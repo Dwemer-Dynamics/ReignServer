@@ -217,6 +217,42 @@ RETURNING (xmax = 0) AS inserted;", connection, transaction))
             }
         }
 
+        internal static NpgsqlConnection TryOpenRegisteredCampaignConnection(string campaignId)
+        {
+            PersistenceService.ThrowIfCampaignRequestReplaced();
+            string normalizedCampaignId = NormalizeCampaignId(campaignId);
+            if (!string.Equals(campaignId, normalizedCampaignId, StringComparison.Ordinal)) return null;
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
+            EnsureInfrastructure();
+
+            string schema = CampaignSchemaName(normalizedCampaignId);
+            NpgsqlConnection connection = OpenDatabaseConnection();
+            try
+            {
+                using var command = new NpgsqlCommand(@"
+SELECT EXISTS(
+    SELECT 1
+    FROM reign_meta.campaign_registry r
+    JOIN pg_namespace n ON n.nspname=r.schema_name
+    WHERE r.campaign_id=@campaign_id AND r.schema_name=@schema_name);", connection);
+                command.Parameters.AddWithValue("campaign_id", normalizedCampaignId);
+                command.Parameters.AddWithValue("schema_name", schema);
+                if (!(bool)command.ExecuteScalar())
+                {
+                    connection.Dispose();
+                    return null;
+                }
+
+                SetSearchPath(connection, schema);
+                return connection;
+            }
+            catch
+            {
+                connection.Dispose();
+                throw;
+            }
+        }
+
         public static NpgsqlConnection OpenMetadataConnection()
         {
             EnsureInfrastructure();

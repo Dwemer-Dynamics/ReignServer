@@ -29,53 +29,40 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "default");
-            string timelineId = ReadString(payload, "timelineId", "main");
+            string campaignId = ReadString(payload, "campaignId", "");
+            string timelineId = ReadString(payload, "timelineId", "");
+            string chargeCategory = ReadString(payload, "chargeCategory", "");
             string accusedId = ReadString(payload, "accusedHeroId", "").Trim();
             if (accusedId.Length == 0)
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false, ["error"] = "accusedHeroId is required."
                 };
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            List<string> evidenceIds = new List<string>();
+            // A documented exposure establishes espionage. World History participates in
+            // other game systems, but its generic roles and flags do not establish a charge.
+            if (chargeCategory == "espionage" && !string.IsNullOrWhiteSpace(campaignId)
+                && !string.IsNullOrWhiteSpace(timelineId))
             {
-                EnsureWorldHistorySchema(connection);
-                List<string> evidenceIds = new List<string>();
+                using var connection = ReignDatabase.OpenCampaignConnection(campaignId);
                 if (TableExists(connection, "foreign_agent_assignments"))
                 {
-                    evidenceIds.AddRange(WorldSimulationStore.SelectForeignAgentAssignments(connection, new Dictionary<string, object>
+                    evidenceIds = WorldSimulationStore.SelectExposedForeignAgentArrestEvidence(connection,
+                        new Dictionary<string, object>
                         {
-                            ["campaign"] = campaignId, ["timeline"] = timelineId,
-                            ["accused"] = accusedId
-                        }).Select(row => "foreign_agent:" + accusedId + ":"
-                            + ReadString(row, "sponsor_kingdom_id", "unknown")));
+                            ["campaign"] = campaignId, ["timeline"] = timelineId, ["accused"] = accusedId
+                        }).Select(row => ArrestExposedAgentEvidenceId(row, accusedId))
+                        .Where(id => id != null).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 }
-                List<Dictionary<string, object>> rows = WorldSimulationStore.SelectWorldHistoryEvents(connection, new Dictionary<string, object>
-                {
-                    ["timeline"] = timelineId, ["accused"] = accusedId
-                });
-                foreach (Dictionary<string, object> row in rows)
-                {
-                    string eventType = ReadString(row, "event_type", "").ToLowerInvariant();
-                    Dictionary<string, object> evidence = TryParseJsonObject(
-                        ReadString(row, "payload_json", "{}"));
-                    // Rumors, allegations, and ordinary social outcomes can never
-                    // bootstrap legal cause. A history record must carry an exact
-                    // authoritative type or an explicit witnessed/attributed flag.
-                    if (ArrestHistoryEvidenceQualifies(eventType, evidence, accusedId))
-                        evidenceIds.Add("world_history:" + ReadString(row, "event_id", ""));
-                }
-                evidenceIds = evidenceIds.Where(id => !string.IsNullOrWhiteSpace(id))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                return new Dictionary<string, object>
-                {
-                    ["ok"] = true, ["accusedHeroId"] = accusedId,
-                    ["causeEstablished"] = evidenceIds.Count > 0,
-                    ["evidenceStatus"] = evidenceIds.Count > 0 ? "established" : "unsupported",
-                    ["evidenceIds"] = evidenceIds,
-                    ["hiddenAgentInformationRevealed"] = false
-                };
             }
+            return new Dictionary<string, object>
+            {
+                ["ok"] = true, ["accusedHeroId"] = accusedId,
+                ["causeEstablished"] = evidenceIds.Count > 0,
+                ["evidenceStatus"] = evidenceIds.Count > 0 ? "established" : "unsupported",
+                ["evidenceIds"] = evidenceIds,
+                ["hiddenAgentInformationRevealed"] = false
+            };
         }
 
         internal static Dictionary<string, object> ArrestCaseApplyApi(
@@ -511,27 +498,12 @@ namespace ReignBetaServer
             return "other";
         }
 
-        private static bool ArrestHistoryEvidenceQualifies(string eventType,
-            Dictionary<string, object> evidence, string accusedId)
+        private static string ArrestExposedAgentEvidenceId(Dictionary<string, object> assignment, string accusedId)
         {
-            eventType = (eventType ?? string.Empty).Trim().ToLowerInvariant();
-            if (eventType == "social_outcome"
-                || eventType.IndexOf("rumor", StringComparison.Ordinal) >= 0
-                || eventType.IndexOf("accus", StringComparison.Ordinal) >= 0)
-                return false;
-            bool explicitProof = ReadBool(evidence, "attributed", false)
-                || ReadBool(evidence, "witnessed", false)
-                || ReadBool(evidence, "officialFinding", false)
-                || string.Equals(ReadFirstString(evidence, "attributedActorHeroId",
-                    "perpetratorHeroId", "witnessedActorHeroId", "detectedAgentHeroId"),
-                    accusedId, StringComparison.OrdinalIgnoreCase);
-            bool authoritativeType = eventType == "crime_witnessed"
-                || eventType == "hostile_operation_attributed"
-                || eventType == "spymaster_operation_attributed"
-                || eventType == "foreign_agent_exposed"
-                || eventType == "treason_established"
-                || eventType == "official_criminal_finding";
-            return authoritativeType || explicitProof;
+            if (ReadString(assignment, "agent_hero_id", "") != accusedId
+                || ReadString(assignment, "status", "") != "exposed")
+                return null;
+            return "foreign_agent:" + accusedId + ":" + ReadString(assignment, "sponsor_kingdom_id", "unknown");
         }
 
         private static int ArrestRelationshipCorrection(string operation,
@@ -651,18 +623,32 @@ namespace ReignBetaServer
                 "Later evidence changes only the difference between policy cells.");
             add("relationship_rescission", ArrestRelationshipCorrection("rescind", 0, -30) == 30,
                 "Rescission removes the arrest case's prior relationship effect.");
-            add("evidence_rumor_rejected", !ArrestHistoryEvidenceQualifies("court_rumor",
-                new Dictionary<string, object> { ["attributed"] = true }, "npc"),
-                "Rumors cannot establish legal cause even when their payload claims attribution.");
-            add("evidence_accusation_rejected", !ArrestHistoryEvidenceQualifies("arrest_accusation",
-                new Dictionary<string, object> { ["officialFinding"] = true }, "npc"),
-                "An accusation cannot bootstrap its own legal cause.");
-            add("evidence_exposed_agent_accepted", ArrestHistoryEvidenceQualifies("foreign_agent_exposed",
-                new Dictionary<string, object>(), "npc"),
-                "An exposed foreign-agent event is authoritative evidence.");
-            add("evidence_witnessed_actor_accepted", ArrestHistoryEvidenceQualifies("crime_report",
-                new Dictionary<string, object> { ["witnessedActorHeroId"] = "npc" }, "npc"),
-                "Exact witnessed-actor evidence establishes cause.");
+            var exposure = new Dictionary<string, object>
+            {
+                ["agent_hero_id"] = "npc", ["sponsor_kingdom_id"] = "enemy", ["status"] = "exposed"
+            };
+            add("evidence_exact_exposed_agent_accepted",
+                ArrestExposedAgentEvidenceId(exposure, "npc") == "foreign_agent:npc:enemy",
+                "A retained exposure for the exact agent supplies a public espionage evidence ID.");
+            add("evidence_wrong_actor_or_unexposed_rejected",
+                ArrestExposedAgentEvidenceId(exposure, "victim") == null
+                && ArrestExposedAgentEvidenceId(exposure, "NPC") == null
+                && ArrestExposedAgentEvidenceId(new Dictionary<string, object>(exposure) { ["status"] = "active" }, "npc") == null,
+                "Another hero, a case alias or an active hidden assignment cannot establish cause.");
+            var unsupportedEvidence = new Dictionary<string, object>
+            {
+                ["campaignId"] = "fixture", ["timelineId"] = "main", ["accusedHeroId"] = "npc",
+                ["chargeCategory"] = "murder", ["officialFinding"] = true, ["witnessedActorHeroId"] = "npc"
+            };
+            add("evidence_wrong_or_legacy_charge_unsupported",
+                !ReadBool(ArrestEvidenceEvaluateApi(unsupportedEvidence), "causeEstablished", true)
+                && ReadString(ArrestEvidenceEvaluateApi(new Dictionary<string, object>(unsupportedEvidence)
+                    { ["chargeCategory"] = "" }), "evidenceStatus", "") == "unsupported",
+                "Generic history flags cannot supply a charge. Missing categories retain the unsupported result.");
+            add("evidence_espionage_requires_explicit_scope",
+                ReadString(ArrestEvidenceEvaluateApi(new Dictionary<string, object>(unsupportedEvidence)
+                    { ["chargeCategory"] = "espionage", ["timelineId"] = "" }), "evidenceStatus", "") == "unsupported",
+                "An espionage request without its timeline cannot read a fallback campaign scope.");
             return results;
         }
     }

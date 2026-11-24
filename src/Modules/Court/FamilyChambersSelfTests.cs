@@ -16,6 +16,23 @@ namespace ReignBetaServer
                 && CourtService.FamilyChildhoodRetainedAtAdulthood(5d)
                 && CourtService.FamilyChildhoodRetainedAtAdulthood(17.9d),
                 "Children may recall all minor experiences, while adulthood migration retains only experiences from exact age five onward.");
+            var adultReferences = CourtService.FamilySceneAdultReferences(
+                [new() { ["heroId"] = "Parent", ["isChild"] = false },
+                 new() { ["heroId"] = "Child", ["isChild"] = true },
+                 new() { ["heroId"] = "Conflicted", ["isChild"] = false },
+                 new() { ["heroId"] = "Conflicted", ["isChild"] = true }],
+                new() { ["participantReferences"] = new List<Dictionary<string, object>>
+                {
+                    new() { ["heroId"] = "Parent", ["imageBase64"] = "adult-source" },
+                    new() { ["heroId"] = "parent", ["imageBase64"] = "case-mismatch" },
+                    new() { ["heroId"] = "Child", ["imageBase64"] = "unverified-child" },
+                    new() { ["heroId"] = "Conflicted", ["imageBase64"] = "conflicting-profile" },
+                    new() { ["heroId"] = "Unrelated", ["imageBase64"] = "unrelated-source" }
+                } });
+            Add(results, "family_chambers_only_exact_adult_references",
+                adultReferences.Count == 1 && adultReferences.TryGetValue("Parent", out string adultSource)
+                && adultSource == "adult-source",
+                "Only explicitly supplied adult portraits for exact active participants are added to the family reference sheet.");
             string imageContract = CourtService.FamilyImageSafetyContract(2, "Evening");
             Add(results, "family_chambers_image_composition_contract",
                 imageContract.Contains("Show exactly two human figures total")

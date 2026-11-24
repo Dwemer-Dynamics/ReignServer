@@ -56,6 +56,7 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
+            bool owned = payload.TryGetValue("sharedActivityGeneration", out object expectedGeneration);
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             Dictionary<string, object> startupGrace =
                 DiplomacyService.BuildAutonomousWorldStartupGrace(payload);
@@ -75,8 +76,15 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> savedMovements = ReadDictionaryList(payload, "movements");
             List<Dictionary<string, object>> updates = new List<Dictionary<string, object>>();
 
+            // Save Sync replaces the campaign under the outer data write gate.
+            // Ordinary timeline activation shares that gate, so fence it separately.
+            using var timelineScope = owned ? WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId) : null;
+            if (owned && !HasCurrentRebellionEvaluationOwner(payload, expectedGeneration))
+                return StaleRebellionEvaluationOwner();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
+                if (owned && !RebellionEvaluationOwnerMatches(connection, payload, expectedGeneration))
+                    return StaleRebellionEvaluationOwner();
                 EnsureRebellionSchema(connection);
                 foreach (Dictionary<string, object> saved in savedMovements) MirrorSavedRebellionState(connection, campaignId, timelineId, worldDay, saved);
                 foreach (Dictionary<string, object> kingdom in kingdoms)
@@ -204,14 +212,50 @@ namespace ReignBetaServer
                 }
             }
 
-            return new Dictionary<string, object>
+            var response = new Dictionary<string, object>
             {
                 ["ok"] = true, ["worldDay"] = worldDay, ["updates"] = updates,
                 ["evaluationIntervalDays"] = RebellionEvaluationIntervalDays,
                 ["existingMovementsAdvanced"] = true,
                 ["newMovementTrigger"] = "deferred_pending_native_relation_rebuild"
             };
+            if (owned)
+                response["ownership"] = new Dictionary<string, object>
+                {
+                    ["campaignId"] = campaignId, ["timelineId"] = timelineId,
+                    ["sharedActivityGeneration"] = expectedGeneration
+                };
+            return response;
         }
+
+        private static Dictionary<string, object> StaleRebellionEvaluationOwner() =>
+            new Dictionary<string, object> { ["ok"] = false, ["error"] = "The rebellion evaluation belongs to a previous save or timeline." };
+
+        private static bool HasCurrentRebellionEvaluationOwner(Dictionary<string, object> payload, object expectedGeneration)
+        {
+            if (expectedGeneration is not string
+                || !payload.TryGetValue("campaignId", out object campaign) || campaign is not string campaignId
+                || string.IsNullOrWhiteSpace(campaignId)
+                || !payload.TryGetValue("timelineId", out object timeline) || timeline is not string timelineId
+                || string.IsNullOrWhiteSpace(timelineId))
+                return false;
+
+            // Checking an old callback must not register a campaign or run its migrations.
+            using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaignId);
+            return connection != null
+                && WorldSimulationService.TableExists(connection, "world_history_timelines")
+                && RebellionEvaluationOwnerMatches(connection, payload, expectedGeneration);
+        }
+
+        private static bool RebellionEvaluationOwnerMatches(ReignDbConnection connection,
+            Dictionary<string, object> payload, object expectedGeneration)
+            => payload.TryGetValue("campaignId", out object campaign) && campaign is string campaignId
+                && !string.IsNullOrWhiteSpace(campaignId)
+                && payload.TryGetValue("timelineId", out object timeline) && timeline is string timelineId
+                && !string.IsNullOrWhiteSpace(timelineId)
+                && DialogueService.ExactSharedActivityGenerationMatches(connection, expectedGeneration)
+                && string.Equals(timelineId, ReadString(WorldSimulationStore.SelectWorldHistoryTimelines2(connection)
+                    .FirstOrDefault(), "timeline_id", ""), StringComparison.Ordinal);
 
         private static Dictionary<string, object> EvaluateRebellionBackingRequest(
             ReignDbConnection connection, string campaignId, string timelineId, double worldDay,

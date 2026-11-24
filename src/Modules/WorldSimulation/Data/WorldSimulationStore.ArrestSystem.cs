@@ -6,22 +6,13 @@ namespace ReignBetaServer
     /// <summary>The WorldSimulation module's SQL statements; every statement runs through <see cref="ReignDatabase"/>.</summary>
     internal static partial class WorldSimulationStore
     {
-        internal static List<Dictionary<string, object>> SelectForeignAgentAssignments(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static List<Dictionary<string, object>> SelectExposedForeignAgentArrestEvidence(ReignDbConnection connection,
+            Dictionary<string, object> parameters)
         {
-            return ReignDatabase.QuerySql(connection, @"SELECT agent_hero_id,sponsor_kingdom_id
+            return ReignDatabase.QuerySql(connection, @"SELECT agent_hero_id,sponsor_kingdom_id,status
 FROM foreign_agent_assignments
 WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND agent_hero_id=$accused AND status='exposed';", parameters, transaction);
-        }
-
-        internal static List<Dictionary<string, object>> SelectWorldHistoryEvents(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
-        {
-            return ReignDatabase.QuerySql(connection, @"SELECT DISTINCT e.*
-FROM world_history_events e
-JOIN world_history_entities entity ON entity.event_id=e.event_id
-WHERE e.timeline_id=$timeline AND entity.entity_id=$accused
-AND e.phase IN ('completed','exposed','established')
-ORDER BY e.sequence DESC LIMIT 200;", parameters, transaction);
+AND agent_hero_id=$accused AND status='exposed';", parameters);
         }
 
         internal static void Begin(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
