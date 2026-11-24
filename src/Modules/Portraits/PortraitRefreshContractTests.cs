@@ -89,7 +89,79 @@ namespace ReignBetaServer
                     return rejected && File.ReadAllBytes(custom)[0] == 1 && !File.Exists(Path.Combine(root, OutfitPortraitReceiptFileName));
                 } finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
             });
+            Check("stale_completion_preserves_first_outfit_commit", () => VerifyStalePortraitRefreshAfterOutfit(false));
+            Check("stale_completion_preserves_same_image_outfit_commit", () => VerifyStalePortraitRefreshAfterOutfit(true));
+            Check("unchanged_completion_publishes_existing_outputs", VerifyCurrentPortraitRefreshPublication);
             return rows;
         }
+
+        private static bool VerifyStalePortraitRefreshAfterOutfit(bool sameImage)
+            => WithOutfitConfirmationFixture((root, first, _) =>
+            {
+                string directory = Path.Combine(root, "portraits");
+                if (sameImage) CommitOutfitInDirectory(first, root);
+                var baseline = CapturePortraitRefreshBaseline(directory);
+                var committed = sameImage ? MakeLaterOutfitFixture(first) : first;
+                if (sameImage)
+                {
+                    committed.After = first.After;
+                    committed.PortraitReceipt = first.PortraitReceipt;
+                }
+
+                CommitOutfitInDirectory(committed, root);
+                var current = CapturePortraitRefreshBaseline(directory);
+                var expected = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+                    .ToDictionary(path => path, File.ReadAllBytes);
+                bool storeCalled = false, rejected = false;
+                try
+                {
+                    byte[] stale = { 8, 9 };
+                    PublishPortraitRefresh(baseline, stale, OutfitContractReceipt(stale, 768, 1024), () =>
+                    {
+                        storeCalled = true;
+                        string path = Path.Combine(directory, "portrait.png");
+                        WriteSharedPortraitAtomic(path, stale);
+                        return path;
+                    });
+                }
+                catch (InvalidOperationException error) when (error.Message.Contains("portrait or outfit changed"))
+                {
+                    rejected = true;
+                }
+
+                return rejected && !storeCalled && baseline.OutfitConfirmation != current.OutfitConfirmation
+                    && (!sameImage || (baseline.Custom == current.Custom && baseline.CustomReceipt == current.CustomReceipt))
+                    && Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length == expected.Count
+                    && expected.All(file => File.ReadAllBytes(file.Key).SequenceEqual(file.Value));
+            });
+
+        private static bool VerifyCurrentPortraitRefreshPublication()
+            => WithOutfitConfirmationFixture((root, outfit, _) =>
+            {
+                string directory = Path.Combine(root, "portraits");
+                string masterPath = Path.Combine(directory, "portrait.png");
+                string customPath = Path.Combine(directory, "custom.png");
+                byte[] image = { 7, 8, 9 };
+                var receipt = OutfitContractReceipt(image, 768, 1024);
+                string Store()
+                {
+                    WriteSharedPortraitAtomic(masterPath, image);
+                    return masterPath;
+                }
+
+                var initial = CapturePortraitRefreshBaseline(directory);
+                bool regularMaster = PublishPortraitRefresh(initial, image, receipt, Store) == masterPath
+                    && File.ReadAllBytes(masterPath).SequenceEqual(image) && !File.Exists(customPath);
+
+                outfit.StoredSourceHash = Sha256Hex(image);
+                CommitOutfitInDirectory(outfit, root);
+                var before = CapturePortraitRefreshBaseline(directory);
+                var stored = PublishPortraitRefresh(before, image, receipt, Store);
+                var after = CapturePortraitRefreshBaseline(directory);
+                var cropReceipt = CampaignFileService.ReadJsonObject(Path.Combine(directory, OutfitPortraitReceiptFileName));
+                return regularMaster && stored == masterPath && File.ReadAllBytes(customPath).SequenceEqual(image)
+                    && ReadString(ReadDictionary(cropReceipt, "master"), "sha256", "") == Sha256Hex(image)
+                    && before.Outfit == after.Outfit && before.OutfitConfirmation == after.OutfitConfirmation;
+            });
     }
 }

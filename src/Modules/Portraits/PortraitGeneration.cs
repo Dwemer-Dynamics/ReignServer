@@ -180,6 +180,12 @@ namespace ReignBetaServer
             try
             {
                 refreshMode = PortraitRefreshMode(payload);
+                PortraitRefreshBaseline refreshBaseline = null;
+                if (refreshMode.Length != 0)
+                {
+                    if (string.IsNullOrWhiteSpace(heroId)) throw new InvalidDataException("A character identity is required.");
+                    refreshBaseline = CapturePortraitRefreshBaseline(CampaignFileService.CharacterFile(campaignId, heroId, "portraits"));
+                }
                 reflectYears = refreshMode == "reflect_years";
                 if (reflectYears)
                 {
@@ -350,6 +356,10 @@ namespace ReignBetaServer
                 }
                 payload["generationOperationId"] = generationOperationId;
                 payload["generationStartedUtc"] = generationStartedUtc;
+                string StoreCharacterPortrait()
+                    => StoreGeneratedPortrait(campaignId, heroId, characterObjectId, cacheKey, prompt, sourceImage,
+                        call.ImageBytes, call, physicalConfidence, sourceProvenance, productReceipt, portraitInput,
+                        generationOperationId, generationStartedUtc, timing, total.ElapsedMilliseconds);
                 string storedPath = ReadBool(payload, "sharedCacheOutput", false)
                     ? StoreGeneratedSharedPortrait(
                         payload,
@@ -360,23 +370,9 @@ namespace ReignBetaServer
                         call,
                         physicalConfidence,
                         productReceipt)
-                    : StoreGeneratedPortrait(
-                        campaignId,
-                        heroId,
-                        characterObjectId,
-                        cacheKey,
-                        prompt,
-                        sourceImage,
-                        call.ImageBytes,
-                        call,
-                        physicalConfidence,
-                        sourceProvenance,
-                        productReceipt,
-                        portraitInput,
-                        generationOperationId,
-                        generationStartedUtc,
-                        timing,
-                        total.ElapsedMilliseconds);
+                    : refreshBaseline == null
+                        ? StoreCharacterPortrait()
+                        : PublishPortraitRefresh(refreshBaseline, call.ImageBytes, productReceipt, StoreCharacterPortrait);
                 Dictionary<string, object> response = new Dictionary<string, object>
                 {
                     ["ok"] = true,
@@ -426,8 +422,6 @@ namespace ReignBetaServer
                     };
                 }
 
-                if (refreshMode.Length != 0)
-                    ReplaceRefreshedCharacterOverride(campaignId, heroId, call.ImageBytes, productReceipt);
                 response["portraitRefreshMode"] = refreshMode;
                 response["characterName"] = ReadString(payload, "characterName", "");
                 response["ageYears"] = ReadInt(payload, "ageYears", 0);

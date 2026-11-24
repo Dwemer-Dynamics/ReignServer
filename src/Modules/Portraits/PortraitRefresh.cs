@@ -2,17 +2,52 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using AIPortraits;
 
 namespace ReignBetaServer
 {
     internal static partial class PortraitsService
     {
-        private static void ReplaceRefreshedCharacterOverride(string campaign, string hero, byte[] image, Dictionary<string, object> receipt)
+        private sealed record PortraitRefreshBaseline(string Directory, string Master, string Custom,
+            string MasterMetadata, string Outfit, string OutfitConfirmation, string CustomReceipt);
+
+        private static PortraitRefreshBaseline CapturePortraitRefreshBaseline(string directory)
         {
-            if (string.IsNullOrWhiteSpace(hero)) throw new InvalidDataException("A character identity is required.");
-            ReplaceRefreshedCharacterOverrideInDirectory(Path.GetDirectoryName(CampaignFileService.CharacterFile(campaign, hero, "portraits", "custom.png")),
-                image, receipt, WriteSharedPortraitAtomic);
+            lock (Program.FileLock)
+            {
+                return new PortraitRefreshBaseline(directory, PortraitRefreshFileDigest(directory, "portrait.png"),
+                    PortraitRefreshFileDigest(directory, "custom.png"), PortraitRefreshFileDigest(directory, "portrait.json"),
+                    PortraitRefreshFileDigest(directory, "outfit.json"), PortraitRefreshFileDigest(directory, OutfitConfirmationFileName),
+                    PortraitRefreshFileDigest(directory, OutfitPortraitReceiptFileName));
+            }
+        }
+
+        private static string PortraitRefreshFileDigest(string directory, string name)
+        {
+            try
+            {
+                using var file = File.OpenRead(Path.Combine(directory, name));
+                return Convert.ToHexString(SHA256.HashData(file));
+            }
+            catch (FileNotFoundException) { return null; }
+            catch (DirectoryNotFoundException) { return null; }
+        }
+
+        private static string PublishPortraitRefresh(PortraitRefreshBaseline baseline, byte[] image,
+            Dictionary<string, object> receipt, Func<string> storePortrait)
+        {
+            lock (Program.FileLock)
+            {
+                // Check the current campaign bytes before either the fallback master or the custom pair can change.
+                // The v2 marker also distinguishes a newer outfit confirmation with identical image bytes.
+                if (CapturePortraitRefreshBaseline(baseline.Directory) != baseline)
+                    throw new InvalidOperationException("The portrait or outfit changed while the refresh was running. Start a new refresh.");
+
+                string storedPath = storePortrait();
+                ReplaceRefreshedCharacterOverrideInDirectory(baseline.Directory, image, receipt, WriteSharedPortraitAtomic);
+                return storedPath;
+            }
         }
 
         private static void ReplaceRefreshedCharacterOverrideInDirectory(string directory, byte[] image,

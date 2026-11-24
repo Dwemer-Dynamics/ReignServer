@@ -84,6 +84,8 @@ namespace ReignBetaServer
                     new EditorHistoryEditBasis(campaign, hero, token, generation));
                 snapshot["letterStatusEditBasis"] = IssueEditorLetterStatusBasis(ReadDictionary(snapshot, "records"),
                     new EditorLetterStatusContext(campaign, hero, token, generation));
+                snapshot["summaryTextEditBasis"] = IssueEditorSummaryTextBasis(ReadDictionary(snapshot, "records"),
+                    new EditorHistoryEditBasis(campaign, hero, token, generation));
                 snapshot["ok"] = true;
                 return snapshot;
             }
@@ -251,6 +253,14 @@ namespace ReignBetaServer
                         ["ok"] = false, ["conflict"] = true, ["currentRevisionToken"] = current,
                         ["error"] = "The letter status edit basis could not be verified. Reload the Character Editor before saving."
                     };
+                var summaryTextContext = payload.ContainsKey("summaryTextEdits")
+                    ? new EditorHistoryEditBasis(campaign, hero, current, EditorProfileRestoreGeneration(c)) : null;
+                if (!TryReadEditorSummaryTextEdits(payload, summaryTextContext, out var summaryTextEdits))
+                    return new Dictionary<string, object>
+                    {
+                        ["ok"] = false, ["conflict"] = true, ["currentRevisionToken"] = current,
+                        ["error"] = "The summary text edit basis could not be verified. Reload the Character Editor before saving."
+                    };
                 var documents = ReadDictionary(payload, "documents");
                 var native = ReadDictionary(payload, "nativeChanges") ?? new Dictionary<string, object>();
                 bool hasProfileEdit = payload.ContainsKey("profileEdit");
@@ -273,6 +283,7 @@ namespace ReignBetaServer
                 ApplyEditorDocuments(campaign, hero, documents, hasProfileEdit);
                 var recordIssues = new List<Dictionary<string, object>>();
                 var letterStatuses = ApplyEditorLetterStatusEdits(c, hero, letterStatusEdits, recordIssues, "letter_status_changed_after_load");
+                var summaryTexts = ApplyEditorSummaryTextEdits(c, hero, summaryTextEdits, recordIssues, "summary_text_changed_after_load");
                 ApplyEditorRecords(c, ReadDictionary(payload, "records"), ReadDictionary(before, "records"), recordIssues);
                 var historyDelta = new EditorHistoryDelta();
                 var historyBasis = historyEdits.Count == 0 ? null
@@ -289,6 +300,7 @@ namespace ReignBetaServer
                 after[EditorHistoryDeltaKey] = historyDelta.After;
                 before[EditorLetterStatusDeltaKey] = letterStatuses.ToDictionary(edit => edit.Id, edit => (object)edit.Expected, StringComparer.Ordinal);
                 after[EditorLetterStatusDeltaKey] = letterStatuses.ToDictionary(edit => edit.Id, edit => (object)edit.Value, StringComparer.Ordinal);
+                RecordEditorSummaryTextDelta(before, after, summaryTexts);
                 var revisionRow = new Dictionary<string, object>
                 {
                     ["revision"] = revision, ["hero"] = hero, ["section"] = section,
@@ -446,10 +458,13 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The retained history revision is invalid." };
             if (!TryReadEditorLetterStatusRevision(snapshot, revisionAfter, out var letterStatusEdits))
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The retained letter status revision is invalid." };
+            if (!TryReadEditorSummaryTextUndo(snapshot, revisionAfter, out var summaryTextEdits))
+                return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The retained summary text revision is invalid." };
             var before = BuildCharacterEditorSnapshot(campaign, hero, c);
             ApplyEditorDocuments(campaign, hero, ReadDictionary(snapshot, "documents"));
             var recordIssues = new List<Dictionary<string, object>>();
             var letterStatuses = ApplyEditorLetterStatusEdits(c, hero, letterStatusEdits, recordIssues, "letter_status_changed_after_revision");
+            var summaryTexts = ApplyEditorSummaryTextEdits(c, hero, summaryTextEdits, recordIssues, "summary_text_changed_after_revision");
             ApplyEditorRecords(c, ReadDictionary(snapshot, "records"), ReadDictionary(revisionAfter, "records"));
             var historyDelta = new EditorHistoryDelta();
             var historyIssues = ApplyEditorHistory(campaign, hero, c, history, postimage, null, null, historyDelta, scopedUndo);
@@ -470,6 +485,7 @@ namespace ReignBetaServer
             before[EditorLetterStatusDeltaKey] = letterStatuses.ToDictionary(edit => edit.Id, edit => (object)edit.Expected, StringComparer.Ordinal);
             after[EditorLetterStatusDeltaKey] = letterStatuses.ToDictionary(edit => edit.Id, edit => (object)edit.Value, StringComparer.Ordinal);
             string job = "editor_reconcile_" + Guid.NewGuid().ToString("N");
+            RecordEditorSummaryTextDelta(before, after, summaryTexts);
             var revisionRow = new Dictionary<string, object>
             {
                 ["id"] = newRevision, ["hero"] = hero, ["description"] = "Rollback of " + revision,
@@ -607,6 +623,8 @@ namespace ReignBetaServer
                         && System.Text.RegularExpressions.Regex.IsMatch(column, "^[A-Za-z_][A-Za-z0-9_]*$")).ToList();
                     if (group == "letters" && columns.RemoveAll(column => column.Equals("status", StringComparison.OrdinalIgnoreCase)) != 0)
                         recordIssues?.Add(EditorLetterStatusIssue(id, "letter_status_requires_edit_basis"));
+                    if (group == "summaries" && columns.RemoveAll(column => column.Equals("summary", StringComparison.OrdinalIgnoreCase)) != 0)
+                        recordIssues?.Add(EditorSummaryTextIssue(id, "summary_text_requires_edit_basis"));
                     if (columns.Count == 0) continue;
                     foreach (string column in columns) args[column] = row[column];
                     CharactersStore.UpdateDynamic(c, table, string.Join(",", columns.Select(column => column + "=$" + column)), key, args);
@@ -900,6 +918,9 @@ namespace ReignBetaServer
             var checks = new List<Dictionary<string, object>>();
             void Check(string id, bool passed, string summary) => checks.Add(new Dictionary<string, object>
                 { ["id"] = "character_editor_" + id, ["suite"] = "character_editor", ["passed"] = passed, ["summary"] = summary });
+#if !REIGN_EXCLUDE_VERIFICATION
+            VerifyEditorSummaryTextCompareAndSwap(Check);
+#endif
             string campaign = "ce_history_" + Guid.NewGuid().ToString("N");
             const string hero = "editor_a", other = "editor_b", listener = "listener", player = "player";
             const long sameSecond = 120;
