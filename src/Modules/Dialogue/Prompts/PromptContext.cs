@@ -386,6 +386,75 @@ namespace ReignBetaServer
                     .OrderBy(row => ReadLong(row, "ts", 0)), configuredLimit);
         }
 
+        private readonly record struct SocialEventPromptIndexRow(long Timestamp, long Ordinal, string Exchange, bool Unbound);
+
+        internal static List<Dictionary<string, object>> BuildIndexedSocialEventPromptTranscript(
+            Func<HashSet<long>, IEnumerable<(long Ordinal, Dictionary<string, object> Row)>> readRows, int configuredLimit)
+        {
+            int limit = Math.Max(2, Math.Min(100, configuredLimit));
+            var winners = new Dictionary<string, SocialEventPromptIndexRow>(StringComparer.OrdinalIgnoreCase);
+            var ordered = new List<SocialEventPromptIndexRow>();
+
+            // Read and parse every row before selecting the window. Only compact
+            // metadata survives this pass, including the earliest chronological row
+            // for each identity and physical order as the timestamp tie-break.
+            foreach (var (ordinal, row) in readRows(null))
+            {
+                if (row == null || string.IsNullOrWhiteSpace(ReadString(row, "text", ""))) continue;
+                string identity = PromptTranscriptIdentity(row);
+                long timestamp = ReadLong(row, "ts", 0);
+                if (identity.Length > 0 && winners.TryGetValue(identity, out var previous)
+                    && (timestamp > previous.Timestamp || (timestamp == previous.Timestamp && ordinal > previous.Ordinal)))
+                    continue;
+
+                var entry = new SocialEventPromptIndexRow(timestamp, ordinal,
+                    ReadFirstString(row, "exchangeId", "exchange_id", "sceneTurnId"), identity.Length == 0);
+                if (entry.Unbound) ordered.Add(entry);
+                else winners[identity] = entry;
+            }
+
+            ordered.AddRange(winners.Values);
+            winners.Clear();
+            if (ordered.Count == 0) return new List<Dictionary<string, object>>();
+            ordered.Sort((left, right) =>
+            {
+                int timestampOrder = left.Timestamp.CompareTo(right.Timestamp);
+                return timestampOrder == 0 ? left.Ordinal.CompareTo(right.Ordinal) : timestampOrder;
+            });
+
+            int start = Math.Max(0, ordered.Count - limit);
+            string boundaryExchange = ordered[start].Exchange;
+            if (!string.IsNullOrWhiteSpace(boundaryExchange))
+            {
+                while (start > 0 && string.Equals(ordered[start - 1].Exchange, boundaryExchange, StringComparison.OrdinalIgnoreCase))
+                    start--;
+            }
+
+            var slots = new Dictionary<long, int>(ordered.Count - start);
+            for (int rank = start; rank < ordered.Count; rank++)
+                slots.Add(ordered[rank].Ordinal, rank);
+            var result = new Dictionary<string, object>[slots.Count];
+            foreach (var (ordinal, row) in readRows(slots.Keys.ToHashSet()))
+            {
+                int rank = slots[ordinal];
+                if (row == null)
+                    throw new InvalidOperationException("Event transcript changed during the indexed read.");
+                if (ordered[rank].Unbound)
+                    BindUnidentifiedPromptTranscriptRow(row, rank);
+                result[rank - start] = row;
+            }
+
+            if (result.Any(row => row == null))
+                throw new InvalidOperationException("Event transcript changed during the indexed read.");
+            return result.ToList();
+        }
+
+        private static void BindUnidentifiedPromptTranscriptRow(Dictionary<string, object> row, int rank)
+        {
+            if (ReadFirstString(row, "id", "turn_id", "turnId").Length == 0)
+                row["promptLocalSourceId"] = "unbound_" + rank + "_" + PromptHash(ReadString(row, "text", "")).Substring(0, 8);
+        }
+
         internal static List<Dictionary<string, object>> CanonicalizePromptTranscript(
             IEnumerable<Dictionary<string, object>> source, int configuredLimit)
         {
@@ -397,8 +466,8 @@ namespace ReignBetaServer
                 if (row == null || string.IsNullOrWhiteSpace(ReadString(row, "text", ""))) continue;
                 string identity = DialogueService.PromptTranscriptIdentity(row);
                 if (identity.Length > 0 && !seen.Add(identity)) continue;
-                if (identity.Length == 0 && ReadFirstString(row, "id", "turn_id", "turnId").Length == 0)
-                    row["promptLocalSourceId"] = "unbound_" + unique.Count + "_" + DialogueService.PromptHash(ReadString(row, "text", "")).Substring(0, 8);
+                if (identity.Length == 0)
+                    BindUnidentifiedPromptTranscriptRow(row, unique.Count);
                 unique.Add(row);
             }
             if (unique.Count <= limit) return unique;

@@ -170,6 +170,14 @@ WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;"
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;", parameters, transaction);
         }
 
+        internal static void InsertForeignAgentDisruptionReceipt(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO foreign_agent_disruption_receipts
+(campaign_id,timeline_id,restore_generation,action_id,assignment_id,scheduled_due_day,issued_day,expires_day,action_json)
+VALUES($campaign,$timeline,$generation,$action,$assignment,$due,$issued,$expires,$payload);", parameters, transaction);
+        }
+
         internal static List<Dictionary<string, object>> SelectForeignAgentAssignments5(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, @"SELECT agent_hero_id,sponsor_kingdom_id,settlement_id,is_notable,status,recruited_day,next_action_day,payload_json,assignment_id

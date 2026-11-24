@@ -33,6 +33,11 @@ namespace ReignBetaServer
                     || Regex.IsMatch(action, @"\b(?:speak(?:s|ing)?|spoke|say(?:s|ing)?|said|tell(?:s|ing)?|told|voice)\b", RegexOptions.IgnoreCase)
                         && Regex.IsMatch(action, @"\b(?:quietly|softly|low|lower(?:s|ing)?|hushed|pitched)\b", RegexOptions.IgnoreCase);
             })) return new List<string>();
+            return GossipSpeechSpans(text, blocks);
+        }
+
+        private static List<string> GossipSpeechSpans(string text, List<Dictionary<string, object>> blocks)
+        {
             var spans = new List<string>();
             int cursor = 0;
             foreach (var block in blocks)

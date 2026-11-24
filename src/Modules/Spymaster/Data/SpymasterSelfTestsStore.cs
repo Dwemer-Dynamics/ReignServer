@@ -63,9 +63,24 @@ WHERE pair_key=$pair;", parameters, transaction);
             ReignDatabase.ExecuteSql(connection, "UPDATE relationship_pair_chemistry SET affinity_a_to_b=-30 WHERE pair_key=$pair;", parameters, transaction);
         }
 
+        internal static List<Dictionary<string, object>> ReadDisruptionReceipts(ReignDbConnection connection,
+            Dictionary<string, object> parameters)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT timeline_id,restore_generation,action_id,assignment_id,
+scheduled_due_day,issued_day,expires_day,action_json FROM foreign_agent_disruption_receipts
+WHERE campaign_id=$campaign AND timeline_id=$timeline ORDER BY action_id;", parameters);
+        }
+
+        internal static void SetDisruptionScheduleFailure(ReignDbConnection connection, bool enabled)
+        {
+            ReignDatabase.ExecuteSql(connection, enabled
+                ? "ALTER TABLE foreign_agent_assignments ADD CONSTRAINT foreign_agent_disruption_fixture_schedule CHECK (last_action_day < 14);"
+                : "ALTER TABLE foreign_agent_assignments DROP CONSTRAINT foreign_agent_disruption_fixture_schedule;");
+        }
+
         internal static void UpdateForeignAgentAssignments(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            ReignDatabase.ExecuteSql(connection, @"UPDATE foreign_agent_assignments SET status='active',next_action_day=14,last_action_day=-1
+            ReignDatabase.ExecuteSql(connection, @"UPDATE foreign_agent_assignments SET status='active',next_action_day=13.75,last_action_day=-1
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND agent_hero_id=$agent;", parameters, transaction);
         }
     }

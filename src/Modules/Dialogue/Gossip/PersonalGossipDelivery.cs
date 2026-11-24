@@ -17,14 +17,7 @@ namespace ReignBetaServer
             if (ids.Count == 0) return false;
             if (ReadString(data, "sourceOrigin", "") == "public_witness")
                 return PublicWitnessGossipSourcesActive(data, ids.SelectMany(id => DialogueStore.SelectConversationTurns37(c, GossipFields("id", id))));
-            var text = new StringBuilder();
-            foreach (string id in ids)
-            {
-                var row = DialogueStore.SelectConversationTurns7(c, GossipFields("id", id)).FirstOrDefault();
-                if (row == null || ReadString(row, "status", "") != "active") return false;
-                text.AppendLine(ReadString(row, "text", ""));
-            }
-            return ReadString(data, "type", "") == "impression" || GossipQuoteSupported(ReadString(data, "sourceQuote", ""), text.ToString());
+            return ParticipantGossipSourcesActive(data, ReadParticipantGossipTurns(c, ids));
         }
 
         private static Dictionary<string, object> SelectDuePersonalGossip(ReignDbConnection c, string generation, long now)
@@ -82,13 +75,22 @@ namespace ReignBetaServer
                     if (ReadInt(row, "is_reply", 0) == 0 && ReadInt(data, "hop", 1) == 1)
                     {
                         string sourceQuote = ReadString(data, "sourceQuote", "");
-                        var sourceTurns = ReadStringList(data, "sourceTurnIds").Take(2)
-                            .SelectMany(id => DialogueStore.SelectConversationTurns37(c, GossipFields("id", id)))
-                            .ToList();
+                        bool witness = ReadString(data, "sourceOrigin", "") == "public_witness";
+                        var ids = ReadStringList(data, "sourceTurnIds");
+                        var sourceTurns = witness ? ids.Take(2)
+                            .SelectMany(id => DialogueStore.SelectConversationTurns37(c, GossipFields("id", id))).ToList()
+                            : ReadParticipantGossipTurns(c, ids);
+                        // Use the same audience-checked rows to build the model context.
+                        if (!witness && !ParticipantGossipSourcesActive(data, sourceTurns))
+                        {
+                            DialogueStore.UpdatePersonalGossipMessages(c, GossipFields("id", ReadString(row, "message_id", "")));
+                            return FinishPersonalGossipTurn(c, generation, "cancelled_source");
+                        }
                         BindPersonalGossipEncounterTurns(data, sourceTurns);
-                        var quoteSources = ReadString(data, "sourceOrigin", "") == "public_witness"
-                            ? ReadDictionaryList(data, "publicWitnessSources") : sourceTurns;
-                        var quotedSpeakers = quoteSources.Where(turn => GossipQuoteSupported(sourceQuote, ReadString(turn, "text", "")))
+                        var quoteSources = witness ? ReadDictionaryList(data, "publicWitnessSources") : sourceTurns;
+                        var quotedSpeakers = quoteSources.Where(turn => witness
+                            ? GossipQuoteSupported(sourceQuote, ReadString(turn, "text", ""))
+                            : ParticipantGossipSpeechSpans(ReadString(turn, "text", "")).Any(span => GossipQuoteSupported(sourceQuote, span)))
                             .Select(turn => ReadString(turn, "speaker_id", "")).Distinct().ToList();
                         data["sourceQuoteSpeakerId"] = quotedSpeakers.Count == 1 ? quotedSpeakers[0] : "";
                     }
@@ -576,6 +578,7 @@ namespace ReignBetaServer
                         response["receivedBody"] = ReadString(data, "body", ""); response["reply"] = true;
                         response["sourceQuote"] = ""; response["sourceText"] = ""; response["sourceTurnIds"] = new List<string>();
                         response.Remove("sourceEncounterTurns"); response.Remove("sourceContextOmittedWholeTurns"); response.Remove("compositionReview");
+                        response.Remove("participantSpeechVersion"); response.Remove("participantSpeechHash");
                         response["distortion"] = "none"; response["worldDay"] = day; response["dueDay"] = day;
                         response["expiresDay"] = Math.Max(ReadDouble(row, "expires_day", day), day + 7);
                         response["signal"] = new Dictionary<string, object>(); response["candidateAudit"] = new Dictionary<string, object>();
@@ -737,6 +740,7 @@ namespace ReignBetaServer
             ReadDictionary(topic, "policy")["chanceAdjustments"] = SettingsService.PersonalGossipChanceOptions(SettingsService.LoadSettings());
             topic["receivedMessageId"] = original; topic["sourceQuote"] = ReadString(source, "body", "");
             topic.Remove("sourceEncounterTurns"); topic.Remove("sourceContextOmittedWholeTurns"); topic.Remove("compositionReview");
+            topic.Remove("participantSpeechVersion"); topic.Remove("participantSpeechHash");
             // This quotation was addressed to the new holder by the previous holder.
             // Its I/you roles must not inherit the root conversation's participants.
             topic["sourceQuoteSpeakerId"] = ReadString(source, "speakerId", "");

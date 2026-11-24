@@ -500,6 +500,37 @@ namespace ReignBetaServer
             return lines.Select(line => Json.Deserialize<Dictionary<string, object>>(line));
         }
 
+        internal static List<Dictionary<string, object>> ReadIndexedSocialEventPromptTranscript(string path, int limit)
+        {
+            if (!File.Exists(path))
+                return new List<Dictionary<string, object>>();
+
+            lock (FileLock)
+            {
+                // Both passes share the managed writer lock and the same file
+                // handle. Only the selected rows are decoded in the second pass.
+                using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                return DialogueService.BuildIndexedSocialEventPromptTranscript(
+                    selected => ReadSocialEventPromptRowsLocked(stream, selected), limit);
+            }
+        }
+
+        private static IEnumerable<(long Ordinal, Dictionary<string, object> Row)> ReadSocialEventPromptRowsLocked(
+            FileStream stream, HashSet<long> selected)
+        {
+            stream.Position = 0;
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 4096, leaveOpen: true);
+            long ordinal = 0;
+            string line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                long physicalOrdinal = ordinal++;
+                if (selected == null || selected.Contains(physicalOrdinal))
+                    yield return (physicalOrdinal, Json.Deserialize<Dictionary<string, object>>(line));
+            }
+        }
+
         internal static List<Dictionary<string, object>> ReadRecentDialogueMemoryRows(string path, int limit)
         {
             if (!File.Exists(path))

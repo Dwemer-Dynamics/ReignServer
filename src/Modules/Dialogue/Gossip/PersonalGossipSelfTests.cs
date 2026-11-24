@@ -27,11 +27,154 @@ namespace ReignBetaServer
             throw new InvalidOperationException("No deterministic gossip fixture seed found.");
         }
 
+        private static void CheckParticipantGossipSpeechAuthority(Action<string, bool, object> check)
+        {
+            const string heard = "I trust you in confidence about the orchard.";
+            const string nested = "I never said this to the court.";
+            const string prefix = "A long spoken greeting";
+            const string suffix = "followed by other words.";
+            string playerText = prefix + " *quietly thinks of Hiddenname: " + nested + "* " + suffix;
+            string npcText = "*whispers to the player only* " + heard + " Spokentarget heard about it.";
+            var npc = GossipTestHero("npc");
+            var player = GossipTestHero("player");
+            var people = new[] { npc, player, GossipTestHero("Hiddenname"), GossipTestHero("Spokentarget") }.ToList();
+            var ids = new List<string> { "player-source", "npc-source" };
+            Dictionary<string, object> Row(string id, string author, string role, string text,
+                string[] audience = null, string channel = "private_whisper") =>
+                GossipFields("turn_id", id, "speaker_id", author, "role", role, "text", text, "status", "active",
+                    "session_id", "private-session", "exchange_id", "private-exchange", "channel", channel,
+                    "participants_json", Json.Serialize(audience ?? new[] { "player", "npc" }));
+            var original = new[] { Row(ids[0], "player", "player", playerText), Row(ids[1], "npc", "npc", npcText) };
+            var sources = ParticipantGossipSources(ids, original, "npc", "player", "private-session", "private-exchange");
+            var root = GossipFields("sourceTurnIds", ids, "speakerId", "npc", "playerId", "player", "type", "positive",
+                "sourceSessionId", "private-session", "sourceEvidenceExchangeId", "private-exchange",
+                "sourceQuote", heard, "sourceQuoteSpeakerId", "npc", "participantSpeechVersion", ParticipantGossipSpeechVersion,
+                "participantSpeechHash", ParticipantGossipSpeechHash(sources), "sourceText",
+                string.Join("\n", sources.SelectMany(source => ReadStringList(source, "speechSpans"))));
+            check("participant_whisper_keeps_real_spoken_evidence_without_public_witness_authority",
+                ParticipantGossipQuoteAuthor(heard, sources) == "npc"
+                && ParticipantGossipSourcesActive(root, original) && PublicGossipSpeechSpans(npcText).Count == 0, null);
+            check("participant_narration_does_not_grant_evidence_or_target_permission",
+                ParticipantGossipQuoteAuthor(nested, sources).Length == 0
+                && ParticipantGossipMentionedIds(sources, npc, player, people).SequenceEqual(new[] { "Spokentarget" }), null);
+            check("participant_quotes_cannot_cross_narration_or_the_player_npc_boundary",
+                ParticipantGossipQuoteAuthor(prefix + " " + suffix, sources).Length == 0
+                && ParticipantGossipQuoteAuthor(suffix + "\n" + heard, sources).Length == 0
+                && ParticipantGossipSpeechSpans("Words before *unfinished private thought").SequenceEqual(new[] { "Words before" })
+                && ParticipantGossipSpeechSpans("**ambiguous** ordinary words").Count == 0, null);
+            var wrongSource = new Dictionary<string, object>(root) { ["sourceQuote"] = nested, ["sourceQuoteSpeakerId"] = "player" };
+            var wrongTarget = new Dictionary<string, object>(root) { ["signal"] = GossipFields("targets",
+                new[] { GossipFields("heroId", "Hiddenname", "evidenceQuote", nested) }) };
+            check("participant_receipt_recheck_rejects_narrated_root_and_target_quotes",
+                !ParticipantGossipSourcesActive(wrongSource, original) && !ParticipantGossipSourcesActive(wrongTarget, original), null);
+            var substituted = new[] { original[0], Row(ids[1], "npc", "npc", npcText + " Extra spoken words.") };
+            var rebound = new[] { original[0], Row(ids[1], "other", "npc", npcText) };
+            var wrongSession = new[] { original[0], new Dictionary<string, object>(original[1]) { ["session_id"] = "another" } };
+            var inactive = new[] { original[0], new Dictionary<string, object>(original[1]) { ["status"] = "withdrawn" } };
+            var wrongSpeaker = new Dictionary<string, object>(root) { ["sourceQuoteSpeakerId"] = "player" };
+            var alteredProjection = new Dictionary<string, object>(root) { ["sourceText"] = playerText + "\n" + npcText };
+            check("participant_receipt_requires_active_exact_sources_and_fixed_author",
+                !ParticipantGossipSourcesActive(root, substituted) && !ParticipantGossipSourcesActive(root, rebound)
+                && !ParticipantGossipSourcesActive(root, wrongSession) && !ParticipantGossipSourcesActive(root, inactive)
+                && !ParticipantGossipSourcesActive(wrongSpeaker, original) && !ParticipantGossipSourcesActive(alteredProjection, original)
+                && !ParticipantGossipSourcesActive(root, original.Concat(original)), null);
+            var duplicateQuoteSources = ParticipantGossipSources(ids, new[] { Row(ids[0], "player", "player", heard), original[1] },
+                "npc", "player", "private-session", "private-exchange");
+            check("participant_identical_words_by_both_authors_are_not_unique_evidence",
+                ParticipantGossipQuoteAuthor(heard, duplicateQuoteSources).Length == 0, null);
+            var legacy = new Dictionary<string, object>(root);
+            legacy.Remove("participantSpeechVersion"); legacy.Remove("participantSpeechHash");
+            legacy["sourceText"] = playerText + "\n" + npcText;
+            var plain = new[] { Row(ids[0], "player", "player", prefix), Row(ids[1], "npc", "npc", heard) };
+            var plainLegacy = new Dictionary<string, object>(legacy) { ["sourceText"] = prefix + "\n" + heard };
+            check("participant_legacy_mixed_private_source_cannot_reuse_unsafe_job",
+                !ParticipantGossipSourcesActive(legacy, original) && ParticipantGossipSourcesActive(plainLegacy, plain)
+                && !ParticipantGossipSourcesActive(legacy, plain), null);
+            const string playerSuggestion = "Tell Spokentarget about this so he knows what he missed.";
+            const string npcIntent = "I will tell Spokentarget about this so that he feels left out.";
+            var intentTurns = new[] { Row(ids[0], "player", "player", playerSuggestion),
+                Row(ids[1], "npc", "npc", heard + " *leans close* " + npcIntent) };
+            var intentSources = ParticipantGossipSources(ids, intentTurns, "npc", "player", "private-session", "private-exchange");
+            Dictionary<string, object> TargetSignal(string quote) => GossipFields("targets",
+                new[] { GossipFields("heroId", "Spokentarget", "evidenceQuote", quote, "hurt", 75) });
+            var targetTopic = new Dictionary<string, object>(root)
+            {
+                ["participantSpeechHash"] = ParticipantGossipSpeechHash(intentSources),
+                ["sourceText"] = string.Join("\n", intentSources.SelectMany(source => ReadStringList(source, "speechSpans"))),
+                ["signal"] = TargetSignal(npcIntent)
+            };
+            var playerTarget = new Dictionary<string, object>(targetTopic) { ["signal"] = TargetSignal(playerSuggestion) };
+            var joinedTarget = new Dictionary<string, object>(targetTopic) { ["signal"] = TargetSignal(heard + " " + npcIntent) };
+            check("participant_targets_require_exact_npc_spoken_intent",
+                ParticipantGossipTargetQuoteSupported(npcIntent, intentSources, "npc")
+                && ParticipantGossipSourcesActive(targetTopic, intentTurns)
+                && !ParticipantGossipTargetQuoteSupported(playerSuggestion, intentSources, "npc")
+                && !ParticipantGossipSourcesActive(playerTarget, intentTurns)
+                && !ParticipantGossipTargetQuoteSupported(heard + " " + npcIntent, intentSources, "npc")
+                && !ParticipantGossipSourcesActive(joinedTarget, intentTurns)
+                && !ParticipantGossipTargetQuoteSupported(heard, duplicateQuoteSources, "npc"), null);
+            var plainIntentTurns = new[] { intentTurns[0], Row(ids[1], "npc", "npc", heard + " " + npcIntent) };
+            var legacyNpcTarget = new Dictionary<string, object>(legacy)
+            {
+                ["sourceText"] = playerSuggestion + "\n" + heard + " " + npcIntent,
+                ["signal"] = TargetSignal(npcIntent)
+            };
+            var legacyPlayerTarget = new Dictionary<string, object>(legacyNpcTarget) { ["signal"] = TargetSignal(playerSuggestion) };
+            check("participant_legacy_target_retains_only_provable_npc_authority",
+                ParticipantGossipSourcesActive(legacyNpcTarget, plainIntentTurns)
+                && !ParticipantGossipSourcesActive(legacyPlayerTarget, plainIntentTurns), null);
+
+            // The shared player turn is stored by the first group speaker. It
+            // keeps its own audience even when another speaker adds a reply.
+            const string groupPlayer = "Only those at this table heard what I said.";
+            const string groupReply = "I heard you and understood what you meant.";
+            var allowedGroup = new[]
+            {
+                Row(ids[0], "player", "player", groupPlayer, new[] { "player", "first", "npc" }, "party_chat"),
+                Row(ids[1], "npc", "npc", groupReply, new[] { "player", "npc" }, "party_chat"),
+            };
+            var groupSources = ParticipantGossipSources(ids, allowedGroup, "npc", "player", "private-session", "private-exchange");
+            var groupTopic = new Dictionary<string, object>(root)
+            {
+                ["sourceQuote"] = groupPlayer, ["sourceQuoteSpeakerId"] = "player",
+                ["participantSpeechHash"] = ParticipantGossipSpeechHash(groupSources),
+                ["sourceText"] = groupPlayer + "\n" + groupReply,
+            };
+            var excludedGroup = new[]
+            {
+                Row(ids[0], "player", "player", groupPlayer, new[] { "player", "first" }, "party_chat"),
+                allowedGroup[1],
+            };
+            var excludedReply = new[] { allowedGroup[0],
+                Row(ids[1], "npc", "npc", groupReply, new[] { "npc", "first" }, "party_chat") };
+            check("participant_group_uses_each_turns_frozen_audience",
+                ParticipantGossipQuoteAuthor(groupPlayer, groupSources) == "player"
+                && ParticipantGossipSourcesActive(groupTopic, allowedGroup)
+                && ParticipantGossipSources(ids, excludedGroup, "npc", "player", "private-session", "private-exchange") == null
+                && !ParticipantGossipSourcesActive(groupTopic, excludedGroup)
+                && !ParticipantGossipSourcesActive(groupTopic, excludedReply), null);
+            var unscoped = new Dictionary<string, object>(allowedGroup[0]);
+            unscoped.Remove("participants_json");
+            var malformed = new Dictionary<string, object>(allowedGroup[0]) { ["participants_json"] = "\"npc\"" };
+            check("participant_legacy_scope_needs_actual_two_party_audience",
+                ParticipantGossipSourcesActive(plainLegacy, plain)
+                && !ParticipantGossipSourcesActive(groupTopic, new[] { unscoped, allowedGroup[1] })
+                && !ParticipantGossipSourcesActive(groupTopic, new[] { malformed, allowedGroup[1] })
+                && ParticipantGossipSourcesActive(root, original), null);
+
+            BindPersonalGossipEncounterTurns(root, original);
+            string brief = Json.Serialize(PersonalGossipEncounterContext(root));
+            check("participant_composition_context_contains_only_separate_bounded_spoken_spans",
+                brief.Contains(heard, StringComparison.Ordinal) && brief.Contains("[separate spoken span]", StringComparison.Ordinal)
+                && !brief.Contains("Hiddenname", StringComparison.Ordinal) && !brief.Contains("whispers", StringComparison.Ordinal), null);
+        }
+
         internal static List<Dictionary<string, object>> RunPersonalGossipSelfTests()
         {
             var results = new List<Dictionary<string, object>>();
             Action<string, bool, object> check = (id, passed, detail) => results.Add(GossipFields("ok", true, "passed", passed,
                 "suite", "personal_gossip", "caseId", id, "name", id, "summary", passed || detail == null ? id : id + ": " + DialogueService.LimitText(Json.Serialize(detail), 6000), "detail", detail, "durationMs", 0));
+            CheckParticipantGossipSpeechAuthority(check);
             var policy = DefaultPersonalGossipSettings();
             var leaseNow = new DateTimeOffset(2026, 10, 21, 12, 0, 0, TimeSpan.Zero);
             (Dictionary<string, object> Run, Dictionary<string, object> Runtime) ConversationLeaseFixture()
@@ -478,14 +621,16 @@ namespace ReignBetaServer
                 // Seed a closed fixture session without scheduling normal consolidation/providers.
                 DialogueSelfTestStore.InsertOrIgnoreConversationSessions(c, GossipFields("id", id + "_conversation", "campaign", campaign, "day", day));
                 var request = GossipFields("campaignId", campaign, "conversationSessionId", id + "_conversation", "timelineId", "main", "worldDay", day, "channel", "in_person");
-                var exchange = StoreConversationExchange(campaign, request, "source", "player", "Traveler", "Source", text, npcReply ?? "That was an interesting conversation.", id + "_exchange", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+                string actualReply = npcReply ?? (malicious ? "I will tell Target myself so that he feels left out."
+                    : "That was an interesting conversation.");
+                var exchange = StoreConversationExchange(campaign, request, "source", "player", "Traveler", "Source", text, actualReply, id + "_exchange", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
                 var signal = GossipFields("topic", "conversation", "confidence", 1d, "evidenceQuote", text, "excitement", malicious ? 0 : 100,
                     "curiosity", 0, "hurt", malicious ? 75 : 0, "privacy", "public", "existencePrivacy", "public", "question", !malicious,
                     "promisedSecrecy", false, "ownCompromising", false,
-                    "targets", malicious ? new[] { GossipFields("heroId", "target", "evidenceQuote", text, "hurt", 75, "grievance", 0) } : Array.Empty<Dictionary<string, object>>());
+                    "targets", malicious ? new[] { GossipFields("heroId", "target", "evidenceQuote", actualReply, "hurt", 75, "grievance", 0) } : Array.Empty<Dictionary<string, object>>());
                 return GossipFields("id", id, "timelineId", "main", "speakerId", "source", "playerId", "player", "sessionId", ReadString(exchange, "sessionId", ""),
                     "createdDay", day, "worldDay", day, "category", "conversation", "signal", signal, "speaker", source, "policy", policy,
-                    "mentionedIds", named ? new[] { "target" } : Array.Empty<string>(), "sourceText", text, "sourceQuote", text,
+                    "mentionedIds", named ? new[] { "target" } : Array.Empty<string>(), "sourceText", malicious ? text + "\n" + actualReply : text, "sourceQuote", text,
                     "sourceTurnIds", ReadStringList(exchange, "turnIds"), "sourceExchangeId", ReadString(exchange, "exchangeId", ""), "rootId", id, "hop", 1, "holders", new[] { "source" });
             }
             void StoreReplySource(ReignDbConnection connection, string session, double day, string question, string replyText)

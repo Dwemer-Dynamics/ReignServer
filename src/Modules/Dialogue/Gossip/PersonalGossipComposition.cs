@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 
 namespace ReignBetaServer
 {
@@ -16,6 +17,120 @@ namespace ReignBetaServer
         {
             internal string Binding;
             internal Dictionary<string, object> Evidence;
+        }
+
+        private const string ParticipantGossipSpeechVersion = "participant-gossip-speech-v1";
+
+        private static bool HasExcludedGossipNarration(string text) =>
+            InputNarrationBlocks(text).Count != 0;
+
+        private static List<string> ParticipantGossipSpeechSpans(string text)
+        {
+            text ??= "";
+            // Adjacent stars are ambiguous markup. A whispered speech tag by itself
+            // does not exclude the words heard by either of its direct participants.
+            return text.Contains("**", StringComparison.Ordinal) ? new List<string>()
+                : GossipSpeechSpans(text, InputNarrationBlocks(text));
+        }
+
+        private static List<Dictionary<string, object>> ReadParticipantGossipTurns(ReignDbConnection c, List<string> ids)
+        {
+            if (ids.Count == 0 || ids.Count > 2 || ids.Any(string.IsNullOrWhiteSpace)
+                || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count) return new List<Dictionary<string, object>>();
+            return ids.SelectMany(id => DialogueStore.SelectConversationTurns6(c, GossipFields("id", id))).ToList();
+        }
+
+        private static bool ParticipantGossipAudienceContains(Dictionary<string, object> row, string listener)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(ReadString(row, "participants_json", "[]"));
+                var audience = document.RootElement;
+                if (audience.ValueKind != JsonValueKind.Array
+                    || audience.EnumerateArray().Any(entry => entry.ValueKind != JsonValueKind.String)) return false;
+                return audience.EnumerateArray().Any(entry => GossipSameId(entry.GetString(), listener));
+            }
+            catch (JsonException) { return false; }
+        }
+
+        private static List<Dictionary<string, object>> ParticipantGossipSources(List<string> ids,
+            IEnumerable<Dictionary<string, object>> activeTurns, string speaker, string player, string session, string exchange)
+        {
+            var rows = activeTurns.ToList();
+            if (ids.Count == 0 || ids.Count > 2 || rows.Count != ids.Count || ids.Any(string.IsNullOrWhiteSpace)
+                || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count
+                || speaker.Length == 0 || player.Length == 0 || GossipSameId(speaker, player)) return null;
+            var sources = new List<Dictionary<string, object>>();
+            var authors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string id in ids)
+            {
+                var matching = rows.Where(row => ReadString(row, "turn_id", "") == id).Take(2).ToList();
+                if (matching.Count != 1) return null;
+                var row = matching[0];
+                string author = ReadString(row, "speaker_id", ""), role = ReadString(row, "role", "");
+                string rowSession = ReadString(row, "session_id", ""), rowExchange = ReadString(row, "exchange_id", "");
+                if (ReadString(row, "status", "") != "active"
+                    || !(role == "player" && GossipSameId(author, player) || role == "npc" && GossipSameId(author, speaker))
+                    // Grouped content retains the first accepted player row and its per-turn audience.
+                    // A later matching reply must not grant the speaker access to that older row.
+                    || !ParticipantGossipAudienceContains(row, role == "player" ? speaker : player)
+                    || rowSession.Length == 0 || rowExchange.Length == 0 || !authors.Add(author)) return null;
+                if (session.Length == 0) session = rowSession;
+                if (exchange.Length == 0) exchange = rowExchange;
+                if (rowSession != session || rowExchange != exchange) return null;
+                string text = ReadString(row, "text", "");
+                sources.Add(GossipFields("turnId", id, "speakerId", author, "role", role, "sessionId", session,
+                    "exchangeId", exchange, "speechSpans", ParticipantGossipSpeechSpans(text),
+                    "excludedNarration", HasExcludedGossipNarration(text)));
+            }
+            return sources;
+        }
+
+        private static string ParticipantGossipQuoteAuthor(string quote, IEnumerable<Dictionary<string, object>> sources)
+        {
+            var matching = sources.Where(source => ReadStringList(source, "speechSpans")
+                .Any(span => GossipQuoteSupported(quote, span))).Take(2).ToList();
+            return matching.Count == 1 ? ReadString(matching[0], "speakerId", "") : "";
+        }
+
+        private static bool ParticipantGossipTargetQuoteSupported(string quote,
+            IEnumerable<Dictionary<string, object>> sources, string speaker) =>
+            GossipSameId(ParticipantGossipQuoteAuthor(quote, sources), speaker);
+
+        private static string ParticipantGossipSpeechHash(IEnumerable<Dictionary<string, object>> sources) =>
+            ConversationExactTextHash(Json.Serialize(sources));
+
+        private static bool ParticipantGossipSourcesActive(Dictionary<string, object> data,
+            IEnumerable<Dictionary<string, object>> activeTurns)
+        {
+            string speaker = ReadString(data, "speakerId", "");
+            var sources = ParticipantGossipSources(ReadStringList(data, "sourceTurnIds"), activeTurns,
+                speaker, ReadString(data, "playerId", ""),
+                ReadString(data, "sourceSessionId", ""), ReadString(data, "sourceEvidenceExchangeId", ""));
+            if (sources == null) return false;
+            string quote = ReadString(data, "sourceQuote", ""), author = ParticipantGossipQuoteAuthor(quote, sources);
+            string storedAuthor = ReadString(data, "sourceQuoteSpeakerId", "");
+            if (quote.Length == 0 ? ReadString(data, "type", "") != "impression"
+                : author.Length == 0 || storedAuthor.Length > 0 && !GossipSameId(author, storedAuthor)) return false;
+            var spans = sources.SelectMany(source => ReadStringList(source, "speechSpans")).ToList();
+            if (ReadDictionaryList(ReadDictionary(data, "signal"), "targets")
+                .Any(target => !ParticipantGossipTargetQuoteSupported(ReadString(target, "evidenceQuote", ""), sources, speaker))) return false;
+
+            if (data.ContainsKey("participantSpeechVersion") || data.ContainsKey("participantSpeechHash"))
+                return ReadString(data, "participantSpeechVersion", "") == ParticipantGossipSpeechVersion
+                    && ReadString(data, "participantSpeechHash", "") == ParticipantGossipSpeechHash(sources)
+                    && ReadString(data, "sourceText", "") == string.Join("\n", spans)
+                    && (quote.Length == 0 || GossipSameId(author, storedAuthor));
+
+            // A legacy job may already contain a draft written from raw narration or
+            // a recipient selected using narrated names. Re-check source authority
+            // without borrowing a new receipt for that earlier decision.
+            if (sources.Any(source => ReadBool(source, "excludedNarration", true))) return false;
+            string legacyText = ReadString(data, "sourceText", "").Trim();
+            if (legacyText.Length > 0 && legacyText != string.Join("\n", spans) && !spans.Contains(legacyText, StringComparer.Ordinal)) return false;
+            return ReadDictionaryList(data, "sourceEncounterTurns").All(turn => sources.Any(source =>
+                GossipSameId(ReadString(source, "speakerId", ""), ReadString(turn, "speakerId", ""))
+                && ReadStringList(source, "speechSpans").Contains(ReadString(turn, "text", "").Trim(), StringComparer.Ordinal)));
         }
 
         private static void BindPersonalGossipEncounterTurns(Dictionary<string, object> data,
@@ -34,9 +149,9 @@ namespace ReignBetaServer
             }
             string speaker = ReadString(data, "speakerId", ""), player = ReadString(data, "playerId", "");
             data["sourceEncounterTurns"] = activeTurns.Where(turn =>
-                    ReadString(turn, "speaker_id", "") == speaker || ReadString(turn, "speaker_id", "") == player)
+                    GossipSameId(ReadString(turn, "speaker_id", ""), speaker) || GossipSameId(ReadString(turn, "speaker_id", ""), player))
                 .Take(2).Select(turn => GossipFields("speakerId", ReadString(turn, "speaker_id", ""),
-                    "text", ReadString(turn, "text", ""))).ToList();
+                    "text", string.Join("\n[separate spoken span]\n", ParticipantGossipSpeechSpans(ReadString(turn, "text", ""))))).ToList();
             var bounded = PersonalGossipEncounterContext(data);
             data["sourceEncounterTurns"] = ReadDictionaryList(bounded, "turns").Select(turn => GossipFields(
                 "speakerId", ReadString(turn, "role", "") == "player" ? player : speaker,
@@ -60,10 +175,11 @@ namespace ReignBetaServer
             var turns = new List<Dictionary<string, object>>();
             foreach (var turn in ReadDictionaryList(data, "sourceEncounterTurns").Take(2))
             {
-                string author = ReadString(turn, "speakerId", ""), text = ReadString(turn, "text", "");
-                if (author != speaker && author != player || string.IsNullOrWhiteSpace(text)) continue;
+                string author = ReadString(turn, "speakerId", "");
+                string text = string.Join("\n[separate spoken span]\n", ParticipantGossipSpeechSpans(ReadString(turn, "text", "")));
+                if (!GossipSameId(author, speaker) && !GossipSameId(author, player) || string.IsNullOrWhiteSpace(text)) continue;
                 if (used + text.Length > GossipSourceContextCharacters) { omitted++; continue; }
-                turns.Add(GossipFields("role", author == player ? "player" : "gossip_speaker",
+                turns.Add(GossipFields("role", GossipSameId(author, player) ? "player" : "gossip_speaker",
                     "words", text));
                 used += text.Length;
             }
