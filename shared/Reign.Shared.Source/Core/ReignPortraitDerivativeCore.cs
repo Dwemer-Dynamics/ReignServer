@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 
 namespace ReignPortraits
 {
@@ -353,6 +354,10 @@ namespace ReignPortraits
         }
 
         public static bool CommitV2(string sourcePath, string outputDirectory, PortraitDerivativeBuild build, byte[] manifestBytes, out string error)
+            => CommitV2(sourcePath, outputDirectory, build, manifestBytes, out error, null);
+
+        internal static bool CommitV2(string sourcePath, string outputDirectory, PortraitDerivativeBuild build, byte[] manifestBytes,
+            out string error, Action<string, string> beforeStep)
         {
             error = null;
             if (build == null || build.Manifest == null || manifestBytes == null || manifestBytes.Length == 0)
@@ -376,11 +381,17 @@ namespace ReignPortraits
             {
                 foreach (CommitItem item in items)
                 {
-                    File.WriteAllBytes(item.TemporaryPath, item.Bytes);
+                    using (var staged = new FileStream(item.TemporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    {
+                        item.OwnsTemporary = true;
+                        staged.Write(item.Bytes, 0, item.Bytes.Length);
+                    }
                     if (item.IsPng && !HasPngDimensions(item.TemporaryPath, item.Width, item.Height))
                     {
                         throw new InvalidDataException("A temporary derivative failed PNG validation: " + Path.GetFileName(item.Path));
                     }
+                    item.StagedHash = DerivativeFileHash(item.TemporaryPath)
+                        ?? throw new IOException("The staged derivative disappeared.");
                 }
 
                 if (!SourceMatches(sourcePath, build.Manifest))
@@ -390,20 +401,28 @@ namespace ReignPortraits
 
                 foreach (CommitItem item in items)
                 {
-                    item.HadOriginal = File.Exists(item.Path);
-                    if (item.HadOriginal)
+                    item.OriginalHash = DerivativeFileHash(item.Path);
+                    if (item.OriginalHash != null)
                     {
-                        File.Replace(item.TemporaryPath, item.Path, item.BackupPath);
+                        CopyDerivativeFile(item.Path, item.BackupPath, ref item.OwnsBackup);
+                        if (DerivativeFileHash(item.BackupPath) != item.OriginalHash)
+                            throw new IOException("The derivative preimage failed verification.");
                     }
+                    // The OS can report failure after changing the destination.
+                    // Keep the independent preimage outside the replace operation.
+                    beforeStep?.Invoke("install", item.Path);
+                    if (DerivativeFileHash(item.Path) != item.OriginalHash || DerivativeFileHash(item.TemporaryPath) != item.StagedHash)
+                        throw new IOException("A derivative changed before installation.");
+                    item.InstallationAttempted = true;
+                    if (item.OriginalHash != null)
+                        File.Replace(item.TemporaryPath, item.Path, null);
                     else
-                    {
                         File.Move(item.TemporaryPath, item.Path);
-                    }
-                    item.Committed = true;
 
-                    if (item.IsPng && !HasPngDimensions(item.Path, item.Width, item.Height))
+                    if (DerivativeFileHash(item.Path) != item.StagedHash
+                        || (item.IsPng && !HasPngDimensions(item.Path, item.Width, item.Height)))
                     {
-                        throw new InvalidDataException("A committed derivative failed PNG validation: " + Path.GetFileName(item.Path));
+                        throw new InvalidDataException("A committed derivative failed verification: " + Path.GetFileName(item.Path));
                     }
 
                     if (string.Equals(Path.GetFileName(item.Path), ZoomFileName, StringComparison.OrdinalIgnoreCase)
@@ -413,43 +432,107 @@ namespace ReignPortraits
                     }
                 }
 
-                foreach (CommitItem item in items)
-                {
-                    DeleteIfExists(item.BackupPath);
-                }
                 return true;
             }
             catch (Exception ex)
             {
-                error = ex.Message;
+                var recovery = new List<string>();
                 for (int i = items.Count - 1; i >= 0; i--)
                 {
                     CommitItem item = items[i];
+                    if (!item.InstallationAttempted) continue;
                     try
                     {
-                        if (item.Committed)
-                        {
-                            DeleteIfExists(item.Path);
-                            if (item.HadOriginal && File.Exists(item.BackupPath))
-                            {
-                                File.Move(item.BackupPath, item.Path);
-                            }
-                        }
+                        RestoreDerivative(item, beforeStep);
                     }
-                    catch
+                    catch (Exception restoreFailure)
                     {
+                        item.RecoveryRequired = true;
+                        string preimage = item.OriginalHash == null
+                            ? "Expected original absence."
+                            : "Expected preimage " + item.OriginalHash + " at " + item.BackupPath + ".";
+                        recovery.Add(Path.GetFileName(item.Path) + ": " + restoreFailure.Message + " " + preimage);
                     }
                 }
+                error = recovery.Count == 0 ? ex.Message
+                    : ex.Message + " Derivative recovery required. " + string.Join(" ", recovery);
                 return false;
             }
             finally
             {
                 foreach (CommitItem item in items)
                 {
-                    DeleteIfExists(item.TemporaryPath);
-                    DeleteIfExists(item.BackupPath);
+                    if (item.RecoveryRequired) continue;
+                    if (item.OwnsTemporary) DeleteIfExists(item.TemporaryPath);
+                    if (item.OwnsBackup) DeleteIfExists(item.BackupPath);
+                    if (item.OwnsRestore) DeleteIfExists(item.RestorePath);
                 }
             }
+        }
+
+        private static void RestoreDerivative(CommitItem item, Action<string, string> beforeStep)
+        {
+            string currentHash = DerivativeFileHash(item.Path);
+            if (currentHash == item.OriginalHash) return;
+            if (currentHash != null && currentHash != item.StagedHash)
+                throw new IOException("Unrecognized destination bytes were preserved.");
+
+            if (item.OriginalHash != null)
+            {
+                if (DerivativeFileHash(item.BackupPath) != item.OriginalHash)
+                    throw new IOException("The derivative preimage is missing or changed.");
+                CopyDerivativeFile(item.BackupPath, item.RestorePath, ref item.OwnsRestore);
+                if (DerivativeFileHash(item.RestorePath) != item.OriginalHash)
+                    throw new IOException("The staged derivative restoration failed verification.");
+            }
+
+            beforeStep?.Invoke("restore", item.Path);
+            if (DerivativeFileHash(item.Path) != currentHash
+                || (item.OriginalHash != null && DerivativeFileHash(item.RestorePath) != item.OriginalHash))
+                throw new IOException("The derivative or staged copy changed during restoration.");
+            try
+            {
+                if (item.OriginalHash == null)
+                    File.Delete(item.Path);
+                else if (currentHash == null)
+                    File.Move(item.RestorePath, item.Path);
+                else
+                    File.Replace(item.RestorePath, item.Path, null);
+            }
+            catch (Exception failure) when ((failure is IOException || failure is UnauthorizedAccessException)
+                && DerivativeFileHash(item.Path) == item.OriginalHash)
+            {
+                // A lost filesystem acknowledgement is harmless once the
+                // original bytes (or original absence) have been verified.
+                return;
+            }
+
+            if (DerivativeFileHash(item.Path) != item.OriginalHash)
+                throw new IOException("The restored derivative failed verification.");
+        }
+
+        private static void CopyDerivativeFile(string source, string destination, ref bool ownsDestination)
+        {
+            using (var original = File.OpenRead(source))
+            using (var copy = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                ownsDestination = true;
+                original.CopyTo(copy);
+                copy.Flush(flushToDisk: true);
+            }
+        }
+
+        private static string DerivativeFileHash(string path)
+        {
+            try
+            {
+                if ((File.GetAttributes(path) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+                    throw new IOException("A derivative path is not a regular file.");
+                using (var file = File.OpenRead(path))
+                using (var sha = SHA256.Create())
+                    return BitConverter.ToString(sha.ComputeHash(file)).Replace("-", "");
+            }
+            catch (FileNotFoundException) { return null; }
         }
 
         public static bool HasPngDimensions(string path, int expectedWidth, int expectedHeight)
@@ -589,18 +672,25 @@ namespace ReignPortraits
             public readonly string Path;
             public readonly string TemporaryPath;
             public readonly string BackupPath;
+            public readonly string RestorePath;
             public readonly byte[] Bytes;
             public readonly int Width;
             public readonly int Height;
             public readonly bool IsPng;
-            public bool HadOriginal;
-            public bool Committed;
+            public string OriginalHash;
+            public string StagedHash;
+            public bool OwnsTemporary;
+            public bool OwnsBackup;
+            public bool OwnsRestore;
+            public bool InstallationAttempted;
+            public bool RecoveryRequired;
 
             public CommitItem(string path, byte[] bytes, int width, int height, bool isPng, string token)
             {
                 Path = path;
                 TemporaryPath = path + ".tmp." + token;
                 BackupPath = path + ".bak." + token;
+                RestorePath = path + ".restore." + token;
                 Bytes = bytes;
                 Width = width;
                 Height = height;

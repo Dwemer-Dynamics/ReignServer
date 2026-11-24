@@ -369,6 +369,7 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> candidates = ReadDictionaryList(payload, "candidates");
             List<Dictionary<string, object>> enemies = ReadDictionaryList(payload, "enemyKingdoms");
             List<Dictionary<string, object>> actions = new List<Dictionary<string, object>>();
+            bool supportsDisruptionReplay = ReadString(payload, "disruptionReplay", "") == ForeignAgentDisruptionReplaySchema;
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureSpymasterSchema(connection);
@@ -382,7 +383,8 @@ namespace ReignBetaServer
                 {
                     string sponsor = ReadString(enemy, "kingdomId", "");
                     string sponsorRuler = ReadString(enemy, "rulerId", "");
-                    if (string.IsNullOrWhiteSpace(sponsor) || sponsor == playerKingdom) continue;
+                    if (string.IsNullOrWhiteSpace(sponsor) || sponsor == playerKingdom
+                        || (supportsDisruptionReplay && !ReadBool(enemy, "isAtWar", false))) continue;
                     bool already = SpymasterStore.SelectForeignAgentAssignments2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["sponsor"] = sponsor }, transaction).Any();
                     if (!already)
                     {
@@ -493,7 +495,7 @@ namespace ReignBetaServer
                             ["issued"] = day, ["expires"] = (double)((float)day + (float)duration),
                             ["payload"] = Json.Serialize(action)
                         }, transaction);
-                        actions.Add(action);
+                        if (!supportsDisruptionReplay) actions.Add(action);
                     }
                     double next = day + 1d + Math.Floor(RelationshipsService.StableUnit(agentId + "|" + day.ToString(CultureInfo.InvariantCulture) + "|next") * 20d);
                     SpymasterStore.UpdateForeignAgentAssignments3(connection, new Dictionary<string, object>
@@ -516,8 +518,11 @@ namespace ReignBetaServer
 
                 var assignments = SpymasterStore.SelectForeignAgentAssignments5(connection,
                     new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId }, transaction);
+                if (supportsDisruptionReplay)
+                    actions = ReadUnexpiredForeignAgentDisruptions(connection, transaction, campaignId, timelineId, generation,
+                        day, assignments, enemies, playerKingdom);
                 transaction.Commit();
-                return new Dictionary<string, object>
+                var response = new Dictionary<string, object>
                 {
                     ["ok"] = true, ["schema"] = ForeignAgentAssignmentSchema,
                     ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["restoreGeneration"] = generation,
@@ -529,7 +534,45 @@ namespace ReignBetaServer
                     ["controlledAgentAction"] = payload.TryGetValue("_controlledAgentActionReceipt", out object controlledReceipt)
                         ? controlledReceipt : null
                 };
+                if (supportsDisruptionReplay) response["disruptionReplay"] = ForeignAgentDisruptionReplaySchema;
+                return response;
             }
+        }
+
+        private static List<Dictionary<string, object>> ReadUnexpiredForeignAgentDisruptions(ReignDbConnection connection,
+            ReignDbTransaction transaction, string campaign, string timeline, string generation, double day,
+            List<Dictionary<string, object>> assignments, List<Dictionary<string, object>> enemies, string playerKingdom)
+        {
+            var sponsors = new HashSet<string>(enemies.Where(row => ReadBool(row, "isAtWar", false))
+                .Select(row => ReadString(row, "kingdomId", "")).Where(id => id.Length != 0 && id != playerKingdom),
+                StringComparer.Ordinal);
+            var active = assignments.Where(row => ReadString(row, "status", "") == "active"
+                    && sponsors.Contains(ReadString(row, "sponsor_kingdom_id", "")))
+                .GroupBy(row => ForeignAgentOccurrenceId(campaign, timeline, row), StringComparer.Ordinal)
+                .Where(group => group.Count() == 1)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+            var actions = new List<Dictionary<string, object>>();
+            if (active.Count == 0) return actions;
+            foreach (var receipt in SpymasterStore.ReadForeignAgentDisruptionReceipts(connection,
+                new Dictionary<string, object> { ["campaign"] = campaign, ["timeline"] = timeline, ["generation"] = generation,
+                    ["day"] = day }, transaction))
+            {
+                string assignmentId = ReadString(receipt, "assignment_id", "");
+                if (!active.TryGetValue(assignmentId, out var owner)) continue;
+                Dictionary<string, object> action;
+                try { action = Json.Deserialize<Dictionary<string, object>>(ReadString(receipt, "action_json", "")); }
+                catch (System.Text.Json.JsonException) { continue; }
+                string actionId = ReadString(receipt, "action_id", "");
+                if (actionId.Length == 0 || ReadString(action, "actionId", "") != actionId
+                    || ReadString(action, "assignmentId", "") != assignmentId
+                    || ReadString(action, "agentHeroStringId", "") != ReadString(owner, "agent_hero_id", "")
+                    || ReadString(action, "sponsorKingdomStringId", "") != ReadString(owner, "sponsor_kingdom_id", ""))
+                    continue;
+                action["issuedDay"] = ReadDouble(receipt, "issued_day", -1d);
+                action["expiresDay"] = ReadDouble(receipt, "expires_day", -1d);
+                actions.Add(action);
+            }
+            return actions;
         }
 
         private static string ForeignAgentCandidateExclusionReason(Dictionary<string, object> candidate, string playerRulerId)
@@ -595,6 +638,7 @@ namespace ReignBetaServer
         }
 
         private const string ForeignAgentAssignmentSchema = "reign-spymaster-foreign-agent-v1";
+        private const string ForeignAgentDisruptionReplaySchema = "reign-spymaster-disruption-replay-v1";
 
         private static bool ForeignAgentScopeIsCurrent(ReignDbConnection connection, ReignDbTransaction transaction,
             Dictionary<string, object> payload, string campaignId, string timelineId, out string generation)

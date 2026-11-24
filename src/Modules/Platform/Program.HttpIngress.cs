@@ -491,6 +491,17 @@ namespace ReignBetaServer
                 return ReadJsonLineRowsLocked(path).ToList();
         }
 
+        internal static List<Dictionary<string, object>> ReadDialogueHistoryTail(string path, int limit)
+        {
+            if (!File.Exists(path))
+                return new List<Dictionary<string, object>>();
+
+            // Keep the existing parser and physical order. Stream earlier rows
+            // so the short reader only retains the requested tail.
+            lock (FileLock)
+                return ReadJsonLineRowsLocked(path).TakeLast(Math.Max(1, limit)).ToList();
+        }
+
         // Consume the returned sequence while holding FileLock.
         private static IEnumerable<Dictionary<string, object>> ReadJsonLineRowsLocked(string path)
         {

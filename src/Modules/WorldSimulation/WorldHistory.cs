@@ -464,6 +464,8 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> WorldHistoryOpenTimelineApi(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
+            if (payload.ContainsKey("verifiedForkLoad"))
+                return WorldHistoryOpenVerifiedFork(payload);
             string campaignId = ReadString(payload, "campaignId", "default");
             string requested = FirstNonEmpty(ReadFirstString(payload, "timelineId", "timeline_id"), "main");
             long savedSequence = ReadLong(payload, "savedSequence", ReadLong(payload, "sequence", 0));
