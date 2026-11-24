@@ -130,8 +130,7 @@ namespace ReignBetaServer
             if (ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId").Length == 0)
                 return Program.ReadDialogueHistoryTail(transcriptPath, limit);
 
-            List<Dictionary<string, object>> legacy = Program.ReadJsonLinesFromPath(transcriptPath);
-            return ReadOriginalConversationHistory(campaignId, payload, "", sessionId, limit, legacy);
+            return ReadOriginalConversationHistoryFromFile(campaignId, payload, "", sessionId, limit, transcriptPath);
         }
 
         internal static Dictionary<string, object> PartyChatHistory(Dictionary<string, object> payload)

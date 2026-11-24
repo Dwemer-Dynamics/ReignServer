@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace ReignBetaServer
@@ -381,6 +382,40 @@ namespace ReignBetaServer
                 Check("legacy_history_window_preserves_latest_append_ordinals_at_same_time", legacyTail.Count == 2
                     && ReadString(legacyTail[0], "role", "") == "npc" && ReadString(legacyTail[0], "text", "") == "First legacy line"
                     && ReadString(legacyTail[1], "text", "") == "first legacy line");
+                string eventTranscript = SocialEventTranscriptFile(campaign, "authenticated-history-window");
+                Directory.CreateDirectory(Path.GetDirectoryName(eventTranscript));
+                try
+                {
+                    IEnumerable<Dictionary<string, object>> streamedLegacy = new[]
+                    {
+                        TestDict("role", "npc", "text", "Early physical high timestamp", "ts", tiedTs + 1)
+                    }.Concat(legacy)
+                        .Concat(Enumerable.Range(0, 256).Select(i => TestDict("role", "npc", "text", "Older " + i, "ts", 1)))
+                        .Append(TestDict("role", "npc", "text", "First legacy line", "ts", tiedTs + 2));
+                    File.WriteAllLines(eventTranscript, streamedLegacy.Select(Json.Serialize));
+                    var streamed = ReadOriginalConversationHistoryFromFile(campaign, payload, "npc",
+                        "grounding_session", 2, eventTranscript);
+                    Check("authenticated_file_history_keeps_exact_order_and_old_duplicate_keys",
+                        streamed.Select(row => ReadString(row, "text", "")).SequenceEqual(new[]
+                        {
+                            "first legacy line", "Early physical high timestamp"
+                        }) && streamed.All(row => ReadString(row, "sourceIntegrity", "") == "legacy_original_unverified"));
+
+                    var eventPayload = CloneDictionary(payload);
+                    eventPayload["eventId"] = "authenticated-history-window";
+                    eventPayload["limit"] = 2;
+                    var eventHistory = SocialEventHistory(eventPayload);
+                    Check("authenticated_event_history_uses_the_merged_window",
+                        ReadDictionaryList(eventHistory, "lines").Select(row => ReadString(row, "text", ""))
+                            .SequenceEqual(streamed.Select(row => ReadString(row, "text", ""))));
+
+                    File.AppendAllText(eventTranscript, "{malformed");
+                    bool malformedRejected = false;
+                    try { SocialEventHistory(eventPayload); }
+                    catch (System.Text.Json.JsonException) { malformedRejected = true; }
+                    Check("authenticated_file_history_keeps_strict_parse_at_eof", malformedRejected);
+                }
+                finally { File.Delete(eventTranscript); }
                 bool mismatch = false;
                 try { var changed = Payload("Different message"); changed["campaignId"] = campaign; AdmitConversationInput(campaign, changed, generation, "npc"); }
                 catch (InvalidOperationException) { mismatch = true; }

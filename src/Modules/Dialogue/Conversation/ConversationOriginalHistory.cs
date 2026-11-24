@@ -12,14 +12,29 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> legacy)
         {
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
-            string timeline = ContinuityTimeline(payload);
             if (player.Length == 0) return legacy;
+            return MergeOriginalConversationHistory(campaign, payload, npc, session, limit, player, legacy);
+        }
+
+        internal static List<Dictionary<string, object>> ReadOriginalConversationHistoryFromFile(string campaign,
+            Dictionary<string, object> payload, string npc, string session, int limit, string path,
+            Func<Dictionary<string, object>, bool> legacyFilter = null)
+        {
+            var legacy = Program.EnumerateJsonLinesFromPath(path);
+            if (legacyFilter != null) legacy = legacy.Where(legacyFilter);
+            string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
+            return player.Length == 0 ? legacy.ToList()
+                : MergeOriginalConversationHistory(campaign, payload, npc, session, limit, player, legacy);
+        }
+
+        private static List<Dictionary<string, object>> ReadAuthoritativeConversationHistory(string campaign,
+            Dictionary<string, object> payload, string npc, string session, int limit, string player,
+            KnowledgeAccessContext historyAccess)
+        {
             using var connection = ReignDatabase.OpenCampaignConnection(campaign);
             var rows = DialogueStore.SelectConversationTurns26(connection, TestDict("player", player, "session", session, "npc", npc, "limit", Math.Max(1000, Math.Min(10000, limit * 8))));
             bool official = ReadString(payload, "conversationMode", "") == "ambassador_official";
             string posting = ReadString(payload, "postingId", "");
-            var historyAccess = new DialogueService.KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
-                WorldDay = ReadDouble(payload, "worldDay", double.MaxValue), AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             rows = rows.Where(row => {
                 var meta = TryParseJsonObject(ReadString(row, "payload_json", "{}"));
                 var sessionMeta = TryParseJsonObject(ReadString(row, "session_payload", "{}"));
@@ -101,8 +116,19 @@ namespace ReignBetaServer
                     "worldDay", ReadDouble(source, "world_day", 0d), "sessionId", ReadString(source, "session_id", ""),
                     "exchangeId", ReadString(source, "exchange_id", ""), "contributionId", ReadString(source, "event_id", ""),
                     "inputSourceId", ReadString(source, "turn_id", ""), "sourceIntegrity", OriginalConversationSourceIntegrity(source), "deliveryStatus", "submitted"));
-            // Preserve historical display records that predate canonical persistence.
-            // They remain explicitly unverified and are never an NPC retrieval source.
+            return lines;
+        }
+
+        private static List<Dictionary<string, object>> MergeOriginalConversationHistory(string campaign,
+            Dictionary<string, object> payload, string npc, string session, int limit, string player,
+            IEnumerable<Dictionary<string, object>> legacy)
+        {
+            string timeline = ContinuityTimeline(payload);
+            var access = new KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
+                WorldDay = ReadDouble(payload, "worldDay", double.MaxValue), AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
+            var authoritative = ReadAuthoritativeConversationHistory(campaign, payload, npc, session, limit, player, access);
+            var selected = new PriorityQueue<(Dictionary<string, object> Row, bool Legacy), (long Timestamp, long Ordinal)>();
+            long ordinal = 0;
             var textKeys = new HashSet<(string Role, string Text)>();
             var exchangeKeys = new HashSet<(string Role, string Exchange)>();
             void IndexLine(Dictionary<string, object> line)
@@ -113,21 +139,41 @@ namespace ReignBetaServer
                 if (exchange.Length > 0) exchangeKeys.Add((role, exchange));
             }
 
-            foreach (var line in lines) IndexLine(line);
-            foreach (var old in legacy ?? new List<Dictionary<string, object>>())
+            void SelectLine(Dictionary<string, object> line, bool isLegacy)
+            {
+                IndexLine(line);
+                // Later entries win a tied cutoff, matching stable OrderBy(...).TakeLast(limit).
+                var priority = (ReadLong(line, "ts", 0), ordinal++);
+                if (selected.Count < limit) selected.Enqueue((line, isLegacy), priority);
+                else if (limit > 0) selected.EnqueueDequeue((line, isLegacy), priority);
+            }
+
+            foreach (var line in authoritative) SelectLine(line, false);
+            // Earlier accepted rows still participate in deduplication after falling
+            // outside the window. Only selected legacy payloads need to be copied.
+            foreach (var old in legacy ?? Enumerable.Empty<Dictionary<string, object>>())
             {
                 if (ReadString(old, "timelineId", timeline) != timeline) continue;
                 string exchange = ReadFirstString(old, "exchangeId", "turnId", "eventId"), role = ReadString(old, "role", "");
                 if ((exchange.Length > 0 && exchangeKeys.Contains((role, exchange)))
                     || textKeys.Contains((role, ReadString(old, "text", "")))) continue;
-                if (ReadDouble(old, "worldDay", 0d) > historyAccess.WorldDay) continue;
-                var retained = CloneDictionary(old);
-                retained["sourceIntegrity"] = "legacy_original_unverified";
-                lines.Add(retained);
-                // The incoming fallback alias is not necessarily the retained row's exchangeId.
-                IndexLine(retained);
+                if (ReadDouble(old, "worldDay", 0d) > access.WorldDay) continue;
+                // Index the stored exchangeId, never the incoming fallback alias.
+                SelectLine(old, true);
             }
-            return lines.OrderBy(line => ReadLong(line, "ts", 0)).TakeLast(limit).ToList();
+
+            var result = new List<Dictionary<string, object>>(selected.Count);
+            while (selected.TryDequeue(out var entry, out _))
+            {
+                if (!entry.Legacy) result.Add(entry.Row);
+                else
+                {
+                    var retained = CloneDictionary(entry.Row);
+                    retained["sourceIntegrity"] = "legacy_original_unverified";
+                    result.Add(retained);
+                }
+            }
+            return result;
         }
 
         internal static string OriginalConversationSourceIntegrity(Dictionary<string, object> source)

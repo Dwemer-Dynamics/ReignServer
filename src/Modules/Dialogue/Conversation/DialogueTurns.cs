@@ -34,15 +34,13 @@ namespace ReignBetaServer
             }
 
             string path = CampaignFileService.CharacterFile(campaignId, heroId, "history", "dialogue.jsonl");
-            List<Dictionary<string, object>> all = Program.ReadJsonLinesFromPath(path);
             bool officialMode = string.Equals(ReadString(payload, "conversationMode", ""), "ambassador_official", StringComparison.OrdinalIgnoreCase);
-            if (officialMode)
-            {
-                string postingId = ReadString(payload, "postingId", "");
-                all = all.Where(x => string.Equals(ReadString(x, "channel", ""), "ambassador_official", StringComparison.OrdinalIgnoreCase)
-                    && (string.IsNullOrWhiteSpace(postingId) || string.Equals(ReadString(x, "postingId", ""), postingId, StringComparison.OrdinalIgnoreCase))).ToList();
-            }
-            all = DialogueService.ReadOriginalConversationHistory(campaignId, payload, heroId, "", limit, all);
+            string postingId = ReadString(payload, "postingId", "");
+            Func<Dictionary<string, object>, bool> legacyFilter = officialMode
+                ? row => string.Equals(ReadString(row, "channel", ""), "ambassador_official", StringComparison.OrdinalIgnoreCase)
+                    && (string.IsNullOrWhiteSpace(postingId) || string.Equals(ReadString(row, "postingId", ""), postingId, StringComparison.OrdinalIgnoreCase))
+                : null;
+            var all = ReadOriginalConversationHistoryFromFile(campaignId, payload, heroId, "", limit, path, legacyFilter);
             if (!officialMode)
             {
                 // Attention observations are internal prompt/jealousy evidence,
