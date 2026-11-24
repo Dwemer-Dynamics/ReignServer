@@ -107,6 +107,7 @@ namespace ReignBetaServer
             try
             {
                 VerifyTypedArrestEffectOwner(add);
+                VerifyOwnedWorldHistoryEventProof(add);
                 string fallbackRoot = Path.Combine(Program.DataDir, "ss");
                 string stableRoot = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -1992,6 +1993,164 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
             {
                 lock (SaveSyncActiveStateLock) SaveSyncActiveStates.Remove(campaignId);
                 if (Directory.Exists(fixtureRoot)) Directory.Delete(fixtureRoot, true);
+            }
+        }
+
+        private static void VerifyOwnedWorldHistoryEventProof(Action<string, bool, string> add)
+        {
+            string campaign = "history_proof_" + Guid.NewGuid().ToString("N");
+            string absent = "history_proof_absent_" + Guid.NewGuid().ToString("N");
+            string[] roots = { StrictCampaignDirectory(campaign), SaveSyncCampaignRoot(campaign),
+                StrictCampaignDirectory(absent), SaveSyncCampaignRoot(absent) };
+            const string timeline = "main", eventId = "history_proof_evidence", ephemeralId = "history_proof_ephemeral";
+            const string summary = "A witness established evidence for a captured noble.";
+            string sidecar = SaveSyncActiveStatePath(campaign);
+
+            bool Registered(string id)
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(id);
+                return connection != null;
+            }
+            if (roots.Any(path => Directory.Exists(path) || File.Exists(path)) || Registered(campaign) || Registered(absent))
+                throw new IOException("A disposable history event proof fixture root is already occupied.");
+
+            string Generation()
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                return ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "<missing>");
+            }
+
+            string TimelineState()
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                return Json.Serialize(WorldSimulationStore.SelectWorldHistoryTimelines(connection, TestDict("id", timeline)).Single());
+            }
+
+            Dictionary<string, object> Upload(params Dictionary<string, object>[] events) =>
+                WorldSimulationService.WorldHistoryIngestBatchApi(TestDict("campaignId", campaign,
+                    "timelineId", timeline, "events", events.ToList(), "waitForRetention", true));
+
+            try
+            {
+                var original = TestDict("eventId", eventId, "eventType", "arrest_evidence_reclassified", "sequence", 1L,
+                    "worldDay", 18.25d, "locationId", "history_proof_town", "locationName", "Proof Town",
+                    "source", "reign_system", "phase", "evidence_established", "summary", summary, "checksum", "fixture-checksum",
+                    "payload", TestDict("caseId", "fixture_case", "priorStatus", "suspicion"),
+                    "entities", new List<Dictionary<string, object>>
+                    {
+                        TestDict("entityId", "fixture_accused", "entityType", "hero", "role", "accused"),
+                        TestDict("entityId", "fixture_witness", "entityType", "hero", "role", "witness")
+                    });
+                var ephemeral = new Dictionary<string, object>(original)
+                {
+                    ["eventId"] = ephemeralId, ["sequence"] = 2L, ["summary"] = "Disposable polling receipt"
+                };
+                var initial = Upload(original, ephemeral);
+                string beforeRestore = Generation();
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign);
+                string generation = Generation();
+                if (beforeRestore == generation || generation == "<missing>" || !ReadBool(initial, "ok", false)
+                    || ReadInt(initial, "accepted", -1) != 1 || ReadInt(initial, "ephemeral", -1) != 1)
+                    throw new InvalidOperationException("The proof fixture could not establish its owner and two upload outcomes.");
+
+                var conflicting = new Dictionary<string, object>(original)
+                {
+                    ["summary"] = "Content that did not win", ["payload"] = TestDict("caseId", "different_case"),
+                    ["entities"] = new List<Dictionary<string, object>>()
+                };
+                var duplicate = Upload(conflicting);
+                MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", "history_proof_active"));
+                byte[] cleanSidecar = File.ReadAllBytes(sidecar);
+                string timelineBefore = TimelineState();
+
+                Dictionary<string, object> Proof(string id = eventId, string ownerCampaign = null,
+                    string ownerTimeline = timeline, string ownerGeneration = null, string version = "1")
+                {
+                    var scope = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["eventProofVersion"] = version, ["campaignId"] = ownerCampaign ?? campaign,
+                        ["timelineId"] = ownerTimeline
+                    };
+                    if (ownerGeneration != null) scope["sharedActivityGeneration"] = ownerGeneration;
+                    return WorldSimulationService.WorldHistoryEventApi(scope, id);
+                }
+
+                var observed = Proof(ownerGeneration: generation);
+                var row = ReadDictionary(observed, "event");
+                var entities = ReadDictionaryList(row, "entities");
+                var owner = ReadDictionary(observed, "ownership");
+                add("owned_history_event_proof_observes_actual_persisted_material",
+                    ReadBool(observed, "ok", false) && ReadString(observed, "result", "") == "observed"
+                    && ReadInt(observed, "eventProofVersion", -1) == 1 && row != null && !row.ContainsKey("checksum")
+                    && ReadString(owner, "campaignId", "") == campaign && ReadString(owner, "timelineId", "") == timeline
+                    && ReadString(owner, "sharedActivityGeneration", "") == generation
+                    && ReadString(row, "event_id", "") == eventId && ReadLong(row, "sequence", -1) == 1
+                    && ReadDouble(row, "world_day", -1) == 18.25d && ReadString(row, "location_id", "") == "history_proof_town"
+                    && ReadString(row, "summary", "") == summary
+                    && ReadString(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "caseId", "") == "fixture_case"
+                    && entities.Select(entity => ReadString(entity, "entity_id", ""))
+                        .SequenceEqual(new[] { "fixture_accused", "fixture_witness" })
+                    && ReadBool(duplicate, "ok", false) && ReadInt(duplicate, "duplicates", -1) == 1
+                    && ReadInt(duplicate, "accepted", -1) == 0,
+                    "A successful same-ID upload with a matching producer checksum and different content does not change the observed event.");
+
+                var discarded = Proof(ephemeralId, ownerGeneration: generation);
+                var wrongId = Proof(eventId.ToUpperInvariant(), ownerGeneration: generation);
+                add("owned_history_event_proof_requires_an_exact_durable_row",
+                    !ReadBool(discarded, "ok", true) && ReadString(discarded, "result", "") == "not_found"
+                    && !discarded.ContainsKey("event") && ReadString(wrongId, "result", "") == "not_found",
+                    "A successful ephemeral ingest and a different ID spelling cannot prove a persisted event.");
+
+                var stale = Proof(ownerGeneration: beforeRestore);
+                var wrongTimeline = Proof(ownerTimeline: "elsewhere", ownerGeneration: generation);
+                var unregistered = Proof(ownerCampaign: absent, ownerGeneration: generation);
+                var missingGeneration = Proof();
+                var unknownVersion = Proof(ownerGeneration: generation, version: "2");
+                add("owned_history_event_proof_requires_current_explicit_scope",
+                    new[] { stale, wrongTimeline, unregistered, missingGeneration }.All(result =>
+                        ReadString(result, "result", "") == "owner_mismatch" && !result.ContainsKey("event")
+                        && !result.ContainsKey("ownership"))
+                    && ReadString(unknownVersion, "result", "") == "invalid_request"
+                    && !unknownVersion.ContainsKey("event") && !Registered(absent)
+                    && !Directory.Exists(roots[2]) && !Directory.Exists(roots[3]),
+                    "Stale, missing, foreign and unsupported scope requests return no event and create no campaign registration.");
+
+                var repeated = Proof(ownerGeneration: generation);
+                bool clean;
+                lock (SaveSyncActiveStateLock)
+                {
+                    var active = ReadSaveSyncActiveStateLocked(campaign);
+                    clean = active?.SavePointId == "history_proof_active" && !active.Dirty;
+                }
+                add("owned_history_event_proof_does_not_advance_or_dirty_history",
+                    clean && File.ReadAllBytes(sidecar).SequenceEqual(cleanSidecar) && TimelineState() == timelineBefore
+                    && ReadBool(repeated, "ok", false) && Json.Serialize(ReadDictionary(repeated, "event")) == Json.Serialize(row),
+                    "Repeated exact proof leaves the timeline head, persisted event and active checkpoint sidecar unchanged.");
+
+                var legacy = WorldSimulationService.WorldHistoryEventApi(
+                    new Dictionary<string, string> { ["campaignId"] = campaign }, eventId);
+                add("owned_history_event_proof_preserves_legacy_event_read",
+                    ReadBool(legacy, "ok", false) && legacy.Count == 2
+                    && ReadString(ReadDictionary(legacy, "event"), "checksum", "") == "fixture-checksum",
+                    "The unversioned event read retains its legacy result shape and checksum.");
+            }
+            finally
+            {
+                try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                finally
+                {
+                    try { if (Registered(absent)) ReignPostgreSqlStorage.DropCampaign(absent); }
+                    finally
+                    {
+                        lock (SaveSyncActiveStateLock)
+                        {
+                            SaveSyncActiveStates.Remove(campaign);
+                            SaveSyncActiveStates.Remove(absent);
+                        }
+                        foreach (string root in roots)
+                            if (Directory.Exists(root)) Directory.Delete(root, true);
+                    }
+                }
             }
         }
 

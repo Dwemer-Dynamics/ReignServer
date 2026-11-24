@@ -600,9 +600,10 @@ Use only supplied heroStringId values.";
 
         private static string ResolveFormalOutfitDescription(string campaignId, string heroId, Dictionary<string, object> participant)
         {
+            string campaignCache = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "formal_outfit.json");
             List<string> cachePaths = new List<string>
             {
-                CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "formal_outfit.json"),
+                campaignCache,
                 CampaignFileService.CharacterFile("_shared", heroId, "portraits", "formal_outfit.json")
             };
             // The shared cache contains more than a thousand portrait folders. Loading every
@@ -614,7 +615,9 @@ Use only supplied heroStringId values.";
                 cachePaths.Add(Path.Combine(sharedPortraitFolder, "formal_outfit.json"));
             foreach (string path in cachePaths.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                Dictionary<string, object> cached = CampaignFileService.ReadJsonObject(path);
+                Dictionary<string, object> cached = path == campaignCache
+                    ? PortraitsService.ReadCampaignFormalOutfit(campaignId, heroId)
+                    : CampaignFileService.ReadJsonObject(path);
                 string description = ReadString(cached, "description", "");
                 string status = ReadString(cached, "status", "");
                 string source = ReadString(cached, "descriptionSource", "");

@@ -163,6 +163,8 @@ namespace ReignBetaServer
             Check("confirmation_requires_final_marker_after_reseal", VerifyOutfitConfirmationPrefixes);
             Check("confirmation_marker_preserves_legacy_and_refresh", VerifyOutfitConfirmationCompatibility);
             Check("confirmation_requires_matching_restored_profile", VerifyOutfitConfirmationProfileReadback);
+            Check("retained_projection_requires_final_marker", VerifyRetainedOutfitProjectionPrefixes);
+            Check("retained_projection_preserves_refresh_and_formal_scans", VerifyRetainedOutfitProjectionCompatibility);
             Check("confirmation_marker_failure_rolls_back", VerifyOutfitConfirmationRollback);
             Check("confirmation_denied_marker_preserves_preimages", VerifyOutfitDeniedMarker);
             Check("confirmation_rollback_continues_after_restore_error", VerifyOutfitRollbackContinues);
@@ -365,6 +367,88 @@ namespace ReignBetaServer
                     && legacyTearRejected && completeLegacyAccepted && wrongTupleRejected && wrongClothingRejected
                     && bothMissingTimestampRejected && CommittedOutfitResponse(request, root) != null
                     && File.ReadAllBytes(formalPath).SequenceEqual(formal) && !File.Exists(markerPath);
+            });
+
+        private static bool VerifyRetainedOutfitProjectionPrefixes()
+            => WithOutfitConfirmationFixture((root, op, _) =>
+            {
+                string portraits = Path.Combine(root, "portraits");
+                void WriteThenCheck(OutfitChangeOperation attempt, string priorDescription)
+                {
+                    CommitOutfitInDirectory(attempt, root, (path, bytes) =>
+                    {
+                        WriteSharedPortraitAtomic(path, bytes);
+                        string name = Path.GetFileName(path);
+                        bool committed = name == OutfitConfirmationFileName;
+                        var profile = new Dictionary<string, object>();
+                        var outfit = ReadRetainedOutfitMetadata(portraits, attempt.Campaign, attempt.Hero);
+                        ApplyConfirmedOutfit(outfit, profile);
+                        string expectedOutfit = committed ? attempt.Description
+                            : name is "custom.png" or "formal_outfit.json" ? priorDescription : "";
+                        string expectedFormal = committed ? attempt.Description
+                            : name == "custom.png" ? priorDescription : "";
+                        if (ReadString(profile, "clothingDescription", "") != expectedOutfit
+                            || ConfirmedOutfitAfterScene(outfit, 0) != expectedOutfit
+                            || ReadString(ReadCampaignFormalOutfitInDirectory(portraits, attempt.Campaign, attempt.Hero),
+                                "description", "") != expectedFormal)
+                            throw new InvalidDataException($"Outfit projection disagreed with completion after '{name}'.");
+                    });
+                }
+
+                WriteThenCheck(op, "");
+                WriteThenCheck(MakeLaterOutfitFixture(op), op.Description);
+                return true;
+            });
+
+        private static bool VerifyRetainedOutfitProjectionCompatibility()
+            => WithOutfitConfirmationFixture((root, op, request) =>
+            {
+                CommitOutfitInDirectory(op, root);
+                string portraits = Path.Combine(root, "portraits");
+                string formalPath = Path.Combine(portraits, "formal_outfit.json");
+                string outfitPath = Path.Combine(portraits, "outfit.json");
+                string markerPath = Path.Combine(portraits, OutfitConfirmationFileName);
+                string profilePath = Path.Combine(root, "profile.json");
+                byte[] marker = File.ReadAllBytes(markerPath);
+                var outfit = CampaignFileService.ReadJsonObject(outfitPath);
+                var formal = CampaignFileService.ReadJsonObject(formalPath);
+
+                string FormalDescription() => ReadString(ReadCampaignFormalOutfitInDirectory(portraits, op.Campaign, op.Hero), "description", "");
+                void WriteRecord(string path, Dictionary<string, object> record)
+                    => WriteSharedPortraitAtomic(path, Encoding.UTF8.GetBytes(Json.Serialize(record)));
+
+                WriteRecord(profilePath, new Dictionary<string, object> { ["clothingDescription"] = "Earlier temporal outfit." });
+                byte[] refreshed = { 7, 8, 9 };
+                ReplaceRefreshedCharacterOverrideInDirectory(portraits, refreshed,
+                    OutfitContractReceipt(refreshed, 768, 1024), WriteSharedPortraitAtomic);
+                var retained = ReadRetainedOutfitMetadata(portraits, op.Campaign, op.Hero);
+                var projection = CampaignFileService.ReadJsonObject(profilePath);
+                ApplyConfirmedOutfit(retained, projection);
+                bool retainedAcrossRefreshAndRestore = ReadString(projection, "clothingDescription", "") == op.Description
+                    && ConfirmedOutfitAfterScene(retained, DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds()) == ""
+                    && FormalDescription() == op.Description && CommittedOutfitResponse(request, root) == null
+                    && File.ReadAllBytes(markerPath).SequenceEqual(marker);
+
+                var mismatched = new Dictionary<string, object>(formal) { ["operationId"] = Guid.NewGuid().ToString("N") };
+                WriteRecord(formalPath, mismatched);
+                bool mismatchWithheld = FormalDescription() == ""
+                    && ReadRetainedOutfitMetadata(portraits, op.Campaign, "foreign_hero") == null;
+
+                outfit.Remove(OutfitConfirmationFormatKey);
+                WriteRecord(outfitPath, outfit);
+                WriteRecord(formalPath, formal);
+                bool versionedFormalRequiresVersionedOutfit = FormalDescription() == "";
+
+                formal.Remove(OutfitConfirmationFormatKey);
+                File.Delete(markerPath);
+                WriteRecord(formalPath, formal);
+                bool legacyAccepted = FormalDescription() == op.Description
+                    && ConfirmedOutfitAfterScene(ReadRetainedOutfitMetadata(portraits, op.Campaign, op.Hero), 0) == op.Description;
+
+                WriteRecord(formalPath, new Dictionary<string, object>
+                    { ["status"] = "completed", ["description"] = "Independent formal portrait scan." });
+                return retainedAcrossRefreshAndRestore && mismatchWithheld && versionedFormalRequiresVersionedOutfit
+                    && legacyAccepted && FormalDescription() == "Independent formal portrait scan.";
             });
 
         private static bool VerifyOutfitConfirmationRollback()

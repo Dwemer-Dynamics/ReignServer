@@ -324,19 +324,24 @@ namespace ReignBetaServer
                 ["descriptionSha256"] = Sha256Hex(Encoding.UTF8.GetBytes(ReadString(outfit, "description", "")))
             };
 
-        private static bool OutfitConfirmationMatches(string directory, Dictionary<string, object> payload,
+        private static bool OutfitConfirmationMatches(string directory, string campaign, string hero,
             Dictionary<string, object> outfit)
         {
             var formatKeys = outfit.Keys.Where(key => key.Equals(OutfitConfirmationFormatKey, StringComparison.OrdinalIgnoreCase))
                 .Take(2).ToArray();
-            // Legacy outfits predate the completion marker and keep their original replay checks.
+            // Legacy outfits predate the completion marker.
             if (formatKeys.Length == 0) return true;
             if (formatKeys.Length != 1 || formatKeys[0] != OutfitConfirmationFormatKey
                 || outfit[OutfitConfirmationFormatKey] is not string format || format != OutfitConfirmationFormat) return false;
             string path = Path.Combine(directory, OutfitConfirmationFileName);
-            if (!File.Exists(path) || !OutfitConfirmationPathUnambiguous(path)) return false;
+            try
+            {
+                if (!File.Exists(path) || !OutfitConfirmationPathUnambiguous(path)) return false;
+            }
+            catch (IOException) { return false; }
+            catch (UnauthorizedAccessException) { return false; }
             var actual = CampaignFileService.ReadJsonObject(path);
-            var expected = BuildOutfitConfirmation(ReadString(payload, "campaignId", ""), ReadString(payload, "heroStringId", ""), outfit);
+            var expected = BuildOutfitConfirmation(campaign, hero, outfit);
             return actual.Count == expected.Count && expected.All(pair =>
                 actual.TryGetValue(pair.Key, out object value) && value is string text && text == (string)pair.Value);
         }
@@ -351,7 +356,8 @@ namespace ReignBetaServer
                     || ReadString(outfit, "timelineId", "") != ReadString(payload, "timelineId", "")
                     || ReadString(outfit, "sourceSha256", "") != ReadString(payload, "sourceSha256", "")) return null;
                 string directory = Path.Combine(characterDirectory, "portraits");
-                if (!OutfitConfirmationMatches(directory, payload, outfit)) return null;
+                if (!OutfitConfirmationMatches(directory, ReadString(payload, "campaignId", ""),
+                    ReadString(payload, "heroStringId", ""), outfit)) return null;
                 // The legacy write sequence and the retained-assets overlay can leave
                 // image evidence ahead of the profile. Read the stored projection;
                 // the independently scanned formal outfit has its own lifecycle.
@@ -378,11 +384,14 @@ namespace ReignBetaServer
                 || !profile.TryGetValue("clothingDescription", out object clothing)
                 || clothing is not string text || text != description) return false;
 
-            return new[] { "operationId", "playerHeroId", "timelineId", "sourceSha256", "portraitSha256", "description", "updatedUtc" }
+            return OutfitCommitFieldsMatch(outfit, projected);
+        }
+
+        private static bool OutfitCommitFieldsMatch(Dictionary<string, object> outfit, Dictionary<string, object> projection)
+            => new[] { "operationId", "playerHeroId", "timelineId", "sourceSha256", "portraitSha256", "description", "updatedUtc" }
                 .All(field => outfit.TryGetValue(field, out object original) && original is string expected
                     && !string.IsNullOrWhiteSpace(expected)
-                    && projected.TryGetValue(field, out object copy) && copy is string actual && actual == expected);
-        }
+                    && projection.TryGetValue(field, out object copy) && copy is string actual && actual == expected);
 
         // Failure-injectable transaction. No preview writes occur in character or shared folders.
         private static void CommitOutfitFiles(IEnumerable<KeyValuePair<string, byte[]>> writes,
@@ -432,8 +441,39 @@ namespace ReignBetaServer
             catch (DirectoryNotFoundException) { return null; }
         }
 
+        private static Dictionary<string, object> ReadRetainedOutfitMetadata(string directory, string campaign, string hero)
+        {
+            lock (Program.FileLock)
+            {
+                var outfit = CampaignFileService.ReadJsonObject(Path.Combine(directory, "outfit.json"));
+                return OutfitConfirmationMatches(directory, campaign, hero, outfit) ? outfit : null;
+            }
+        }
+
+        internal static Dictionary<string, object> ReadCampaignFormalOutfit(string campaign, string hero)
+            => ReadCampaignFormalOutfitInDirectory(CampaignFileService.CharacterFile(campaign, hero, "portraits"), campaign, hero);
+
+        private static Dictionary<string, object> ReadCampaignFormalOutfitInDirectory(string directory, string campaign, string hero)
+        {
+            lock (Program.FileLock)
+            {
+                var formal = CampaignFileService.ReadJsonObject(Path.Combine(directory, "formal_outfit.json"));
+                if (ReadString(formal, "descriptionSource", "") != "confirmed_outfit_change"
+                    || !formal.Keys.Any(key => key.Equals(OutfitConfirmationFormatKey, StringComparison.OrdinalIgnoreCase)))
+                    return formal;
+
+                // Formal clothing from the outfit transaction must match its currently published outfit.
+                // Independent portrait scans and pre-marker formal records keep their own lifecycle.
+                var outfit = ReadRetainedOutfitMetadata(directory, campaign, hero);
+                return outfit != null && outfit.TryGetValue(OutfitConfirmationFormatKey, out object format)
+                    && format is string version && version == OutfitConfirmationFormat
+                    && OutfitCommitFieldsMatch(outfit, formal) && OutfitConfirmationMatches(directory, campaign, hero, formal)
+                    ? formal : null;
+            }
+        }
+
         internal static void PreserveConfirmedOutfit(string campaign, string hero, Dictionary<string, object> profile)
-            => ApplyConfirmedOutfit(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "portraits", "outfit.json")), profile);
+            => ApplyConfirmedOutfit(ReadRetainedOutfitMetadata(CampaignFileService.CharacterFile(campaign, hero, "portraits"), campaign, hero), profile);
 
         private static void ApplyConfirmedOutfit(Dictionary<string, object> outfit, Dictionary<string, object> profile)
         {
@@ -445,7 +485,9 @@ namespace ReignBetaServer
         }
 
         internal static string ConfirmedOutfitDescription(string campaign, string hero, long sceneUpdatedSeconds = 0)
-            => ConfirmedOutfitAfterScene(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "portraits", "outfit.json")), sceneUpdatedSeconds);
+            => ConfirmedOutfitAfterScene(
+                ReadRetainedOutfitMetadata(CampaignFileService.CharacterFile(campaign, hero, "portraits"), campaign, hero),
+                sceneUpdatedSeconds);
 
         private static string ConfirmedOutfitAfterScene(Dictionary<string, object> outfit, long sceneUpdatedSeconds)
         {

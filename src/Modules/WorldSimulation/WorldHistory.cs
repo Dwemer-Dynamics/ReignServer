@@ -46,29 +46,33 @@ namespace ReignBetaServer
         }
 
         internal static Dictionary<string, object> ReadOwnedNoticeSnapshot(Dictionary<string, string> query,
-            Func<ReignDbConnection, ReignDbTransaction, string, string, Dictionary<string, object>> read)
-        {
-            Dictionary<string, object> OutOfScope() => new Dictionary<string, object>
+            Func<ReignDbConnection, ReignDbTransaction, string, string, Dictionary<string, object>> read) =>
+            ReadOwnedWorldHistorySnapshot(query, read) ?? new Dictionary<string, object>
             {
                 ["ok"] = false, ["error"] = "The requested notice scope is no longer current."
             };
+
+        private static Dictionary<string, object> ReadOwnedWorldHistorySnapshot(Dictionary<string, string> query,
+            Func<ReignDbConnection, ReignDbTransaction, string, string, Dictionary<string, object>> read,
+            System.Data.IsolationLevel isolationLevel = System.Data.IsolationLevel.Unspecified)
+        {
             if (!query.TryGetValue("campaignId", out string campaignId) || string.IsNullOrWhiteSpace(campaignId)
                 || !query.TryGetValue("timelineId", out string timelineId) || string.IsNullOrWhiteSpace(timelineId)
                 || !query.TryGetValue("sharedActivityGeneration", out string generation) || generation == null)
-                return OutOfScope();
+                return null;
             var ownership = new Dictionary<string, object>
             {
                 ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["sharedActivityGeneration"] = generation
             };
             using var timelineScope = EnterWorldHistoryTimelineScope(campaignId);
             using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaignId, trackCampaignMutations: true);
-            if (connection == null) return OutOfScope();
-            using var transaction = connection.BeginTransaction();
+            if (connection == null) return null;
+            using var transaction = connection.BeginTransaction(isolationLevel);
             AcquirePostgreSqlTransactionMutationLock(connection, transaction);
             if (!NoticeAcknowledgementOwnerMatches(connection, transaction, ownership, campaignId, timelineId))
-                return OutOfScope();
+                return null;
             var result = read(connection, transaction, campaignId, timelineId);
-            if (result == null) return OutOfScope();
+            if (result == null) return null;
             result["ownership"] = ownership;
             transaction.Commit();
             return result;
@@ -668,6 +672,11 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> WorldHistoryEventApi(Dictionary<string, string> query, string eventId)
         {
+            if (query?.TryGetValue("eventProofVersion", out string version) == true)
+                return version == "1" && !string.IsNullOrWhiteSpace(eventId)
+                    ? ReadOwnedWorldHistoryEventProof(query, eventId)
+                    : WorldHistoryEventProofFailure("invalid_request", "An exact event ID and proof version 1 are required.");
+
             string campaignId = query != null && query.ContainsKey("campaignId") ? query["campaignId"] : SettingsService.LatestCampaignId();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
@@ -679,6 +688,40 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = true, ["event"] = row };
             }
         }
+
+        private static Dictionary<string, object> ReadOwnedWorldHistoryEventProof(
+            Dictionary<string, string> query, string eventId)
+        {
+            // Retention compaction can remove event children independently of the timeline monitor.
+            return ReadOwnedWorldHistorySnapshot(query, (connection, transaction, campaign, timeline) =>
+            {
+                if (!TableExists(connection, "world_history_events") || !TableExists(connection, "world_history_entities")
+                    || !TableExists(connection, "world_history_knowledge_rules"))
+                    return WorldHistoryEventProofFailure("unavailable", "Persisted event proof is unavailable for this timeline.");
+
+                var key = TestDict("id", eventId, "timeline", timeline);
+                var row = WorldSimulationStore.SelectWorldHistoryEvents4(connection, key, transaction).SingleOrDefault();
+                if (ReadString(row, "event_id", "") != eventId || ReadString(row, "campaign_id", "") != campaign
+                    || ReadString(row, "timeline_id", "") != timeline)
+                    return WorldHistoryEventProofFailure("not_found", "The event is absent from the current timeline.");
+
+                // Producers supply the checksum. A reader must compare the observed material to its own expected event.
+                row.Remove("checksum");
+                var eventKey = TestDict("id", eventId);
+                row["entities"] = WorldSimulationStore.SelectWorldHistoryEntities2(connection, eventKey, transaction);
+                row["knowledgeRules"] = WorldSimulationStore.SelectWorldHistoryKnowledgeRules(connection, eventKey, transaction);
+                return new Dictionary<string, object>
+                {
+                    ["ok"] = true, ["eventProofVersion"] = 1, ["result"] = "observed", ["event"] = row
+                };
+            }, System.Data.IsolationLevel.RepeatableRead) ?? WorldHistoryEventProofFailure("owner_mismatch", "The requested event scope is no longer current.");
+        }
+
+        private static Dictionary<string, object> WorldHistoryEventProofFailure(string result, string error) =>
+            new Dictionary<string, object>
+            {
+                ["ok"] = false, ["eventProofVersion"] = 1, ["result"] = result, ["error"] = error
+            };
 
         internal static Dictionary<string, object> WorldHistoryCorrelationApi(Dictionary<string, string> query, string correlationId)
         {
