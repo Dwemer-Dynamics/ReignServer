@@ -894,6 +894,9 @@ namespace ReignBetaServer
                 string reportedError = ReadString(payload, "error", ReadString(payload, "message", "Command failed."));
                 bool fatalInfrastructureFailure = result && status == "failed" && IsFatalLiveTestInfrastructureFailure(reportedError);
                 if (fatalInfrastructureFailure) status = "needs_input";
+                if (observesExecution && !result && (status is "accepted" or "running")
+                    && ReadString(command, "operation", "") == "send")
+                    command["partyAgencyAcceptedSendExecution"] = PartyAgencySendAck(ReadDictionary(observation, "executionObservation"));
                 command["status"] = status;
                 command["message"] = fatalInfrastructureFailure
                     ? "Paused because the configured LLM provider cannot currently accept requests. Resume after correcting provider access or balance."

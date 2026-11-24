@@ -73,17 +73,28 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> DialogueRespond(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
+            var claim = WorldSimulationService.TakePartyAgencySendClaim(payload);
+            var sendOrigin = WorldSimulationService.AdmitPartyAgencySendOrigin(payload, "individual_chat", claim);
             DialogueService.BeginSinglePassConversation(payload);
-            return DialogueService.RunPlayerActionTurn(payload, () => LlmProviderService.RunCodexConversationScope(payload, () => DialogueRespondCore(payload)));
+            return DialogueService.RunPlayerActionTurn(payload, () => LlmProviderService.RunCodexConversationScope(payload,
+                () => DialogueRespondCore(payload, sendOrigin)));
         }
 
         internal static Dictionary<string, object> DialogueRespondCore(Dictionary<string, object> payload)
         {
-            payload = payload ?? TestDict();
-            return DialogueService.RunDialogueWithRetryGate(payload, () => DialogueRespondCoreOnce(payload));
+            WorldSimulationService.TakePartyAgencySendClaim(payload);
+            return DialogueRespondCore(payload, null);
         }
 
-        private static Dictionary<string, object> DialogueRespondCoreOnce(Dictionary<string, object> payload)
+        private static Dictionary<string, object> DialogueRespondCore(Dictionary<string, object> payload,
+            WorldSimulationService.PartyAgencySendOrigin sendOrigin)
+        {
+            payload = payload ?? TestDict();
+            return DialogueService.RunDialogueWithRetryGate(payload, () => DialogueRespondCoreOnce(payload, sendOrigin));
+        }
+
+        private static Dictionary<string, object> DialogueRespondCoreOnce(Dictionary<string, object> payload,
+            WorldSimulationService.PartyAgencySendOrigin sendOrigin)
         {
             Stopwatch totalTimer = Stopwatch.StartNew();
             Stopwatch phaseTimer = new Stopwatch();
@@ -741,6 +752,7 @@ namespace ReignBetaServer
                 Location = FirstNonEmpty(ReadFirstString(payload, "locationId", "currentSettlementId", "settlementId"), ReadFirstString(profile, "currentSettlementId", "settlementId")),
                 EventId = decisionId, EventType = "dialogue_turn", PlayerText = playerText, Reply = reply, Timestamp = ts,
                 Generation = DialogueService._playerActionGeneration, Payload = payload, Motive = motiveDecision, Profile = profile,
+                PartyAgencySend = sendOrigin,
                 Characteristics = characteristics, Parsed = parsed, Memories = memoryWrites, Beliefs = beliefWrites,
                 Relationships = relationshipUpdates, Obligations = obligationWrites, Comprehensions = comprehensionWrites,
                 Continuity = actionAcceptanceCooperation ? null : ReadDictionaryList(parsed, "continuityWrites"),

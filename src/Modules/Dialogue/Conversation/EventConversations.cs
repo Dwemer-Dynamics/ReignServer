@@ -166,11 +166,20 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> SocialEventRespond(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            DialogueService.BeginSinglePassConversation(payload);
-            return DialogueService.RunPlayerActionTurn(payload, () => LlmProviderService.RunCodexConversationScope(payload, () => SocialEventRespondCore(payload)));
+            WorldSimulationService.TakePartyAgencySendClaim(payload);
+            return SocialEventRespond(payload, null);
         }
 
-        private static Dictionary<string, object> SocialEventRespondCore(Dictionary<string, object> payload)
+        private static Dictionary<string, object> SocialEventRespond(Dictionary<string, object> payload,
+            WorldSimulationService.PartyAgencySendOrigin sendOrigin)
+        {
+            DialogueService.BeginSinglePassConversation(payload);
+            return DialogueService.RunPlayerActionTurn(payload, () => LlmProviderService.RunCodexConversationScope(payload,
+                () => SocialEventRespondCore(payload, sendOrigin)));
+        }
+
+        private static Dictionary<string, object> SocialEventRespondCore(Dictionary<string, object> payload,
+            WorldSimulationService.PartyAgencySendOrigin sendOrigin)
         {
             Stopwatch totalTimer = Stopwatch.StartNew();
             Stopwatch phaseTimer = new Stopwatch();
@@ -647,6 +656,7 @@ namespace ReignBetaServer
                 PublishIntroductions = !agencyVisibleFailure && participation != "quiet",
                 SceneMode = ReadString(payload, "mode", "social_event"),
                 GroupConversation = partyChatTurn, PrivateWhisper = privatePlayerInputForSpeaker,
+                PartyAgencySend = partyChatTurn ? sendOrigin : null,
                 CollectGroupHistoryObservation = !approachOpening && !recallOnlyTurn };
             Dictionary<string, object> conversationExchange = DialogueService.PublishAcceptedConversationUnit(acceptedUnit,
                 accept => partyChatTurn
@@ -912,6 +922,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> PartyChatRespond(Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
+            var claim = WorldSimulationService.TakePartyAgencySendClaim(payload);
             var floorResult = DialogueService.ApplyGroupConversationFloorToSpeaker(payload);
             if (floorResult != null) return floorResult;
             bool familyChambers = ReadBool(payload, "familyChambers", false);
@@ -982,7 +993,9 @@ namespace ReignBetaServer
                     ReadString(payload, "campaignId", "default"), ReadString(payload, "speakerHeroStringId", ""), partyVisitorContext);
             ApplyCastleChatMode(payload, castlePrompt);
 
-            Dictionary<string, object> response = SocialEventRespond(payload);
+            var sendOrigin = string.IsNullOrWhiteSpace(castlePrompt)
+                ? WorldSimulationService.AdmitPartyAgencySendOrigin(payload, "party_chat", claim) : null;
+            Dictionary<string, object> response = SocialEventRespond(payload, sendOrigin);
             response["mode"] = string.IsNullOrWhiteSpace(castlePrompt) ? "party_chat" : "castle_chat";
             if (familyChambers && ReadBool(response, "ok", false)) CourtService.ProcessFamilyReconciliationReply(payload, response);
             return response;

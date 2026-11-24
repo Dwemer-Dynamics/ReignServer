@@ -340,6 +340,7 @@ namespace ReignBetaServer
             command.Remove("executionEvidence");
             command.Remove("executionObservation");
             command.Remove("executionStartIdentity");
+            command.Remove("partyAgencyAcceptedSendExecution");
             if (mode.Equals("social_balance", StringComparison.OrdinalIgnoreCase))
             {
                 Dictionary<string, object> enrollment = ReadDictionary(input, "enrollment");

@@ -18,6 +18,7 @@ namespace ReignBetaServer
         internal sealed class AcceptedConversationUnit
         {
             internal string Campaign, Hero, Player, Location, EventId, EventType, PlayerText, Reply, Generation;
+            internal WorldSimulationService.PartyAgencySendOrigin PartyAgencySend;
             internal long Timestamp;
             internal bool CommitEffects = true, RetrievalEligible = true, GroupConversation, PrivateWhisper;
             internal bool DelimitedSpeechOnly, CollectGroupHistoryObservation;
@@ -57,6 +58,14 @@ namespace ReignBetaServer
                 throw new InvalidOperationException("The final response changed after its grounding check; the original contribution remains saved.");
             if (!IsSinglePassConversation(unit.Payload) && RelationshipsService.ApproachOpeningViolations(finalOpening, unit.Payload).Count > 0)
                 throw new InvalidOperationException("The final spoken approach no longer matches its saved opening evidence.");
+            var sendOrigin = unit.PartyAgencySend;
+            string acceptedMode = unit.EventType == "dialogue_turn" ? "individual_chat"
+                : unit.EventType == "party_chat_turn" && unit.GroupConversation ? "party_chat" : "";
+            bool observedSend = sendOrigin != null && sendOrigin.CampaignId == unit.Campaign
+                && sendOrigin.Mode == acceptedMode && sendOrigin.SpeakerId == unit.Hero
+                && sendOrigin.CorrelationId == ReadString(unit.Payload, "correlationId", "")
+                && sendOrigin.PlayerContributionSha256 == ConversationExactTextHash(unit.PlayerText ?? "")
+                && WorldSimulationService.IsCurrentPartyAgencySendOrigin(sendOrigin);
             lock (RelationshipsService.CampaignRelationshipWriteLock(unit.Campaign))
             {
                 using (var setup = ReignDatabase.OpenCampaignConnection(unit.Campaign)) EnsureAcceptedConversationUnitSchema(setup);
@@ -170,6 +179,12 @@ namespace ReignBetaServer
                         "sourceIds", ReadStringList(source, "turnIds").Concat(ReadStringList(privateExchange, "turnIds")).ToArray(),
                         "effectPayload", TestDict("conversationAgencyReceipt", ReadDictionary(effectPayload, "conversationAgencyReceipt"),
                             "intoxicationReceipt", ReadDictionary(effectPayload, "intoxicationReceipt")));
+                    if (observedSend && !suppressReplyEffects && !string.IsNullOrWhiteSpace(unit.Reply)
+                        && sourceRows.Concat(ReadStringList(privateExchange, "turnIds")
+                            .SelectMany(id => DialogueStore.SelectConversationTurns6(connection, TestDict("id", id))))
+                            .Any(row => ReadString(row, "role", "") == "npc" && ReadString(row, "speaker_id", "") == unit.Hero
+                                && ReadString(row, "text", "") == unit.Reply))
+                        receipt[WorldSimulationService.PartyAgencySendOriginField] = sendOrigin.AcceptedReceipt(unit.EventId, hash);
                     boundary?.Invoke("before_unit_receipt");
                     if (unit.DelimitedSpeechOnly) receipt["outputContract"] = OllamaDelimitedSpeechContract;
                     receipt["politicalReflection"] = CharactersService.AcceptedPoliticalReflection(unit, suppressReplyEffects);

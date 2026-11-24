@@ -100,6 +100,99 @@ namespace ReignBetaServer
                 "Only a full report for a guarded enrollment exposes the server-recorded start identity.");
         }
 
+        private static void AddPartyAgencySendAuthorityChecks(Action<string, bool, string> add)
+        {
+            const string process = "f0c845c1a0134b49baa0218998fa6998";
+            const string lease = "66fe555aaa9d47bf95ccfa0211b237357";
+            const string campaign = "send-campaign";
+            const string runId = "send-run";
+            const string game = "send-game";
+            const string speaker = "fixture-npc";
+            var wire = TestDict("schemaVersion", 1, "runId", runId, "commandId", "send-command",
+                "gameInstanceId", game, "clientProcessInstanceId", process, "executionLeaseId", lease,
+                "retryGeneration", 0);
+            var payload = TestDict("campaignId", campaign, "heroStringId", speaker,
+                "dialogueAuditRunId", runId, "correlationId", "live-send-command",
+                "playerText", "Original turn", PartyAgencySendOriginField, wire);
+            var claim = TakePartyAgencySendClaim(payload);
+            var duplicate = TestDict(PartyAgencySendOriginField, wire, "PARTYAGENCYSENDORIGIN", wire);
+            bool clearedDuplicates = TakePartyAgencySendClaim(duplicate) == null && duplicate.Count == 0;
+            var coercion = TestDict(PartyAgencySendOriginField, new Dictionary<string, object>(wire) { ["retryGeneration"] = "0" });
+            add("party_agency_send_claim_is_strict_and_removed", claim != null
+                && !payload.ContainsKey(PartyAgencySendOriginField) && clearedDuplicates
+                && TakePartyAgencySendClaim(coercion) == null && coercion.Count == 0,
+                "Only a versioned typed claim survives parsing, and no raw claim reaches dialogue processing.");
+
+            var observed = TestDict("campaignId", campaign, "gameInstanceId", game, "runId", runId,
+                "commandId", "send-command", "leaseId", lease, "clientProcessInstanceId", process,
+                "executionRetryGeneration", 0);
+            var openObservation = new Dictionary<string, object>(observed) { ["commandId"] = "open-command" };
+            var openResult = TestDict("runId", runId, "mode", "individual_chat", "targets", new[] { TestDict("heroId", speaker) });
+            var open = TestDict("commandId", "open-command", "operation", "open", "mode", "individual_chat",
+                "status", "completed", "executionEvidence", TestDict("status", "pending_artifact_review",
+                    "executionObservation", openObservation), "result", openResult);
+            var send = TestDict("campaignId", campaign, "runId", runId, "gameInstanceId", game,
+                "commandId", "send-command", "operation", "send", "mode", "individual_chat", "leaseId", lease,
+                "status", "accepted", "text", "Original turn", "issuedExecutionObservations", new[] { observed },
+                "partyAgencyAcceptedSendExecution", PartyAgencySendAck(observed));
+            var run = TestDict("campaignId", campaign, "runId", runId, "gameInstanceId", game, "status", "running",
+                "mode", "party_agency", "executionObservationVersion", 1,
+                "enrollment", TestDict("campaignId", campaign, "campaignTestRunId", "owned-campaign-test",
+                    "certificationRunId", "party-agency-test"), "commands", new[] { open, send });
+            var original = BindPartyAgencySendOrigin(run, payload, "individual_chat", claim);
+            var exported = original?.AcceptedReceipt("accepted-turn", "final-response-hash");
+            add("party_agency_send_binds_accepted_scope", original != null && original.SpeakerId == speaker
+                && ReadString(exported, "status", "") == "execution_observed"
+                && ReadString(exported, "acceptedResponseHash", "") == "final-response-hash"
+                && !Json.Serialize(exported).Contains("Original turn"),
+                "The receipt binds only the original send identity and accepted response digest.");
+
+            bool Reject(PartyAgencySendClaim attempt) =>
+                BindPartyAgencySendOrigin(run, payload, "individual_chat", attempt) == null;
+            var ack = send["partyAgencyAcceptedSendExecution"];
+            send.Remove("partyAgencyAcceptedSendExecution");
+            bool needsAck = Reject(claim);
+            send["partyAgencyAcceptedSendExecution"] = ack;
+            send["status"] = "leased";
+            bool needsAccepted = Reject(claim);
+            send["status"] = "running";
+            send["executionRetryGeneration"] = 1;
+            bool stale = Reject(claim);
+            send["executionRetryGeneration"] = 0;
+            add("party_agency_send_requires_exact_ack_scope", needsAck && needsAccepted && stale
+                && Reject(claim with { ClientProcessInstanceId = "other-process" })
+                && Reject(claim with { ExecutionLeaseId = "other-lease" })
+                && Reject(claim with { GameInstanceId = "other-load" })
+                && BindPartyAgencySendOrigin(run, payload, "individual_chat", claim) != null,
+                "Unaccepted, superseded, replacement lease, wrong load and wrong process claims confer no authority.");
+
+            var fakeSpeaker = new Dictionary<string, object>(payload) { ["heroStringId"] = "unopened-npc" };
+            var wrongOrigin = new Dictionary<string, object>(payload) { ["correlationId"] = "another-command" };
+            var contextual = new Dictionary<string, object>(payload) { ["playerText"] = "Additional words. Original turn" };
+            bool exactText = BindPartyAgencySendOrigin(run, contextual, "individual_chat", claim) == null;
+            send["contextualPartyAgencyResponse"] = true;
+            bool allowsContext = BindPartyAgencySendOrigin(run, contextual, "individual_chat", claim) != null;
+            add("party_agency_send_binds_actual_individual_turn", exactText && allowsContext
+                && BindPartyAgencySendOrigin(run, fakeSpeaker, "individual_chat", claim) == null
+                && BindPartyAgencySendOrigin(run, wrongOrigin, "individual_chat", claim) == null,
+                "The actual individual turn must be the planned text or its authorized contextual form, with the exact opened speaker and correlation.");
+
+            open["mode"] = openResult["mode"] = send["mode"] = "party_chat";
+            var group = TestDict("campaignId", campaign, "speakerHeroStringId", speaker, "auditRunId", runId,
+                "mode", "party_chat", "partySpeakerIndex", 0, "groupTurnPlan", TestDict("responseOrder", new[] { speaker }),
+                "activeHeroIds", new[] { speaker }, "correlationId", "live-send-command-s1-t1-npc-" + speaker,
+                "playerText", "Original turn");
+            bool partyBound = BindPartyAgencySendOrigin(run, group, "party_chat", claim) != null;
+            group["partySpeakerIndex"] = -1;
+            bool noFloor = BindPartyAgencySendOrigin(run, group, "party_chat", claim) == null;
+            group["partySpeakerIndex"] = 0;
+            group["correlationId"] = "live-send-command-s1-t1-npc-other";
+            bool bindsSpeaker = BindPartyAgencySendOrigin(run, group, "party_chat", claim) == null;
+            add("party_agency_send_binds_each_party_speaker", partyBound && noFloor && bindsSpeaker
+                && BindPartyAgencySendOrigin(run, payload, "individual_chat", claim) == null,
+                "Party authority requires the admitted mode, server floor and exact speaker-specific correlation.");
+        }
+
         internal static List<Dictionary<string, object>> RunLiveInteractionTestSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -116,6 +209,7 @@ namespace ReignBetaServer
             Dictionary<string, object> wrongVersion = NormalizeLiveTestCommand(fakeRun, new Dictionary<string, object> { ["schemaVersion"] = 999, ["operation"] = "open" });
             add("command_schema", first != null && ReadString(first, "status", "") == "queued" && invalid == null && wrongVersion == null, "Command normalization requires the supported schema, valid operations, and non-empty dialogue text.");
             AddLiveTestExecutionObservationChecks(add);
+            AddPartyAgencySendAuthorityChecks(add);
             var economyRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "passive_world" };
             foreach (string profile in new[] { "civilian_crew_probe", "production_probe", "relief_probe", "market_food_probe", "household_probe" })
             {
