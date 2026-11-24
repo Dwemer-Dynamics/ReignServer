@@ -55,6 +55,9 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             Dictionary<string, object> pressure = DiplomacyService.EvaluatePoliticalPressure(payload);
+            string pressureStatus = ReadString(pressure, "status", "");
+            if (pressureStatus is "scope_changed" or "invalid_day" or "invalid_snapshot")
+                return pressure;
             Dictionary<string, object> conflicts = EvaluateClanConflicts(payload);
             Dictionary<string, object> result = new Dictionary<string, object>(pressure,
                 StringComparer.OrdinalIgnoreCase);

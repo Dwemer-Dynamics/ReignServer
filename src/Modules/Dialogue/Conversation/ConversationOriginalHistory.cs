@@ -103,15 +103,29 @@ namespace ReignBetaServer
                     "inputSourceId", ReadString(source, "turn_id", ""), "sourceIntegrity", OriginalConversationSourceIntegrity(source), "deliveryStatus", "submitted"));
             // Preserve historical display records that predate canonical persistence.
             // They remain explicitly unverified and are never an NPC retrieval source.
+            var textKeys = new HashSet<(string Role, string Text)>();
+            var exchangeKeys = new HashSet<(string Role, string Exchange)>();
+            void IndexLine(Dictionary<string, object> line)
+            {
+                string role = ReadString(line, "role", "");
+                textKeys.Add((role, ReadString(line, "text", "")));
+                string exchange = ReadString(line, "exchangeId", "");
+                if (exchange.Length > 0) exchangeKeys.Add((role, exchange));
+            }
+
+            foreach (var line in lines) IndexLine(line);
             foreach (var old in legacy ?? new List<Dictionary<string, object>>())
             {
                 if (ReadString(old, "timelineId", timeline) != timeline) continue;
                 string exchange = ReadFirstString(old, "exchangeId", "turnId", "eventId"), role = ReadString(old, "role", "");
-                if (lines.Any(line => ReadString(line, "role", "") == role &&
-                    (exchange.Length > 0 && ReadString(line, "exchangeId", "") == exchange
-                    || ReadString(line, "text", "") == ReadString(old, "text", "")))) continue;
+                if ((exchange.Length > 0 && exchangeKeys.Contains((role, exchange)))
+                    || textKeys.Contains((role, ReadString(old, "text", "")))) continue;
                 if (ReadDouble(old, "worldDay", 0d) > historyAccess.WorldDay) continue;
-                var retained = CloneDictionary(old); retained["sourceIntegrity"] = "legacy_original_unverified"; lines.Add(retained);
+                var retained = CloneDictionary(old);
+                retained["sourceIntegrity"] = "legacy_original_unverified";
+                lines.Add(retained);
+                // The incoming fallback alias is not necessarily the retained row's exchangeId.
+                IndexLine(retained);
             }
             return lines.OrderBy(line => ReadLong(line, "ts", 0)).TakeLast(limit).ToList();
         }

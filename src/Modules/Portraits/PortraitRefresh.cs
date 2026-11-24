@@ -2,18 +2,89 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using AIPortraits;
 
 namespace ReignBetaServer
 {
     internal static partial class PortraitsService
     {
-        private static void ReplaceRefreshedCharacterOverride(string campaign, string hero, byte[] image, Dictionary<string, object> receipt)
+        private const string PortraitRefreshPublicationKey = "refreshPublication";
+
+        private sealed record PortraitRefreshBaseline(string Directory, string Master, string Custom,
+            string MasterMetadata, string Outfit, string OutfitConfirmation, string CustomReceipt);
+
+        private static PortraitRefreshBaseline CapturePortraitRefreshBaseline(string directory)
         {
-            if (string.IsNullOrWhiteSpace(hero)) throw new InvalidDataException("A character identity is required.");
-            ReplaceRefreshedCharacterOverrideInDirectory(Path.GetDirectoryName(CampaignFileService.CharacterFile(campaign, hero, "portraits", "custom.png")),
-                image, receipt, WriteSharedPortraitAtomic);
+            lock (Program.FileLock)
+            {
+                return new PortraitRefreshBaseline(directory, PortraitRefreshFileDigest(directory, "portrait.png"),
+                    PortraitRefreshFileDigest(directory, "custom.png"), PortraitRefreshFileDigest(directory, "portrait.json"),
+                    PortraitRefreshFileDigest(directory, "outfit.json"), PortraitRefreshFileDigest(directory, OutfitConfirmationFileName),
+                    PortraitRefreshFileDigest(directory, OutfitPortraitReceiptFileName));
+            }
         }
+
+        private static string PortraitRefreshFileDigest(string directory, string name)
+        {
+            try
+            {
+                using var file = File.OpenRead(Path.Combine(directory, name));
+                return Convert.ToHexString(SHA256.HashData(file));
+            }
+            catch (FileNotFoundException) { return null; }
+            catch (DirectoryNotFoundException) { return null; }
+        }
+
+        private static string PublishPortraitRefresh(PortraitRefreshBaseline baseline, byte[] image,
+            Dictionary<string, object> receipt, Func<Dictionary<string, object>, string> storePortrait)
+        {
+            lock (Program.FileLock)
+            {
+                PersistenceService.RequireSaveSyncPathAvailable(baseline.Directory);
+                // Check the current campaign bytes before either the fallback master or the custom pair can change.
+                // The v2 marker also distinguishes a newer outfit confirmation with identical image bytes.
+                if (CapturePortraitRefreshBaseline(baseline.Directory) != baseline)
+                    throw new InvalidOperationException("The portrait or outfit changed while the refresh was running. Start a new refresh.");
+
+                // Record the completed bytes before writing. An interrupted custom replacement cannot pass recovery.
+                string master = Convert.ToHexString(SHA256.HashData(image));
+                var publication = PortraitRefreshPublication(master,
+                    baseline.Custom == null ? null : master,
+                    baseline.Custom == null ? baseline.CustomReceipt : Convert.ToHexString(SHA256.HashData(PortraitRefreshReceiptBytes(receipt))),
+                    baseline.Outfit, baseline.OutfitConfirmation);
+                string storedPath = storePortrait(publication);
+                ReplaceRefreshedCharacterOverrideInDirectory(baseline.Directory, image, receipt, WriteSharedPortraitAtomic);
+                return storedPath;
+            }
+        }
+
+        private static Dictionary<string, object> PortraitRefreshPublication(string master, string custom,
+            string customReceipt, string outfit, string marker)
+            => new Dictionary<string, object>
+            {
+                ["schema"] = "reign-portrait-refresh-publication-v1",
+                ["masterSha256"] = master,
+                ["customSha256"] = custom ?? "",
+                ["customReceiptSha256"] = customReceipt ?? "",
+                ["outfitSha256"] = outfit ?? "",
+                ["outfitConfirmationSha256"] = marker ?? ""
+            };
+
+        private static bool PortraitRefreshPublicationMatches(string directory, byte[] master, object witness)
+        {
+            if (witness is not Dictionary<string, object> expected) return false;
+            var actual = PortraitRefreshPublication(Convert.ToHexString(SHA256.HashData(master)),
+                PortraitRefreshFileDigest(directory, "custom.png"), PortraitRefreshFileDigest(directory, OutfitPortraitReceiptFileName),
+                PortraitRefreshFileDigest(directory, "outfit.json"), PortraitRefreshFileDigest(directory, OutfitConfirmationFileName));
+            return actual.Count == expected.Count && actual.All(pair =>
+                expected.TryGetValue(pair.Key, out object value) && value is string text && text == (string)pair.Value);
+        }
+
+        private static byte[] PortraitRefreshReceiptBytes(Dictionary<string, object> receipt)
+            => Encoding.UTF8.GetBytes(Json.Serialize(receipt));
 
         private static void ReplaceRefreshedCharacterOverrideInDirectory(string directory, byte[] image,
             Dictionary<string, object> receipt, Action<string, byte[]> write)
@@ -24,7 +95,7 @@ namespace ReignBetaServer
                 if (!File.Exists(custom)) return;
                 CommitOutfitFiles(new Dictionary<string, byte[]> {
                     [custom] = image,
-                    [Path.Combine(directory, OutfitPortraitReceiptFileName)] = System.Text.Encoding.UTF8.GetBytes(Json.Serialize(receipt))
+                    [Path.Combine(directory, OutfitPortraitReceiptFileName)] = PortraitRefreshReceiptBytes(receipt)
                 }, write);
             }
         }

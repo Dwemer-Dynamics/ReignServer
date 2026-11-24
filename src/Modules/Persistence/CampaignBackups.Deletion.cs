@@ -503,6 +503,7 @@ namespace ReignBetaServer
                 catch { }
                 return 1;
             }
+            using var ownership = PortraitsService.AcquireOutfitRuntimeOwnership(Program.DataDir);
             return CompleteDeleteAllCampaignData();
         }
 

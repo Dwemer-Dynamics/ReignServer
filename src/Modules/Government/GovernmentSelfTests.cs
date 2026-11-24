@@ -18,6 +18,37 @@ namespace ReignBetaServer
                     ["summary"] = summary, ["evidence"] = evidence
                 });
 
+            Dictionary<string, object> SpeakerPayload(params Dictionary<string, object>[] resolutions) => new()
+            {
+                ["speaker"] = new Dictionary<string, object> { ["heroStringId"] = "speaker_fixture" },
+                ["party"] = new Dictionary<string, object> { ["partyId"] = "party_fixture", ["name"] = "Commons" },
+                ["resolutions"] = resolutions
+            };
+            Dictionary<string, object> NamedConstructionRow(params string[] routes) => new()
+            {
+                ["constructionAuthority"] = true, ["title"] = "Construction priorities", ["targetName"] = "Fixture Town",
+                ["availableRoutes"] = routes, ["firstRoute"] = "OBSOLETE_PROJECT", ["secondRoute"] = "OBSOLETE_PAYMENT"
+            };
+            var treasuryStatement = GovernmentSpeakerStatement(SpeakerPayload(NamedConstructionRow("Fund local needs")));
+            var boundedStatement = GovernmentSpeakerStatement(SpeakerPayload(
+                NamedConstructionRow("Prioritize Orchard Granary", "Fund local needs", "UNLISTED_THIRD_ROUTE")));
+            var emptyStatement = GovernmentSpeakerStatement(SpeakerPayload(NamedConstructionRow()));
+            string fundedReply = ReadString(treasuryStatement, "reply", "");
+            string boundedReply = ReadString(boundedStatement, "reply", "");
+            string emptyReply = ReadString(emptyStatement, "reply", "");
+            add("government.named_construction_speaker_uses_live_routes",
+                new[] { treasuryStatement, boundedStatement, emptyStatement }.All(reply => ReadBool(reply, "ok", false)
+                    && ReadInt(reply, "providerCallCount", -1) == 0 && ReadString(reply, "partyId", "") == "party_fixture"
+                    && ReadString(reply, "speakerHeroStringId", "") == "speaker_fixture")
+                && fundedReply.Contains("Fund local needs", StringComparison.Ordinal)
+                && !fundedReply.Contains("Orchard Granary", StringComparison.Ordinal)
+                && boundedReply.Contains("Prioritize Orchard Granary", StringComparison.Ordinal)
+                && !boundedReply.Contains("UNLISTED_THIRD_ROUTE", StringComparison.Ordinal)
+                && emptyReply.Contains("no available remedy", StringComparison.Ordinal)
+                && new[] { fundedReply, boundedReply, emptyReply }.All(reply => !reply.Contains("OBSOLETE_", StringComparison.Ordinal)),
+                "Construction speaker text uses the supplied live routes, ignores legacy routes and calls no provider.",
+                new { fundedReply, boundedReply, emptyReply });
+
             int[] levels = new int[6];
             int[] parties = new int[5];
             var blueprints = new Dictionary<string, ReignGovernmentPartyBlueprint>(StringComparer.OrdinalIgnoreCase);

@@ -357,6 +357,30 @@ namespace ReignBetaServer
                 var history = ReadOriginalConversationHistory(campaign, payload, "npc", "grounding_session", 100, new());
                 Check("accepted_history_exact_original_not_projection", history.Count == 1 && ReadString(history[0], "text", "") == original
                     && ReadString(history[0], "sourceIntegrity", "") == "original_verified");
+                long tiedTs = ReadLong(history[0], "ts", 0);
+                string acceptedExchange = ReadString(history[0], "exchangeId", "");
+                var legacy = new List<Dictionary<string, object>>
+                {
+                    TestDict("role", "player", "text", original, "ts", tiedTs),
+                    TestDict("role", "player", "text", "Conflicting exchange", "turnId", acceptedExchange, "ts", tiedTs),
+                    TestDict("role", "player", "text", "First legacy line", "turnId", "fallback", "ts", tiedTs),
+                    TestDict("role", "player", "text", "Second legacy line", "eventId", "fallback", "ts", tiedTs),
+                    TestDict("role", "npc", "text", "First legacy line", "exchangeId", "projected", "timelineId", "foreign", "ts", tiedTs),
+                    TestDict("role", "npc", "text", "First legacy line", "exchangeId", "projected", "worldDay", 21, "ts", tiedTs),
+                    TestDict("role", "npc", "text", "First legacy line", "exchangeId", "projected", "ts", tiedTs),
+                    TestDict("role", "npc", "text", "Suppressed by projected exchange", "eventId", "projected", "ts", tiedTs),
+                    TestDict("role", "npc", "text", "first legacy line", "ts", tiedTs)
+                };
+                var displayHistory = ReadOriginalConversationHistory(campaign, payload, "npc", "grounding_session", 100, legacy);
+                Check("legacy_history_merge_keeps_ordinal_text_and_projected_exchange",
+                    displayHistory.Select(row => ReadString(row, "text", "")).SequenceEqual(new[]
+                    { original, "First legacy line", "Second legacy line", "First legacy line", "first legacy line" })
+                    && displayHistory.Skip(1).All(row => ReadString(row, "sourceIntegrity", "") == "legacy_original_unverified")
+                    && legacy.All(row => !row.ContainsKey("sourceIntegrity")));
+                var legacyTail = ReadOriginalConversationHistory(campaign, payload, "npc", "grounding_session", 2, legacy);
+                Check("legacy_history_window_preserves_latest_append_ordinals_at_same_time", legacyTail.Count == 2
+                    && ReadString(legacyTail[0], "role", "") == "npc" && ReadString(legacyTail[0], "text", "") == "First legacy line"
+                    && ReadString(legacyTail[1], "text", "") == "first legacy line");
                 bool mismatch = false;
                 try { var changed = Payload("Different message"); changed["campaignId"] = campaign; AdmitConversationInput(campaign, changed, generation, "npc"); }
                 catch (InvalidOperationException) { mismatch = true; }

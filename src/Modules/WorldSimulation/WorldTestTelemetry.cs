@@ -72,6 +72,14 @@ namespace ReignBetaServer
             string chunkKey,
             Dictionary<string, object> counters)
         {
+            WriteWorldTestCounterSchemaReady(connection, campaignId, timelineId, dayKey, subsystem, chunkKey, counters, null);
+            SignalWorldTestRollupWorker();
+        }
+
+        internal static void WriteWorldTestCounterSchemaReady(ReignDbConnection connection, string campaignId,
+            string timelineId, int dayKey, string subsystem, string chunkKey, Dictionary<string, object> counters,
+            ReignDbTransaction transaction)
+        {
             long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             WorldSimulationStore.UpsertWorldTestChunkCounters(connection, new Dictionary<string, object>
                 {
@@ -82,8 +90,7 @@ namespace ReignBetaServer
                     ["chunk"] = chunkKey ?? string.Empty,
                     ["counters"] = Json.Serialize(counters ?? new Dictionary<string, object>()),
                     ["ts"] = now
-                });
-            SignalWorldTestRollupWorker();
+                }, transaction);
         }
 
         private static void RecordWorldTestEvidence(

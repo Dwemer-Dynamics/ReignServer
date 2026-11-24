@@ -24,9 +24,23 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> GenerateSinglePassConversation(Dictionary<string, object> request,
             Dictionary<string, object> payload, string mode, out bool delimitedSpeechOnly, bool allowQuiet = false,
             Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
+            => GenerateSinglePassConversation(request, payload, mode, null, out delimitedSpeechOnly, out _, allowQuiet, responder);
+
+        internal static Dictionary<string, object> GenerateSinglePassConversation(Dictionary<string, object> request,
+            Dictionary<string, object> payload, string mode, WorldSimulationService.PartyAgencySendOrigin sendOrigin,
+            out bool delimitedSpeechOnly, out LlmProviderService.ServingProviderAttempt servingAttempt,
+            bool allowQuiet = false, Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
         {
             BeginSinglePassConversation(payload);
-            return PrepareSinglePassConversationResponse((responder ?? LlmProviderService.ChatWithLlm)(request), mode, out delimitedSpeechOnly, allowQuiet);
+            LlmProviderService.ServingProviderAttempt transport = null;
+            bool observedSend = sendOrigin != null && (sendOrigin.Mode == "individual_chat" && mode == "dialogue"
+                || sendOrigin.Mode == "party_chat" && mode == "party_chat");
+            var raw = responder != null ? responder(request)
+                : observedSend ? LlmProviderService.ChatWithPartyAgencyServingAttempt(request, out transport)
+                : LlmProviderService.ChatWithLlm(request);
+            var prepared = PrepareSinglePassConversationResponse(raw, mode, out delimitedSpeechOnly, allowQuiet);
+            servingAttempt = ReadBool(prepared, "ok", false) ? transport : null;
+            return prepared;
         }
 
         // Decode the one authored answer. No judge, rewrite, missing-metadata

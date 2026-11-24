@@ -32,6 +32,16 @@ namespace ReignBetaServer
         private const string AdditionalObservableActionPattern = @"\b(?:sips?|sipped|drinks?|drank|drinking|pulls?|pulled|swallows?|swallowed|refills?|refilled|pours?|poured|pass(?:es|ed)?|hands?|handed|kiss(?:es|ed)?|hugs?|hugged|embraces?|embraced|caress(?:es|ed)?|eats?|ate|chews?|chewed|leans?|leaned|rests?|rested|lays?|laid|lies|lying|closes?|closed|opens?|opened|draws?|drew|shakes?|shook|removes?|removed|unfastens?|unfastened|wraps?|wrapped|press(?:es|ed)?|knocks?|knocked|runs?|ran|kneels?|knelt|writes?|wrote|reads?|read|points?|pointed|waits?|waited|pauses?|paused|shrugs?|shrugged|laughs?|laughed|breathes?|breathed|blush(?:es|ed)?|flinch(?:es|ed)?|chuckles?|chuckled|giggles?|giggled|grins?|grinned|answers?|answered|replies|replied|reply)\b";
         private const string ProgressiveObservableActionPattern = @"\b(?:watch(?:es|ed|ing)?|walking|standing|sitting|smiling|nodding|glancing|looking|turning|holding|offering|reaching|taking|giving|putting|placing|stepping|shifting|straightening|studying|tilting|frowning|raising|lowering|dropping|moving|saying|asking|whispering|sipping|pulling|swallowing|refilling|pouring|passing|handing|kissing|hugging|embracing|caressing|eating|chewing|leaning|resting|closing|opening|drawing|shaking|removing|unfastening|wrapping|pressing|knocking|running|kneeling|writing|reading|pointing|waiting|pausing|shrugging|breathing|blushing|flinching|chuckling|giggling|grinning|answering|replying)\b";
 
+        // These standalone clauses assert an internal state without narrating an outward act.
+        // Leave mixed clauses and speech attribution to their existing source handling.
+        private static bool IsStandaloneObserverInference(string text)
+        {
+            const string inferredState = @"^\s*(?:(?:I|he|she|we|they|the speaker)\s+regret(?:s|ted)?\s+(?:ever|having|that)\b|(?:my|his|her|our|their)\s+(?:eyes?|hands?|face|voice|expression)\s+betray(?:s|ed)?\s+(?:guilt|remorse|regret|shame)\b)";
+            const string separateActOrSpeech = @"[,;:—–'‘’""“”]|\b(?:and|but|while|as|when|then|before|after|because|aloud|audibly|verbally|says?|said|tells?|told|admits?|admitted|whispers?|whispered|replies|replied)\b";
+            const RegexOptions options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+            return Regex.IsMatch(text, inferredState, options) && !Regex.IsMatch(text, separateActOrSpeech, options);
+        }
+
         private static bool HasObservableMovementNarration(string text, out bool unperformedMovement)
         {
             // Preserve a directly narrated arrival/return, including its original
@@ -90,6 +100,7 @@ namespace ReignBetaServer
                         string text = sentence.Value;
                         if (Regex.IsMatch(text.Trim(), @"^(?:The player whispers privately(?: to [^.]+)?|The speaker replies privately to the player|A private reply was exchanged)[.!]?$", RegexOptions.IgnoreCase))
                         { Keep(action.Groups[1].Index + sentence.Index, text.Length, "observable_narration", true); continue; }
+                        if (IsStandaloneObserverInference(text)) continue;
                         var mental = Regex.Match(text, PrivateNarrativePattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
                         int count = text.Length;
                         if (mental.Success)

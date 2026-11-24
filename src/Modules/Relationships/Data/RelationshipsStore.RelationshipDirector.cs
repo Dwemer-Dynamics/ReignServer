@@ -684,10 +684,12 @@ conception_day,due_day,status,payload_json,created_ts,updated_ts) VALUES($id,$mo
             return ReignDatabase.QuerySql(connection, "SELECT * FROM conceptions WHERE conception_id=$id LIMIT 1;", parameters, transaction);
         }
 
-        internal static void UpsertParentage(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static bool TryInsertBirthParentage(ReignDbConnection connection, Dictionary<string, object> parameters,
+            ReignDbTransaction transaction)
         {
-            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO parentage(child_id,mother_id,biological_father_id,legal_father_id,is_illegitimate,revealed,bastard_surname,conception_id,payload_json,updated_ts)
-VALUES($child,$mother,$bio,$legal,$illegitimate,$revealed,'',$conception,$payload,$ts);", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"INSERT INTO parentage(child_id,mother_id,biological_father_id,legal_father_id,is_illegitimate,revealed,bastard_surname,conception_id,payload_json,updated_ts)
+VALUES($child,$mother,$bio,$legal,$illegitimate,$revealed,'',$conception,$payload,$ts)
+ON CONFLICT(child_id) DO NOTHING RETURNING child_id;", parameters, transaction).Count == 1;
         }
 
         internal static void InsertDirectorOutbox(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
@@ -787,12 +789,16 @@ WHERE action_type<>'native_relation'
       WHERE commitment.marriage_action_id=
           relationship_director_actions.director_action_id
         AND commitment.status='awaiting_conception'))
-ORDER BY world_day,created_ts LIMIT 50;", parameters, transaction);
+ORDER BY world_day,created_ts,director_action_id LIMIT 50 OFFSET $offset;", parameters, transaction);
         }
 
-        internal static void UpdateRelationshipDirectorActions11(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static bool TryClaimRelationshipDirectorAction(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
         {
-            ReignDatabase.ExecuteSql(connection, "UPDATE relationship_director_actions SET status='claimed',claimed_ts=$ts WHERE director_action_id=$id;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"UPDATE relationship_director_actions
+SET status='claimed',claimed_ts=$ts WHERE director_action_id=$id
+AND (status='pending' OR (status='claimed' AND claimed_ts<$stale)) RETURNING director_action_id;",
+                parameters, transaction).Count == 1;
         }
     }
 }

@@ -89,7 +89,141 @@ namespace ReignBetaServer
                     return rejected && File.ReadAllBytes(custom)[0] == 1 && !File.Exists(Path.Combine(root, OutfitPortraitReceiptFileName));
                 } finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
             });
+            Check("stale_completion_preserves_first_outfit_commit", () => VerifyStalePortraitRefreshAfterOutfit(false));
+            Check("stale_completion_preserves_same_image_outfit_commit", () => VerifyStalePortraitRefreshAfterOutfit(true));
+            Check("unchanged_completion_publishes_existing_outputs", VerifyCurrentPortraitRefreshPublication);
+            Check("recovery_requires_current_publication_witness", VerifyPortraitRefreshRecoveryWitness);
             return rows;
         }
+
+        private static bool VerifyStalePortraitRefreshAfterOutfit(bool sameImage)
+            => WithOutfitConfirmationFixture((root, first, _) =>
+            {
+                string directory = Path.Combine(root, "portraits");
+                if (sameImage) CommitOutfitInDirectory(first, root);
+                var baseline = CapturePortraitRefreshBaseline(directory);
+                var committed = sameImage ? MakeLaterOutfitFixture(first) : first;
+                if (sameImage)
+                {
+                    committed.After = first.After;
+                    committed.PortraitReceipt = first.PortraitReceipt;
+                }
+
+                CommitOutfitInDirectory(committed, root);
+                var current = CapturePortraitRefreshBaseline(directory);
+                var expected = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+                    .ToDictionary(path => path, File.ReadAllBytes);
+                bool storeCalled = false, rejected = false;
+                try
+                {
+                    byte[] stale = { 8, 9 };
+                    PublishPortraitRefresh(baseline, stale, OutfitContractReceipt(stale, 768, 1024), publication =>
+                    {
+                        storeCalled = true;
+                        string path = Path.Combine(directory, "portrait.png");
+                        WriteSharedPortraitAtomic(path, stale);
+                        return path;
+                    });
+                }
+                catch (InvalidOperationException error) when (error.Message.Contains("portrait or outfit changed"))
+                {
+                    rejected = true;
+                }
+
+                return rejected && !storeCalled && baseline.OutfitConfirmation != current.OutfitConfirmation
+                    && (!sameImage || (baseline.Custom == current.Custom && baseline.CustomReceipt == current.CustomReceipt))
+                    && Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length == expected.Count
+                    && expected.All(file => File.ReadAllBytes(file.Key).SequenceEqual(file.Value));
+            });
+
+        private static bool VerifyCurrentPortraitRefreshPublication()
+            => WithOutfitConfirmationFixture((root, outfit, _) =>
+            {
+                string directory = Path.Combine(root, "portraits");
+                string masterPath = Path.Combine(directory, "portrait.png");
+                string customPath = Path.Combine(directory, "custom.png");
+                byte[] image = { 7, 8, 9 };
+                var receipt = OutfitContractReceipt(image, 768, 1024);
+                string Store(Dictionary<string, object> publication)
+                {
+                    WriteSharedPortraitAtomic(masterPath, image);
+                    return masterPath;
+                }
+
+                var initial = CapturePortraitRefreshBaseline(directory);
+                bool regularMaster = PublishPortraitRefresh(initial, image, receipt, Store) == masterPath
+                    && File.ReadAllBytes(masterPath).SequenceEqual(image) && !File.Exists(customPath);
+
+                outfit.StoredSourceHash = Sha256Hex(image);
+                CommitOutfitInDirectory(outfit, root);
+                var before = CapturePortraitRefreshBaseline(directory);
+                var stored = PublishPortraitRefresh(before, image, receipt, Store);
+                var after = CapturePortraitRefreshBaseline(directory);
+                var cropReceipt = CampaignFileService.ReadJsonObject(Path.Combine(directory, OutfitPortraitReceiptFileName));
+                return regularMaster && stored == masterPath && File.ReadAllBytes(customPath).SequenceEqual(image)
+                    && ReadString(ReadDictionary(cropReceipt, "master"), "sha256", "") == Sha256Hex(image)
+                    && before.Outfit == after.Outfit && before.OutfitConfirmation == after.OutfitConfirmation;
+            });
+
+        private static bool VerifyPortraitRefreshRecoveryWitness()
+            => WithOutfitConfirmationFixture((root, outfit, _) =>
+            {
+                CommitOutfitInDirectory(outfit, root);
+                string directory = Path.Combine(root, "portraits");
+                string masterPath = Path.Combine(directory, "portrait.png"), sourcePath = Path.Combine(directory, "source.png"),
+                    promptPath = Path.Combine(directory, "prompt.txt"), metadataPath = Path.Combine(directory, "portrait.json");
+                string operation = Guid.NewGuid().ToString("N");
+                byte[] image = outfit.After;
+                var receipt = OutfitContractReceipt(image, 768, 1024);
+                receipt["portraitRefreshMode"] = "look_again";
+                var metadata = new Dictionary<string, object>
+                {
+                    ["generationOperationId"] = operation,
+                    ["productReceipt"] = receipt
+                };
+                void WriteMetadata() => WriteSharedPortraitAtomic(metadataPath, System.Text.Encoding.UTF8.GetBytes(Json.Serialize(metadata)));
+                Dictionary<string, object> Recover() => BuildStoredPortraitGenerationResponseFromPaths(outfit.Campaign, outfit.Hero,
+                    operation, masterPath, sourcePath, promptPath, metadataPath);
+                bool FailedWithoutProduct()
+                {
+                    var response = Recover();
+                    return !ReadBool(response, "ok", true) && ReadString(response, "generationStatus", "") == "failed"
+                        && !response.ContainsKey("imageBase64");
+                }
+
+                bool withheldDuringPublication = false;
+                PublishPortraitRefresh(CapturePortraitRefreshBaseline(directory), image, receipt, publication =>
+                {
+                    WriteSharedPortraitAtomic(masterPath, image);
+                    WriteSharedPortraitAtomic(sourcePath, image);
+                    WriteSharedPortraitAtomic(promptPath, new byte[] { 65 });
+                    metadata[PortraitRefreshPublicationKey] = publication;
+                    WriteMetadata();
+                    withheldDuringPublication = FailedWithoutProduct();
+                    return masterPath;
+                });
+                var current = Recover();
+                bool currentAccepted = ReadString(current, "generationStatus", "") == "completed"
+                    && ReadString(current, "imageBase64", "") == Convert.ToBase64String(image)
+                    && !current.ContainsKey(PortraitRefreshPublicationKey);
+
+                var later = MakeLaterOutfitFixture(outfit);
+                later.After = image;
+                later.PortraitReceipt = receipt;
+                var before = CapturePortraitRefreshBaseline(directory);
+                CommitOutfitInDirectory(later, root);
+                var after = CapturePortraitRefreshBaseline(directory);
+                bool newerOutfitWithheld = before.Custom == after.Custom && before.CustomReceipt == after.CustomReceipt
+                    && before.OutfitConfirmation != after.OutfitConfirmation && FailedWithoutProduct();
+
+                metadata[PortraitRefreshPublicationKey] = new Dictionary<string, object> { ["schema"] = "unknown" };
+                WriteMetadata();
+                bool unknownWithheld = FailedWithoutProduct();
+
+                metadata.Remove(PortraitRefreshPublicationKey);
+                WriteMetadata();
+                bool legacyAccepted = ReadString(Recover(), "generationStatus", "") == "completed";
+                return withheldDuringPublication && currentAccepted && newerOutfitWithheld && unknownWithheld && legacyAccepted;
+            });
     }
 }

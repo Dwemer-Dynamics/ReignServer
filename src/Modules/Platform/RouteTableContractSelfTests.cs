@@ -387,6 +387,7 @@ namespace ReignBetaServer
             "POST exact Ordinal /portraits/status read",
             "POST exact Ordinal /portraits/request read",
             "POST prefix Ordinal /portraits/outfit/ -",
+            "POST exact Ordinal /portraits/current-product read",
             "POST exact Ordinal /portraits/generate read",
             "POST exact Ordinal /portraits/generate/status read",
             "POST exact Ordinal /castle-chat/scene/generate read",

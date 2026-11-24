@@ -14,6 +14,7 @@ namespace ReignBetaServer
             routes.Post("/tavern-house/scene", request => Program.RunInteractiveRequest(() => PortraitsService.TavernHouseGenerateScene(request.JsonBody)));
             routes.Get("/portraits/vision/models", request => PortraitsService.PortraitVisionModelCatalog(request.Query.TryGetValue("provider", out string visionProvider) ? visionProvider : "Codex"));
             routes.PostPrefix("/portraits/outfit/", StringComparison.Ordinal, request => PortraitsService.OutfitChangeApi(request.JsonBody, request.Path.Substring("/portraits/outfit/".Length)));
+            routes.Post("/portraits/current-product", request => PortraitsService.CampaignPortraitProductApi(request.JsonBody));
             routes.Post("/portraits/generate", request => PortraitsService.PortraitGenerate(request.JsonBody));
             routes.Post("/portraits/generate/status", request => PortraitsService.PortraitGenerationStatus(request.JsonBody));
             routes.Get("/portraits/shared-generation/catalog", request => PortraitsService.SharedPortraitCatalogApi());

@@ -110,6 +110,6 @@ namespace ReignBetaServer
             => new() { ["group"] = "letters", ["rowId"] = id, ["column"] = "status", ["reason"] = reason };
 
         private static string EditorSqlIssueMessage(List<Dictionary<string, object>> issues)
-            => issues.Count == 0 ? "" : " Some letter statuses were skipped because they changed or their edit basis could not be verified.";
+            => issues.Count == 0 ? "" : " Some record edits were skipped because the record changed or its edit basis could not be verified.";
     }
 }

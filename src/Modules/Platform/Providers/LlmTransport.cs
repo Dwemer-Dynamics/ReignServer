@@ -23,7 +23,21 @@ namespace ReignBetaServer
     {
         internal static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload) => ChatWithLlm(payload, null, null);
 
-        internal static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload, Action<string> contentDelta, Func<bool> canceled, Dictionary<string, object> frozenSettings = null)
+        internal static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload, Action<string> contentDelta, Func<bool> canceled, Dictionary<string, object> frozenSettings = null) =>
+            ChatWithLlm(payload, contentDelta, canceled, frozenSettings, null);
+
+        internal static Dictionary<string, object> ChatWithPartyAgencyServingAttempt(Dictionary<string, object> payload,
+            out ServingProviderAttempt attempt)
+        {
+            ServingProviderAttempt observed = null;
+            var result = ChatWithLlm(payload, null, null, null, winner => observed = winner);
+            attempt = ReadBool(result, "ok", false) ? observed : null;
+            return result;
+        }
+
+        private static Dictionary<string, object> ChatWithLlm(Dictionary<string, object> payload,
+            Action<string> contentDelta, Func<bool> canceled, Dictionary<string, object> frozenSettings,
+            Action<ServingProviderAttempt> captureServingAttempt)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
             payload = payload ?? new Dictionary<string, object>();
@@ -88,6 +102,8 @@ namespace ReignBetaServer
                 messages.Add(new Dictionary<string, object> { ["role"] = "user", ["content"] = prompt });
             }
             Dictionary<string, object> codexContext = BuildCodexGenerationContext(settings, payload, requestType, model, correlationId);
+            if (captureServingAttempt != null && codexSubscription && codexContext != null)
+                codexContext["captureServingTurnDigest"] = true;
             if ((codexSubscription ? ReadString(codexContext, "requestedReasoningEffort", "none") : DialogueService.EffectiveReasoningEffort(settings, payload, requestType)) != "none")
             {
                 DialogueService.ApplyPrivateReasoningPolicyToMessages(messages);
@@ -183,11 +199,12 @@ namespace ReignBetaServer
                     ["request"] = requestBody
                 });
                 llmTimer.Start();
+                var selectedAdapter = LlmProviders.Select(settings, apiUrl);
                 string responseText;
                 try
                 {
                     DialogueService.CapturePromptEvidence(campaignId, correlationId, requestType, model, requestBody, envelopeDiagnostics, apiKey);
-                    responseText = PostLlmProviderJson(apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext, contentDelta, canceled);
+                    responseText = PostLlmProviderJson(selectedAdapter, apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext, contentDelta, canceled);
                 }
                 catch (Exception reasoningException) when (!singleAttempt && DialogueService.ShouldRetryWithoutReasoning(reasoningRouting, reasoningException.Message))
                 {
@@ -201,7 +218,7 @@ namespace ReignBetaServer
                     outboundJson = Json.Serialize(requestBody);
                     totalRequestChars += outboundJson.Length;
                     DialogueService.CapturePromptEvidence(campaignId, correlationId, requestType, model, requestBody, envelopeDiagnostics, apiKey);
-                    responseText = PostLlmProviderJson(apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext);
+                    responseText = PostLlmProviderJson(selectedAdapter, apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext);
                 }
                 catch (Exception cacheRouteException) when (!singleAttempt && DialogueService.ShouldRetryWithoutCache(cacheRouting, cacheRouteException.Message))
                 {
@@ -217,7 +234,7 @@ namespace ReignBetaServer
                     try
                     {
                         DialogueService.CapturePromptEvidence(campaignId, correlationId, requestType, model, requestBody, envelopeDiagnostics, apiKey);
-                        responseText = PostLlmProviderJson(apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext);
+                        responseText = PostLlmProviderJson(selectedAdapter, apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext);
                     }
                     catch (Exception reasoningException) when (!singleAttempt && DialogueService.ShouldRetryWithoutReasoning(reasoningRouting, reasoningException.Message))
                     {
@@ -231,7 +248,7 @@ namespace ReignBetaServer
                         outboundJson = Json.Serialize(requestBody);
                         totalRequestChars += outboundJson.Length;
                             DialogueService.CapturePromptEvidence(campaignId, correlationId, requestType, model, requestBody, envelopeDiagnostics, apiKey);
-                            responseText = PostLlmProviderJson(apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext);
+                            responseText = PostLlmProviderJson(selectedAdapter, apiUrl, apiKey, outboundJson, requestBody, settings, cacheRouting, correlationId, requestType, model, codexContext);
                     }
                 }
                 llmTimer.Stop();
@@ -280,6 +297,11 @@ namespace ReignBetaServer
                     ["raw"] = safeRaw
                 };
                 result = CheckConversationProviderResult(result, requestType, ollamaConversation);
+                if (captureServingAttempt != null && ReadBool(result, "ok", false))
+                    captureServingAttempt(ObserveServingProviderAttempt(selectedAdapter.Id, campaignId, correlationId,
+                        heroId, requestType, requestBody, outboundJson, raw, responseText, ExtractAssistantContent(raw),
+                        cacheRouting, reasoningRouting, contentDelta != null,
+                        codexSubscription && CodexRpcTransportOverride != null, apiKey));
                 providerTrace.Set("ok", true);
                 if (codexSubscription)
                 {

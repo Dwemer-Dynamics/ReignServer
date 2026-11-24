@@ -2186,7 +2186,15 @@
     function renderRecordCollection(name,rows,showHeading=true){return `${showHeading?`<h3>${editorLabel(name)} <small>(${rows.length})</small></h3>`:''}<div class='editorRecordList'>${rows.slice(0,500).map((row,index)=>`<details class='editorRecord'><summary>${editorEscape(row.claim||row.summary||row.description||row.kind||row.memory_type||row.letter_id||row.rumor_id||('Record '+(index+1)))}</summary><div class='editorFields'>${renderRecordFields(name,row,index)}</div></details>`).join('')||'<div class="hint">No records.</div>'}</div>`;}
     function renderKnowledgeCollection(name,rows,open=false){const extra=name==='memories'?['worldEvents','knowledgeReceipts','conversationSessions','conversationTurns','memorySources'].map(key=>renderKnowledgeCollection(key,characterEditorState.data?.records?.[key]||[],false)).join(''):'';return extra+`<details class='knowledgeGroup' ${open?'open':''}><summary>${editorLabel(name)} (${rows.length})</summary><div class='knowledgeGroupBody'>${renderRecordCollection(name,rows,false)}</div></details>`;}
     function setKnowledgeGroups(open){document.querySelectorAll('#characterEditorPanel .knowledgeGroup').forEach(x=>x.open=open);}
-    function renderRecordFields(group,row,index){return Object.keys(row).filter(k=>!k.endsWith('_json')&&!['payload_json','input_json','output_json','evidence_json'].includes(k)).map(k=>{const v=row[k],wide=String(v??'').length>100;return `<div class='editorField ${wide?'wide':''}'><label>${editorLabel(k)}</label>${wide?`<textarea onchange='editorRecordChanged("${group}",${index},"${k}",this.value)'>${editorEscape(v)}</textarea>`:`<input value='${editorEscape(v)}' onchange='editorRecordChanged("${group}",${index},"${k}",this.value)'>`}</div>`;}).join('');}
+    function renderRecordFields(group,row,index){
+      const summaryBasis=characterEditorState.original?.summaryTextEditBasis;
+      return Object.keys(row).filter(k=>!k.endsWith('_json')&&!['payload_json','input_json','output_json','evidence_json'].includes(k)).map(k=>{
+        const v=row[k],wide=String(v??'').length>100;
+        if(group==='summaries'&&k==='summary'&&(!summaryBasis||!Object.prototype.hasOwnProperty.call(summaryBasis,row.summary_id)))
+          return `<div class='editorField wide'><label>${editorLabel(k)}</label><textarea readonly>${editorEscape(v)}</textarea></div>`;
+        return `<div class='editorField ${wide?'wide':''}'><label>${editorLabel(k)}</label>${wide?`<textarea onchange='editorRecordChanged("${group}",${index},"${k}",this.value)'>${editorEscape(v)}</textarea>`:`<input value='${editorEscape(v)}' onchange='editorRecordChanged("${group}",${index},"${k}",this.value)'>`}</div>`;
+      }).join('');
+    }
     function editorRecordChanged(group,index,key,value){characterEditorState.data.records[group][index][key]=value;markCharacterDirty();}
 
     function renderHistory(){const history=characterEditorState.data.history||{};return ['dialogue','events','decisions'].map(group=>`<h3>${editorLabel(group)}</h3><div>${(history[group]||[]).map((row,index)=>{const textKey=['text','content','message','reply','body'].find(k=>row[k]!=null)||'text';return `<div class='editorTimelineRow'><span>${editorEscape(row.worldDay??row.ts??'')}</span><span>${editorEscape(row.speaker||row.role||row.source||'')}</span><textarea onchange='editorHistoryChanged("${group}",${index},"${textKey}",this.value)'>${editorEscape(row[textKey]||'')}</textarea><button title='Delete entry' onclick='deleteEditorHistory("${group}",${index})'>X</button></div>`;}).join('')||'<div class="hint">No entries.</div>'}</div>`).join('');}
@@ -2261,8 +2269,8 @@
       const keys={worldEvents:'event_id',knowledgeReceipts:'receipt_id',conversationSessions:'session_id',
         conversationTurns:'turn_id',beliefs:'belief_id',comprehension:'comprehension_id',obligations:'obligation_id',
         summaries:'summary_id',memories:'memory_id',letters:'letter_id',conceptions:'conception_id',parentage:'child_id'};
-      const records=Object.create(null),letterStatusEdits=[];
-      const statusBasis=original?.letterStatusEditBasis;
+      const records=Object.create(null),letterStatusEdits=[],summaryTextEdits=[];
+      const statusBasis=original?.letterStatusEditBasis,summaryBasis=original?.summaryTextEditBasis;
       function uniqueById(rows,key){
         const index=new Map();
         for(const row of rows){
@@ -2286,22 +2294,39 @@
               if(!Object.prototype.hasOwnProperty.call(statusBasis,id)||typeof before.status!=='string'||typeof row.status!=='string')
                 throw new Error('This letter status cannot be edited safely. Reload the Character Editor.');
               letterStatusEdits.push({id,expected:before.status,value:row.status,basis:statusBasis[id]});
+            }else if(group==='summaries'&&column==='summary'){
+              if(!summaryBasis||!Object.prototype.hasOwnProperty.call(summaryBasis,id)||typeof before.summary!=='string'||typeof row.summary!=='string')
+                throw new Error('This summary text cannot be edited safely. Reload the Character Editor.');
+              summaryTextEdits.push({id,expected:before.summary,value:row.summary,basis:summaryBasis[id]});
             }else changes[column]=row[column];
           }
           if(Object.keys(changes).length>1)(records[group]??=[]).push(changes);
         }
       }
-      return {records,letterStatusEdits};
+      return {records,letterStatusEdits,summaryTextEdits};
     }
     async function saveCharacterSection(all=false){if(!characterEditorState.data)return;const section=all?'all':characterEditorState.section,profileChanges=editorProfileChanges(),nativeChanges=nativeProfileChanges(profileChanges),dangerKeys=['isalive','ispregnant','spouseid','fatherid','motherid','clanid','kingdomid'];const dangerous=Object.keys(nativeChanges).some(k=>dangerKeys.includes(k.toLowerCase()));let confirmation='';if(dangerous){const name=characterEditorState.data.documents.profile?.name||characterEditorState.heroId;if(!confirm('These changes affect family, political, pregnancy, or life-state data. Review dependencies before continuing.'))return;confirmation=prompt(`Type ${name} to confirm dangerous native changes.`)||'';if(confirmation!==name){editorStatus('Confirmation did not match. Nothing was saved.','error');return;}}
       const {data,original,dirty,heroId}=characterEditorState;
-      const payload={campaignId:editorCampaign(),heroStringId:heroId,revisionToken:data.revisionToken,section,description:`Character Editor ${section} save`,documents:data.documents,nativeChanges,dangerous,confirmation};
+      const documents={...data.documents},narrative=documents.narrative,loadedNarrative=original?.documents?.narrative;
+      delete documents.narrative;
+      const narrativeChanges={};
+      for(const group of ['life','voice']){
+        const changed=Object.fromEntries(Object.entries(narrative?.[group]||{}).filter(([key,value])=>
+          JSON.stringify(value)!==JSON.stringify(loadedNarrative?.[group]?.[key])));
+        if(Object.keys(changed).length)narrativeChanges[group]=changed;
+      }
+      if(narrative?.items&&JSON.stringify(narrative.items)!==JSON.stringify(loadedNarrative?.items))
+        narrativeChanges.items=narrative.items;
+      if(Object.keys(narrativeChanges).length)documents.narrative=narrativeChanges;
+      const payload={campaignId:editorCampaign(),heroStringId:heroId,revisionToken:data.revisionToken,section,description:`Character Editor ${section} save`,documents,nativeChanges,dangerous,confirmation};
+      if(documents.narrative)payload.narrativeEditBasis=original?.narrativeEditBasis;
       const basis=original?.profileEditBasis;
       if(basis)payload.profileEdit={basis,fields:profileChanges};
       try{
         const recordChanges=editorRecordChanges(original,data);
         if(Object.keys(recordChanges.records).length)payload.records=recordChanges.records;
         if(recordChanges.letterStatusEdits.length)payload.letterStatusEdits=recordChanges.letterStatusEdits;
+        if(recordChanges.summaryTextEdits.length)payload.summaryTextEdits=recordChanges.summaryTextEdits;
         if(original?.historyEditBasis)payload.historyEdits=dirty.has('history')?editorHistoryEdits(original,data):[];
         else if(dirty.has('history'))payload.history=data.history;
       }catch(error){editorStatus(error.message,'error');return;}

@@ -218,6 +218,13 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> MaterializeCanonicalProfile(string campaignId, string heroId, Dictionary<string, object> runtimeProfile, Dictionary<string, object> shipped, bool forceCanonical, bool rerollHooks)
         {
+            lock (NarrativeStateLock)
+                return MaterializeCanonicalProfileLocked(campaignId, heroId, runtimeProfile, shipped, forceCanonical, rerollHooks);
+        }
+
+        private static Dictionary<string, object> MaterializeCanonicalProfileLocked(string campaignId, string heroId,
+            Dictionary<string, object> runtimeProfile, Dictionary<string, object> shipped, bool forceCanonical, bool rerollHooks)
+        {
             var narrative = ReadDictionary(shipped, "narrative");
             bool richNarrative = ReadInt(runtimeProfile, "narrativeVersion", 0) >= 5 && ReadString(narrative, "schema", "") == NarrativeSchema;
             string packVersion = richNarrative ? NarrativePack : CharacterProfilePackVersion;

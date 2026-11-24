@@ -77,6 +77,36 @@ namespace ReignBetaServer
             string accusedId = ReadString(payload, "accusedHeroId", "").Trim();
             string playerId = ReadString(payload, "playerHeroId", "").Trim();
             string tagId = ReadString(payload, "reputationTagId", "").Trim();
+            const string generationField = "sharedActivityGeneration";
+            var generationFields = payload.Keys.Where(key =>
+                string.Equals(key, generationField, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+            bool requireOwner = generationFields.Length != 0;
+            if (requireOwner && (generationFields.Length != 1 || generationFields[0] != generationField
+                || payload[generationField] is not string
+                || !ExactArrestEffectField(payload, "campaignId", campaignId)
+                || !ExactArrestEffectField(payload, "timelineId", timelineId)
+                || !ExactArrestEffectField(payload, "operation", operation)
+                || !ExactArrestEffectField(payload, "caseId", caseId)
+                || !ExactArrestEffectField(payload, "accusedHeroId", accusedId)
+                || !ExactArrestEffectField(payload, "playerHeroId", playerId)
+                || !ExactArrestEffectField(payload, "reputationTagId", tagId)))
+                return ArrestEffectOwnerFailure("ownership_mismatch", "The arrest effect requires its exact campaign, timeline, case, and restore owner.");
+
+            bool requestReceipt = payload.Keys.Any(IsArrestEffectReceiptField);
+            if (requestReceipt && !requireOwner)
+                return ArrestEffectOwnerFailure("ownership_mismatch", "A versioned arrest effect requires a current restore owner.");
+            bool inspect = requestReceipt && operation == "inspect";
+            ArrestEffectIntent intent = null;
+            if (inspect)
+            {
+                if (!ExactArrestIntentValue(payload, "arrestEffectVersion", out int version) || version != 2
+                    || payload.Keys.Any(key => !string.Equals(key, "arrestEffectVersion", StringComparison.Ordinal) && IsArrestEffectReceiptField(key))
+                    || !TryReadArrestEffectMaterial(payload, out _, out _))
+                    return ArrestEffectOwnerFailure("invalid_effect_intent", "An arrest inspection requires exact v2 material with no proposed write intent.");
+            }
+            else if (requestReceipt && (operation != "apply" || !TryReadArrestEffectIntent(payload, out intent)))
+                return ArrestEffectOwnerFailure("invalid_effect_intent", "A versioned arrest apply requires an exact intent, revision and material.");
+
             if (caseId.Length == 0 || accusedId.Length == 0 || playerId.Length == 0
                 || tagId.Length == 0)
                 return new Dictionary<string, object>
@@ -84,39 +114,90 @@ namespace ReignBetaServer
                     ["ok"] = false,
                     ["error"] = "caseId, accusedHeroId, playerHeroId, and reputationTagId are required."
                 };
-            if (operation != "apply" && operation != "rescind")
+            if (!inspect && operation != "apply" && operation != "rescind")
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false, ["error"] = "operation must be apply or rescind."
                 };
 
-            double worldDay = ReadDouble(payload, "worldDay", 0d);
+            double worldDay = intent?.WorldDay ?? ReadDouble(payload, "worldDay", 0d);
             int desiredDelta = Clamp(ReadInt(payload, "relationshipDelta", 0), -100, 100);
             int reputationValue = Clamp(ReadInt(payload, "reputationValue", 0), -100, 100);
             string description = DialogueService.LimitText(ReadString(payload, "description", ""), 1000);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             using (EnterWorldHistoryTimelineScope(campaignId))
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = requireOwner
+                ? ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaignId, trackCampaignMutations: true)
+                : ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                ReputationService.EnsureSocialReputationSchema(connection);
-                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
-                RelationshipsService.EnsureRelationshipDirectorSchema(connection);
-                WorldSimulationStore.EnsureArrestCaseEffects(connection);
-                // ReignDatabase's PostgreSQL BEGIN takes the campaign-schema mutation lock.
-                WorldSimulationStore.Begin(connection);
+                if (connection == null)
+                    return ArrestEffectOwnerFailure("ownership_mismatch", "The arrest effect campaign is not registered.");
+
+                if (!requireOwner)
+                {
+                    ReputationService.EnsureSocialReputationSchema(connection);
+                    RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                    RelationshipsService.EnsureRelationshipDirectorSchema(connection);
+                    WorldSimulationStore.EnsureArrestCaseEffects(connection);
+                }
+                using var typedTransaction = requireOwner ? connection.BeginTransaction() : null;
+                if (requireOwner)
+                    AcquirePostgreSqlTransactionMutationLock(connection, typedTransaction);
+                else
+                    WorldSimulationStore.Begin(connection);
+
+                void CommitEffect()
+                {
+                    if (requireOwner) typedTransaction.Commit();
+                    else WorldSimulationStore.Commit(connection);
+                }
+
+                void RollbackEffect()
+                {
+                    if (requireOwner) typedTransaction.Rollback();
+                    else WorldSimulationStore.Rollback(connection);
+                }
+
                 try
                 {
-                    string activeTimeline = TableExists(connection, "world_history_timelines")
-                        ? ActiveWorldHistoryTimeline(connection) : "main";
-                    if (!string.Equals(activeTimeline, timelineId, StringComparison.Ordinal))
-                        throw new InvalidOperationException("The arrest effect does not belong to the active timeline.");
+                    if (requireOwner)
+                    {
+                        // Queries enlist in the physical transaction opened above.
+                        if (!NoticeAcknowledgementOwnerMatches(connection, typedTransaction, payload, campaignId, timelineId))
+                        {
+                            RollbackEffect();
+                            return ArrestEffectOwnerFailure("ownership_mismatch", "The arrest effect owner is no longer current.");
+                        }
+                        if (!TableExists(connection, "arrest_case_effect_state")
+                            || !TableExists(connection, "character_reputations")
+                            || !TableExists(connection, "relationship_pair_chemistry"))
+                        {
+                            RollbackEffect();
+                            return ArrestEffectOwnerFailure("arrest_effect_schema_unavailable", "The campaign arrest effect storage is not initialized.");
+                        }
+                    }
+                    else
+                    {
+                        string activeTimeline = TableExists(connection, "world_history_timelines")
+                            ? ActiveWorldHistoryTimeline(connection) : "main";
+                        if (!string.Equals(activeTimeline, timelineId, StringComparison.Ordinal))
+                            throw new InvalidOperationException("The arrest effect does not belong to the active timeline.");
+                    }
+
+                    bool receiptSchema = WorldSimulationStore.ArrestEffectReceiptSchemaReady(connection);
+                    if (requestReceipt && !receiptSchema)
+                    {
+                        RollbackEffect();
+                        return ArrestEffectOwnerFailure("arrest_effect_schema_unavailable", "The campaign must open normally before using versioned arrest effects.");
+                    }
 
                     Dictionary<string, object> key = new Dictionary<string, object>
                     {
                         ["campaign"] = campaignId, ["timeline"] = timelineId, ["case"] = caseId,
                         ["subject"] = accusedId, ["player"] = playerId, ["tag"] = tagId
                     };
-                    var states = WorldSimulationStore.SelectArrestCaseEffects(connection, key);
+                    var states = WorldSimulationStore.SelectArrestCaseEffects(connection, key, receiptSchema);
+                    var effectState = states.FirstOrDefault();
                     Dictionary<string, object> existing =
                         WorldSimulationStore.SelectCharacterReputations(connection, key).FirstOrDefault();
                     Dictionary<string, object> priorSnapshot = TryParseJsonObject(
@@ -132,7 +213,7 @@ namespace ReignBetaServer
                         || states.Count == 0 && WorldSimulationStore.SelectOtherArrestCaseReputations(connection, key).Any(row =>
                             ReadString(TryParseJsonObject(ReadString(row, "snapshot_json", "")), "arrestCaseId", "") == caseId))
                     {
-                        WorldSimulationStore.Rollback(connection);
+                        RollbackEffect();
                         return new Dictionary<string, object>
                         {
                             ["ok"] = false, ["caseId"] = caseId,
@@ -140,13 +221,16 @@ namespace ReignBetaServer
                         };
                     }
 
-                    bool recordedRescission = ReadBool(states.FirstOrDefault(), "rescinded", false);
+                    bool recordedRescission = ReadBool(effectState, "rescinded", false);
                     bool legacyRescission = ReadString(existing, "status", "") == "rescinded_by_accuser";
                     bool terminal = recordedRescission || legacyRescission;
                     bool rescind = operation == "rescind";
-                    if (terminal && !rescind)
+                    long revision = effectState == null || !receiptSchema ? 0 : ReadLong(effectState, "material_revision", -1);
+                    if (revision < 0)
+                        throw new InvalidOperationException("The arrest effect material revision is invalid.");
+                    if (!inspect && intent == null && terminal && !rescind)
                     {
-                        WorldSimulationStore.Rollback(connection);
+                        RollbackEffect();
                         return new Dictionary<string, object>
                         {
                             ["ok"] = false, ["caseId"] = caseId, ["reputationTagId"] = tagId,
@@ -164,16 +248,53 @@ namespace ReignBetaServer
                     if ((recordedRescission && existing != null && !legacyRescission)
                         || (!recordedRescission && states.Count != 0 && existing == null))
                     {
-                        WorldSimulationStore.Rollback(connection);
+                        RollbackEffect();
                         return new Dictionary<string, object>
                         {
                             ["ok"] = false, ["caseId"] = caseId,
                             ["error"] = "The recorded arrest case has an inconsistent reputation state."
                         };
                     }
+                    if (inspect)
+                    {
+                        RollbackEffect();
+                        bool matching = measured && requested == desiredDelta
+                            && ArrestEffectMaterialMatches(payload, existing, priorSnapshot, description, reputationValue);
+                        string status = terminal ? "terminal_rescinded" : effectState == null && existing == null ? "ready"
+                            : matching ? "settled" : "material_mismatch";
+                        return ArrestEffectInspection(payload, revision, status, status == "settled" ? applied : (int?)null);
+                    }
+                    if (intent != null && terminal)
+                    {
+                        RollbackEffect();
+                        return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "terminal_rescinded");
+                    }
+                    if (intent != null && ReadString(effectState, "effect_intent_id", "") == intent.Id)
+                    {
+                        RollbackEffect();
+                        if (revision - 1 != intent.ExpectedRevision
+                            || ReadString(effectState, "effect_intent_material", "") != intent.Material)
+                            return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "intent_conflict");
+                        var receipt = TryParseJsonObject(ReadString(effectState, "effect_receipt_json", ""));
+                        int receiptDelta = ReadInt(receipt, "appliedRelationshipDelta", int.MinValue);
+                        if (!measured || requested != desiredDelta || receiptDelta != applied
+                            || !ArrestEffectMaterialMatches(payload, existing, priorSnapshot, description, reputationValue)
+                            || !ReadBool(receipt, "ok", false) || ReadString(receipt, "operation", "") != "apply"
+                            || ReadString(receipt, "caseId", "") != caseId || ReadString(receipt, "reputationTagId", "") != tagId
+                            || ReadString(receipt, "status", "") != "committed" || ReadInt(receipt, "arrestEffectVersion", 0) != 2
+                            || ReadString(receipt, "effectIntentId", "") != intent.Id
+                            || ReadLong(receipt, "materialRevision", -1) != revision)
+                            return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "receipt_unavailable");
+                        return receipt;
+                    }
+                    if (intent != null && revision != intent.ExpectedRevision)
+                    {
+                        RollbackEffect();
+                        return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "stale_material");
+                    }
                     if (recordedRescission)
                     {
-                        WorldSimulationStore.Commit(connection);
+                        CommitEffect();
                         return ArrestEffectAcknowledgement(operation, caseId, tagId,
                             legacyUnverified ? null : applied, true);
                     }
@@ -250,25 +371,146 @@ namespace ReignBetaServer
                                 ["snapshot"] = Json.Serialize(priorSnapshot), ["ts"] = ts
                             });
                     }
-                    if (states.Count == 0 || rescind)
+                    var response = ArrestEffectAcknowledgement(operation, caseId, tagId,
+                        legacyUnverified ? null : applied, intent == null && (rescind ? terminal : sameRequest || correction == 0));
+                    if (receiptSchema)
+                    {
+                        long nextRevision = checked(revision + 1);
+                        if (intent != null)
+                        {
+                            response["arrestEffectVersion"] = 2;
+                            response["effectIntentId"] = intent.Id;
+                            response["materialRevision"] = nextRevision;
+                            response["status"] = "committed";
+                        }
+                        key["rescinded"] = rescind;
+                        key["revision"] = nextRevision;
+                        key["intent"] = intent?.Id ?? "";
+                        key["material"] = intent?.Material ?? "";
+                        key["receipt"] = intent == null ? "{}" : Json.Serialize(response);
+                        WorldSimulationStore.UpsertVersionedArrestCaseEffect(connection, key);
+                    }
+                    else if (states.Count == 0 || rescind)
                     {
                         key["rescinded"] = rescind;
                         WorldSimulationStore.UpsertArrestCaseEffect(connection, key);
                     }
-                    WorldSimulationStore.Commit(connection);
+                    // Do not commit a replayable result if the checkpoint sidecar could not be made dirty.
+                    if (intent != null) PersistenceService.MarkSaveSyncActiveStateDirty(campaignId);
+                    CommitEffect();
                     RelationshipsService.InvalidateRelationshipPairStateCache(campaignId);
-                    return ArrestEffectAcknowledgement(operation, caseId, tagId,
-                        legacyUnverified ? null : applied, rescind ? terminal : sameRequest || correction == 0);
+                    return response;
                 }
                 catch (Exception ex)
                 {
-                    try { WorldSimulationStore.Rollback(connection); } catch { }
+                    try { RollbackEffect(); } catch { }
                     return new Dictionary<string, object>
                     {
                         ["ok"] = false, ["caseId"] = caseId, ["error"] = ex.Message
                     };
                 }
             }
+        }
+
+        private sealed record ArrestEffectIntent(string Id, long ExpectedRevision, string Material, double WorldDay);
+
+        private static bool IsArrestEffectReceiptField(string key) =>
+            string.Equals(key, "arrestEffectVersion", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(key, "effectIntentId", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(key, "expectedMaterialRevision", StringComparison.OrdinalIgnoreCase);
+
+        private static bool ExactArrestIntentValue<T>(Dictionary<string, object> input, string key, out T value)
+        {
+            value = default;
+            if (input.Keys.Count(field => string.Equals(field, key, StringComparison.OrdinalIgnoreCase)) != 1
+                || !input.Keys.Contains(key, StringComparer.Ordinal) || input[key] is not T exact)
+                return false;
+            value = exact;
+            return true;
+        }
+
+        private static bool TryReadArrestEffectIntent(Dictionary<string, object> input, out ArrestEffectIntent intent)
+        {
+            intent = null;
+            if (!ExactArrestIntentValue(input, "arrestEffectVersion", out int version) || version != 2
+                || !ExactArrestIntentValue(input, "expectedMaterialRevision", out object revision) || !(revision is int or long)
+                || !ExactArrestIntentValue(input, "effectIntentId", out string id)
+                || !TryReadArrestEffectMaterial(input, out double day, out string material))
+                return false;
+            long expected = Convert.ToInt64(revision, CultureInfo.InvariantCulture);
+            if (expected < 0 || expected == long.MaxValue)
+                return false;
+            // Revisions form part of the intent identity so a superseded nonce cannot
+            // be reapplied by resubmitting it with a refreshed revision.
+            string prefix = expected.ToString(CultureInfo.InvariantCulture) + "_";
+            if (!id.StartsWith(prefix, StringComparison.Ordinal)
+                || !Guid.TryParseExact(id.Substring(prefix.Length), "N", out Guid nonce) || nonce == Guid.Empty
+                || id != prefix + nonce.ToString("N"))
+                return false;
+            intent = new ArrestEffectIntent(id, expected, material, day);
+            return true;
+        }
+
+        private static bool TryReadArrestEffectMaterial(Dictionary<string, object> input, out double day, out string material)
+        {
+            day = 0;
+            material = null;
+            if (!ExactArrestIntentValue(input, "relationshipDelta", out int delta) || delta < -100 || delta > 100
+                || !ExactArrestIntentValue(input, "reputationValue", out int value) || value < -100 || value > 100
+                || !ExactArrestIntentValue(input, "worldDay", out object rawDay) || !(rawDay is int or long or float or double or decimal)
+                || !ExactArrestIntentValue(input, "description", out string description)
+                || description != DialogueService.LimitText(description, 1000)
+                || !ExactArrestIntentValue(input, "chargeCategory", out string category) || category.Length > 128
+                || !ExactArrestIntentValue(input, "severity", out string severity) || severity.Length > 128
+                || !ExactArrestIntentValue(input, "causeEstablished", out bool established)
+                || !ExactArrestIntentValue(input, "evidenceStatus", out string evidenceStatus) || evidenceStatus.Length > 128
+                || !ExactArrestIntentValue(input, "evidenceIds", out string evidenceIds) || evidenceIds.Length > 8192)
+                return false;
+            day = Convert.ToDouble(rawDay, CultureInfo.InvariantCulture);
+            if (!double.IsFinite(day) || day < 0)
+                return false;
+            material = Json.Serialize(new object[] { delta, value, day, description, category, severity,
+                established, evidenceStatus, evidenceIds });
+            return true;
+        }
+
+        private static bool ArrestEffectMaterialMatches(Dictionary<string, object> payload,
+            Dictionary<string, object> reputation, Dictionary<string, object> snapshot, string description, int value) =>
+            ReadString(reputation, "status", "") == "active"
+            && ReadInt(reputation, "reputation_value", int.MinValue) == value
+            && ReadString(reputation, "description", "") == description
+            && ReadString(snapshot, "chargeCategory", "") == ReadString(payload, "chargeCategory", "")
+            && ReadString(snapshot, "severity", "") == ReadString(payload, "severity", "")
+            && ReadBool(snapshot, "causeEstablished", false) == ReadBool(payload, "causeEstablished", false)
+            && ReadString(snapshot, "evidenceStatus", "") == ReadString(payload, "evidenceStatus", "")
+            && ReadString(snapshot, "evidenceIds", "") == ReadString(payload, "evidenceIds", "");
+
+        private static Dictionary<string, object> ArrestEffectInspection(Dictionary<string, object> request,
+            long revision, string status, int? delta)
+        {
+            var response = TestDict("ok", status == "ready" || status == "settled", "operation", "inspect",
+                "arrestEffectVersion", 2, "status", status, "materialRevision", revision,
+                "appliedRelationshipDelta", delta, "relationshipEffectResolved", status == "settled");
+            foreach (string field in new[] { "campaignId", "timelineId", "sharedActivityGeneration", "caseId",
+                "accusedHeroId", "playerHeroId", "reputationTagId" })
+                response[field] = request[field];
+            return response;
+        }
+
+        private static Dictionary<string, object> ArrestEffectIntentStatus(ArrestEffectIntent intent,
+            string caseId, string tagId, long revision, string status) =>
+            TestDict("ok", false, "operation", "apply", "caseId", caseId, "reputationTagId", tagId,
+                "arrestEffectVersion", 2, "effectIntentId", intent.Id, "materialRevision", revision, "status", status);
+
+        private static bool ExactArrestEffectField(Dictionary<string, object> payload, string key, string expected)
+        {
+            return !string.IsNullOrWhiteSpace(expected) && payload.TryGetValue(key, out object value)
+                && value is string supplied && string.Equals(supplied, expected, StringComparison.Ordinal);
+        }
+
+        private static Dictionary<string, object> ArrestEffectOwnerFailure(string status, string error)
+        {
+            return new Dictionary<string, object> { ["ok"] = false, ["status"] = status, ["error"] = error };
         }
 
         private static int ArrestDirectionalAffinity(Dictionary<string, object> pair, string heroA, string heroB,

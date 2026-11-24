@@ -28,6 +28,8 @@ namespace ReignBetaServer
             string token = Guid.NewGuid().ToString("N").Substring(0, 8);
             // Save Sync restores older schemas; they must reach the latest campaign migration.
             RunCampaignMigrationSelfTests(add, token);
+            VerifyRegisteredPartyAgencyAcceptedReceiptProjection(add, token);
+            VerifyActiveStatePublicationRetry(add);
             var loadedReceiptLedger = TestDict("lastLoadedSavePoint", TestDict("savePointId", "cached_point", "status", "ready"));
             var registeredLoadedPoint = TestDict("savePointId", "cached_point", "snapshotStorageId", "actual_retained_storage");
             add("loaded_receipt_uses_registered_storage_metadata",
@@ -104,6 +106,8 @@ namespace ReignBetaServer
             CampaignMutationAllowDuringTests = true;
             try
             {
+                VerifyTypedArrestEffectOwner(add);
+                VerifyOwnedWorldHistoryEventProof(add);
                 string fallbackRoot = Path.Combine(Program.DataDir, "ss");
                 string stableRoot = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -1745,6 +1749,1086 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
+        private static void VerifyRegisteredPartyAgencyAcceptedReceiptProjection(Action<string, bool, string> add, string token)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation)
+            {
+                add("party_agency_postgres_requires_isolation", false, "The fixture requires the isolated ReignValidation database.");
+                return;
+            }
+
+            const string generation = "fixture-current";
+            const string oldGeneration = "fixture-prior";
+            string ownedCampaign = "__postgres_pa_owned_" + token;
+            string otherCampaign = "__postgres_pa_other_" + token;
+            string bareCampaign = "__postgres_pa_bare_" + token;
+            string missingCampaign = "__postgres_pa_missing_" + token;
+            const string selectedUnit = "accepted_selected";
+            const string otherSpeakerUnit = "accepted_other_speaker";
+            const string oldUnit = "accepted_old_generation";
+            const string otherCampaignUnit = "accepted_other_campaign";
+            const string missingUnit = "accepted_missing";
+            const string malformedUnit = "accepted_malformed";
+            const string oversizedUnit = "accepted_oversized";
+            const string oversizedProofUnit = "accepted_oversized_proof";
+            string responseHash = DialogueService.PromptHash("synthetic response");
+            string speechHash = DialogueService.ConversationExactTextHash("synthetic speech");
+            var claim = new WorldSimulationService.PartyAgencySendClaim(
+                "fixture-live", "fixture-command", "fixture-game", "fixture-process", "fixture-lease", 1);
+
+            void Insert(ReignDbConnection connection, string campaign, string unit, string speaker, string restored,
+                string receiptPadding = "", string originPadding = "")
+            {
+                var origin = new WorldSimulationService.PartyAgencySendOrigin(claim, campaign, "fixture-test",
+                    "fixture-certification", "party_chat", speaker, "fixture-party-beat", speechHash)
+                    .AcceptedReceipt(unit, responseHash);
+                if (originPadding.Length > 0) origin["fixturePadding"] = originPadding;
+                var provider = TestDict("schema", "reign-party-agency-serving-provider-attempt-v1",
+                    "status", "serving_transport_matches_accepted_speech", "acceptedUnitId", unit,
+                    "acceptedResponseHash", responseHash, "acceptedSpeechSha256", speechHash,
+                    "providerAuthoredSpeechSha256", speechHash, "adapter", LlmProviderService.OpenRouterProvider,
+                    "requestedModel", "fixture/requested", "servedModel", "fixture/served",
+                    "servedModelEvidence", "http_response_model", "requestKind", "http_post_body",
+                    "requestSha256", speechHash, "responseSha256", speechHash, "responseIdentitySha256", speechHash,
+                    "providerAssistantContentSha256", speechHash, "fallbackDisposition", "none",
+                    "httpRetriesInServingRound", 0, "codexTerminalAttempts", 0);
+                var receipt = TestDict("ok", true, "status", "committed", "unitId", unit,
+                    "responseHash", responseHash, "acceptedReplyHash", speechHash, "restoreGeneration", restored,
+                    WorldSimulationService.PartyAgencySendOriginField, origin,
+                    LlmProviderService.ServingProviderAttempt.ReceiptField, provider,
+                    "fixtureUnprojectedSpeech", "fixture raw speech", "fixturePadding", receiptPadding);
+                DialogueStore.InsertConversationAcceptedUnits(connection, TestDict("unit", unit, "hash", responseHash,
+                    "generation", restored, "receipt", Json.Serialize(receipt), "ts", 1L));
+            }
+
+            void Initialize(ReignDbConnection connection)
+            {
+                DialogueSchema.CreateMemoryPrecisionState(connection);
+                DialogueStore.InsertOrIgnoreMemoryPrecisionState(connection, TestDict("generation", generation, "ts", 1L));
+                DialogueService.EnsureAcceptedConversationUnitSchema(connection);
+            }
+
+            bool RegistryHasSchema(ReignDbConnection connection, string campaign)
+            {
+                var row = ReignDatabase.QuerySql(connection, @"
+SELECT EXISTS (SELECT 1 FROM reign_meta.campaign_registry WHERE campaign_id = $campaign)
+    OR EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = $schema) AS present;",
+                    TestDict("campaign", campaign, "schema", ReignPostgreSqlStorage.CampaignSchemaName(campaign))).Single();
+                return ReadBool(row, "present", false);
+            }
+
+            string Snapshot(ReignDbConnection connection, string campaign) => Json.Serialize(ReignDatabase.QuerySql(connection, @"
+SELECT r.xmin::text AS registry_version, s.xmin::text AS generation_version, s.restore_generation,
+    (SELECT jsonb_agg(jsonb_build_array(u.xmin::text, to_jsonb(u)) ORDER BY u.unit_id)::text
+        FROM conversation_accepted_units u) AS accepted_state
+FROM reign_meta.campaign_registry r CROSS JOIN memory_precision_state s
+WHERE r.campaign_id = $campaign AND s.state_id = 'current';", TestDict("campaign", campaign)).Single());
+
+            try
+            {
+                using var owned = ReignPostgreSqlStorage.OpenCampaignConnection(ownedCampaign);
+                using var other = ReignPostgreSqlStorage.OpenCampaignConnection(otherCampaign);
+                using var bare = ReignPostgreSqlStorage.OpenCampaignConnection(bareCampaign);
+                Initialize(owned);
+                Initialize(other);
+                Insert(owned, ownedCampaign, selectedUnit, "fixture-selected-speaker", generation);
+                Insert(owned, ownedCampaign, otherSpeakerUnit, "fixture-other-speaker", generation);
+                Insert(owned, ownedCampaign, oldUnit, "fixture-selected-speaker", oldGeneration);
+                Insert(owned, ownedCampaign, oversizedUnit, "fixture-selected-speaker", generation,
+                    receiptPadding: new string('x', 262144));
+                Insert(owned, ownedCampaign, oversizedProofUnit, "fixture-selected-speaker", generation,
+                    originPadding: new string('x', 8192));
+                Insert(other, otherCampaign, otherCampaignUnit, "fixture-other-campaign-speaker", generation);
+                DialogueStore.InsertConversationAcceptedUnits(owned, TestDict("unit", malformedUnit, "hash", responseHash,
+                    "generation", generation, "receipt", "fixture malformed JSON", "ts", 1L));
+                string ownedBefore = Snapshot(owned, ownedCampaign);
+                string otherBefore = Snapshot(other, otherCampaign);
+
+                var selected = ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign,
+                    new[] { selectedUnit, oldUnit, missingUnit, "invalid-fixture-selector" }).SingleOrDefault();
+                var proof = selected == null ? TestDict() : Json.Deserialize<Dictionary<string, object>>(selected.ProofJson);
+                var origin = ReadDictionary(proof, WorldSimulationService.PartyAgencySendOriginField);
+                var provider = ReadDictionary(proof, LlmProviderService.ServingProviderAttempt.ReceiptField);
+                add("party_agency_postgres_projects_exact_saved_receipt", selected?.UnitId == selectedUnit
+                    && selected.ResponseHash == responseHash && selected.RestoreGeneration == generation
+                    && ReadString(proof, "unitId", "") == selectedUnit && ReadString(proof, "restoreGeneration", "") == generation
+                    && ReadString(origin, "campaignId", "") == ownedCampaign
+                    && ReadString(origin, "speakerHeroStringId", "") == "fixture-selected-speaker"
+                    && ReadString(origin, "correlationId", "") == "fixture-party-beat"
+                    && ReadString(provider, "acceptedUnitId", "") == selectedUnit
+                    && ReadString(provider, "servedModel", "") == "fixture/served"
+                    && !proof.ContainsKey("fixtureUnprojectedSpeech") && !proof.ContainsKey("fixturePadding"),
+                    "The exact selected speaker's current receipt is projected without extra saved fields or another speaker's receipt.");
+
+                add("party_agency_postgres_excludes_foreign_or_missing_authority",
+                    ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign,
+                        new[] { oldUnit, missingUnit, otherCampaignUnit }).Count == 0
+                    && ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(otherCampaign,
+                        new[] { selectedUnit }).Count == 0
+                    && ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(otherCampaign,
+                        new[] { otherCampaignUnit }).SingleOrDefault()?.UnitId == otherCampaignUnit,
+                    "An old restore generation, an absent unit and a different registered campaign cannot supply a matching receipt.");
+
+                add("party_agency_postgres_bounds_selector_and_projection",
+                    ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign,
+                        new[] { oversizedUnit, oversizedProofUnit }).Count == 0
+                    && ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign,
+                        new[] { selectedUnit }.Concat(Enumerable.Range(0, ReignPostgreSqlStorage.PartyAgencyAcceptedReceiptReadLimit)
+                            .Select(number => "accepted_unused_" + number)).ToArray()).Count == 0
+                    && ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign + " ",
+                        new[] { selectedUnit }).Count == 0,
+                    "Over-limit selectors, a non-exact campaign identity and oversized receipt or proof JSON cannot contribute evidence.");
+
+                bool malformedRejected = false;
+                try { ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(ownedCampaign, new[] { malformedUnit }); }
+                catch (Npgsql.PostgresException exception) when (exception.SqlState == "22P02") { malformedRejected = true; }
+                add("party_agency_postgres_malformed_saved_receipt_fails_closed", malformedRejected,
+                    "Invalid selected saved JSON fails the database projection before any receipt can be returned.");
+
+                bool MissingReceiptTable() => ReignDatabase.QuerySql(bare,
+                    @"SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class relation
+INNER JOIN pg_catalog.pg_namespace ns ON ns.oid = relation.relnamespace
+WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units') AS missing;",
+                    TestDict("schema", ReignPostgreSqlStorage.CampaignSchemaName(bareCampaign)))
+                    .Any(row => ReadBool(row, "missing", false));
+                bool tableMissingBefore = MissingReceiptTable();
+                bool noSetup = false;
+                try { ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(bareCampaign, new[] { selectedUnit }); }
+                catch (Npgsql.PostgresException exception) when (exception.SqlState == "42P01") { noSetup = true; }
+                add("party_agency_postgres_reader_never_sets_up_or_updates_campaign",
+                    !RegistryHasSchema(owned, missingCampaign)
+                    && ReignPostgreSqlStorage.ReadRegisteredPartyAgencyAcceptedReceipts(missingCampaign, new[] { selectedUnit }).Count == 0
+                    && !RegistryHasSchema(owned, missingCampaign)
+                    && tableMissingBefore && noSetup && MissingReceiptTable()
+                    && Snapshot(owned, ownedCampaign) == ownedBefore && Snapshot(other, otherCampaign) == otherBefore,
+                    "The reader leaves both registered row versions and saved evidence intact and does not register or initialize a schema.");
+            }
+            catch (Exception exception)
+            {
+                add("party_agency_postgres_fixture_exception", false,
+                    "The disposable PostgreSQL fixture failed with " + exception.GetType().Name + ".");
+            }
+            finally
+            {
+                foreach (string campaign in new[] { bareCampaign, otherCampaign, ownedCampaign })
+                {
+                    try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                    catch (Exception exception)
+                    {
+                        add("party_agency_postgres_fixture_cleanup", false,
+                            "Could not retire disposable fixture " + campaign + " (" + exception.GetType().Name + ").");
+                    }
+                }
+            }
+        }
+
+        private static void VerifyActiveStatePublicationRetry(Action<string, bool, string> add)
+        {
+            string campaignId = "save_state_" + Guid.NewGuid().ToString("N");
+            string fixtureRoot = SaveSyncCampaignRoot(campaignId);
+            if (File.Exists(fixtureRoot) || Directory.Exists(fixtureRoot))
+            {
+                add("active_state_publication_fixture_isolated", false, "The disposable active-state root is already occupied.");
+                return;
+            }
+
+            string path = SaveSyncActiveStatePath(campaignId);
+            string campaignPath = Path.Combine(StrictCampaignDirectory(campaignId), "world", "fixture.json");
+            const string oldPoint = "before_write", newPoint = "after_write";
+            bool FailPublication(Action publish)
+            {
+                string savedSidecar = path + ".fixture_previous";
+                File.Move(path, savedSidecar);
+                try
+                {
+                    Directory.CreateDirectory(path);
+                    try { publish(); }
+                    catch (IOException) { return true; }
+                    catch (UnauthorizedAccessException) { return true; }
+                    return false;
+                }
+                finally
+                {
+                    if (Directory.Exists(path))
+                        Directory.Move(path, path + ".fixture_obstruction_" + Guid.NewGuid().ToString("N"));
+                    File.Move(savedSidecar, path);
+                }
+            }
+
+            bool CachedStateMatches(string point, bool dirty)
+            {
+                lock (SaveSyncActiveStateLock)
+                {
+                    SaveSyncActiveState cached = ReadSaveSyncActiveStateLocked(campaignId);
+                    return cached.SavePointId == point && cached.Dirty == dirty;
+                }
+            }
+
+            try
+            {
+                MarkSaveSyncActiveStateClean(campaignId, TestDict("savePointId", oldPoint));
+                string unrelatedTemporary = path + ".tmp_unrelated_fixture";
+                const string unrelatedContent = "Retain the unrelated temporary";
+                File.WriteAllText(unrelatedTemporary, unrelatedContent);
+                byte[] clean = File.ReadAllBytes(path);
+                bool directFailed = FailPublication(() => MarkSaveSyncActiveStateDirty(campaignId));
+                bool pathFailed = FailPublication(() => MarkSaveSyncActiveStateDirtyForPath(campaignPath));
+                bool cleanSurvived = CachedStateMatches(oldPoint, false) && clean.SequenceEqual(File.ReadAllBytes(path));
+                MarkSaveSyncActiveStateDirtyForPath(campaignPath);
+                var dirtySidecar = CampaignFileService.ReadAtomicallyReplacedJsonObject(path);
+                add("failed_active_state_dirty_publication_can_retry",
+                    directFailed && pathFailed && cleanSurvived && CachedStateMatches(oldPoint, true)
+                    && ReadBool(dirtySidecar, "dirty", false) && ReadString(dirtySidecar, "savePointId", "") == oldPoint,
+                    "Both dirty entry points propagate a real sidecar write failure, preserve the last published state, and can persist the retry.");
+
+                byte[] dirty = File.ReadAllBytes(path);
+                var nextPoint = TestDict("savePointId", newPoint);
+                bool cleanFailed = FailPublication(() => MarkSaveSyncActiveStateClean(campaignId, nextPoint));
+                bool dirtySurvived = CachedStateMatches(oldPoint, true) && dirty.SequenceEqual(File.ReadAllBytes(path));
+                MarkSaveSyncActiveStateClean(campaignId, nextPoint);
+                var cleanSidecar = CampaignFileService.ReadAtomicallyReplacedJsonObject(path);
+                add("failed_active_state_clean_publication_preserves_cache",
+                    cleanFailed && dirtySurvived && CachedStateMatches(newPoint, false)
+                    && !ReadBool(cleanSidecar, "dirty", true) && ReadString(cleanSidecar, "savePointId", "") == newPoint,
+                    "A failed clean publication retains the last persisted dirty point until the clean retry is written.");
+
+                add("failed_active_state_publication_cleans_only_its_temporary", directFailed && pathFailed && cleanFailed
+                    && Directory.EnumerateFiles(fixtureRoot, "active-state.json.tmp_*").SequenceEqual(new[] { unrelatedTemporary })
+                    && File.ReadAllText(unrelatedTemporary) == unrelatedContent,
+                    "Failed active-state attempts remove their own scratch files while preserving an unrelated sibling.");
+                VerifyDirtyPublicationBeforeMetadataCommit(campaignId, path, FailPublication, add);
+            }
+            finally
+            {
+                lock (SaveSyncActiveStateLock) SaveSyncActiveStates.Remove(campaignId);
+                if (Directory.Exists(fixtureRoot)) Directory.Delete(fixtureRoot, true);
+            }
+        }
+
+        private static void VerifyDirtyPublicationBeforeMetadataCommit(string campaign, string path,
+            Func<Action, bool> failPublication, Action<string, bool, string> add)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation)
+            {
+                add("dirty_before_commit_fixture_isolation", false, "The metadata fixture requires the isolated validation database.");
+                return;
+            }
+
+            const string point = "metadata_fixture_point";
+            try
+            {
+                using var writer = ReignPostgreSqlStorage.OpenCampaignConnection(campaign);
+                using var reader = ReignPostgreSqlStorage.OpenCampaignConnection(campaign);
+                ReignDatabase.ExecuteSql(writer, @"CREATE TABLE dirty_publication_fixture (
+marker INTEGER PRIMARY KEY CHECK (marker > 0));");
+                var activePoint = TestDict("savePointId", point);
+                MarkSaveSyncActiveStateClean(campaign, activePoint);
+
+                int Count(ReignDbConnection connection, ReignDbTransaction transaction = null) =>
+                    ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM dirty_publication_fixture;",
+                        transaction: transaction).Single(), "count", -1);
+                // The raw-only maintenance candidate would use the returning query seam and explicitly publish dirty before commit.
+                void Stage(int marker, ReignDbTransaction transaction) =>
+                    ReignDatabase.QuerySql(writer, "INSERT INTO dirty_publication_fixture(marker) VALUES($marker) RETURNING marker;",
+                        TestDict("marker", marker), transaction).Single();
+                bool DiskIsDirty()
+                {
+                    var sidecar = CampaignFileService.ReadAtomicallyReplacedJsonObject(path);
+                    return ReadString(sidecar, "savePointId", "") == point && ReadBool(sidecar, "dirty", false);
+                }
+                bool ReloadedStateIsDirty()
+                {
+                    lock (SaveSyncActiveStateLock)
+                    {
+                        SaveSyncActiveStates.Remove(campaign);
+                        var reloaded = ReadSaveSyncActiveStateLocked(campaign);
+                        return reloaded.SavePointId == point && reloaded.Dirty;
+                    }
+                }
+
+                byte[] clean = File.ReadAllBytes(path);
+                bool stagedBeforeFailure = false;
+                bool failed = failPublication(() =>
+                {
+                    using var transaction = writer.BeginTransaction();
+                    Stage(1, transaction);
+                    stagedBeforeFailure = Count(writer, transaction) == 1 && Count(reader) == 0;
+                    MarkSaveSyncActiveStateDirty(campaign);
+                    transaction.Commit();
+                });
+                add("dirty_publication_failure_rolls_back_staged_metadata",
+                    failed && stagedBeforeFailure && Count(reader) == 0 && clean.SequenceEqual(File.ReadAllBytes(path)),
+                    "A real sidecar replace failure rolls back staged PostgreSQL metadata and leaves the last clean marker intact.");
+
+                bool publishedBeforeCommit;
+                using (var transaction = writer.BeginTransaction())
+                {
+                    Stage(1, transaction);
+                    MarkSaveSyncActiveStateDirty(campaign);
+                    publishedBeforeCommit = DiskIsDirty() && Count(writer, transaction) == 1 && Count(reader) == 0;
+                    transaction.Commit();
+                }
+                add("dirty_publication_retry_is_visible_before_metadata_commit",
+                    publishedBeforeCommit && Count(reader) == 1 && ReloadedStateIsDirty(),
+                    "The same-process retry publishes the dirty checkpoint marker before PostgreSQL commit, and a fresh cache read observes it.");
+
+                MarkSaveSyncActiveStateClean(campaign, activePoint);
+                bool publishedBeforeSqlFailure = false, constraintRejected = false;
+                try
+                {
+                    using var transaction = writer.BeginTransaction();
+                    Stage(2, transaction);
+                    MarkSaveSyncActiveStateDirty(campaign);
+                    publishedBeforeSqlFailure = DiskIsDirty() && Count(writer, transaction) == 2 && Count(reader) == 1;
+                    Stage(0, transaction);
+                }
+                catch (Npgsql.PostgresException exception) when (exception.SqlState == "23514")
+                {
+                    constraintRejected = true;
+                }
+                add("dirty_publication_remains_conservative_after_metadata_rollback",
+                    publishedBeforeSqlFailure && constraintRejected && Count(reader) == 1
+                    && DiskIsDirty() && ReloadedStateIsDirty(),
+                    "A later PostgreSQL failure rolls back its staged row and leaves the already published dirty marker conservative.");
+            }
+            catch (Exception exception)
+            {
+                add("dirty_before_commit_fixture_exception", false, "The isolated metadata fixture failed with " + exception.GetType().Name + ".");
+            }
+            finally
+            {
+                ReignPostgreSqlStorage.DropCampaign(campaign);
+            }
+        }
+
+        private static void VerifyOwnedWorldHistoryEventProof(Action<string, bool, string> add)
+        {
+            string campaign = "world_history_selftest_" + Guid.NewGuid().ToString("N");
+            string absent = "world_history_selftest_absent_" + Guid.NewGuid().ToString("N");
+            // Ordinary ingest queues reputation work unless this uses a recognized synchronous fixture ID.
+            if (!CampaignFileService.IsInternalCampaignId(campaign) || !CampaignFileService.IsInternalCampaignId(absent))
+                throw new InvalidOperationException("History proof fixtures must remain isolated from ordinary background work.");
+            string[] roots = { StrictCampaignDirectory(campaign), SaveSyncCampaignRoot(campaign),
+                StrictCampaignDirectory(absent), SaveSyncCampaignRoot(absent) };
+            const string timeline = "main", eventId = "history_proof_evidence", ephemeralId = "history_proof_ephemeral";
+            const string summary = "A witness established evidence for a captured noble.";
+            string sidecar = SaveSyncActiveStatePath(campaign);
+
+            bool Registered(string id)
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(id);
+                return connection != null;
+            }
+            if (roots.Any(path => Directory.Exists(path) || File.Exists(path)) || Registered(campaign) || Registered(absent))
+                throw new IOException("A disposable history event proof fixture root is already occupied.");
+
+            string Generation()
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                return ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "<missing>");
+            }
+
+            string TimelineState()
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                return Json.Serialize(WorldSimulationStore.SelectWorldHistoryTimelines(connection, TestDict("id", timeline)).Single());
+            }
+
+            Dictionary<string, object> Upload(params Dictionary<string, object>[] events) =>
+                WorldSimulationService.WorldHistoryIngestBatchApi(TestDict("campaignId", campaign,
+                    "timelineId", timeline, "events", events.ToList(), "waitForRetention", true));
+
+            try
+            {
+                var original = TestDict("eventId", eventId, "eventType", "arrest_evidence_reclassified", "sequence", 1L,
+                    "worldDay", 18.25d, "locationId", "history_proof_town", "locationName", "Proof Town",
+                    "source", "reign_system", "category", "justice", "phase", "evidence_established",
+                    "summary", summary, "checksum", "fixture-checksum",
+                    "payload", TestDict("caseId", "fixture_case", "priorStatus", "suspicion"),
+                    "entities", new List<Dictionary<string, object>>
+                    {
+                        TestDict("entityId", "fixture_accused", "entityType", "hero", "role", "accused"),
+                        TestDict("entityId", "fixture_witness", "entityType", "hero", "role", "witness")
+                    });
+                var ephemeral = new Dictionary<string, object>(original)
+                {
+                    ["eventId"] = ephemeralId, ["sequence"] = 2L, ["summary"] = "Disposable polling receipt"
+                };
+                const string unrelatedId = "history_proof_unrelated";
+                var unrelated = new Dictionary<string, object>(original)
+                {
+                    ["eventId"] = unrelatedId, ["sequence"] = 3L, ["category"] = "diplomacy"
+                };
+                var initial = Upload(original, ephemeral, unrelated);
+                string beforeRestore = Generation();
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign);
+                string generation = Generation();
+                if (beforeRestore == generation || generation == "<missing>" || !ReadBool(initial, "ok", false)
+                    || ReadInt(initial, "accepted", -1) != 2 || ReadInt(initial, "ephemeral", -1) != 1)
+                    throw new InvalidOperationException("The proof fixture could not establish its owner and two upload outcomes.");
+
+                var conflicting = new Dictionary<string, object>(original)
+                {
+                    ["summary"] = "Content that did not win", ["payload"] = TestDict("caseId", "different_case"),
+                    ["entities"] = new List<Dictionary<string, object>>()
+                };
+                var duplicate = Upload(conflicting);
+                MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", "history_proof_active"));
+                byte[] cleanSidecar = File.ReadAllBytes(sidecar);
+                string timelineBefore = TimelineState();
+
+                Dictionary<string, object> Proof(string id = eventId, string ownerCampaign = null,
+                    string ownerTimeline = timeline, string ownerGeneration = null, string version = "1")
+                {
+                    var scope = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["eventProofVersion"] = version, ["campaignId"] = ownerCampaign ?? campaign,
+                        ["timelineId"] = ownerTimeline
+                    };
+                    if (ownerGeneration != null) scope["sharedActivityGeneration"] = ownerGeneration;
+                    return WorldSimulationService.WorldHistoryEventApi(scope, id);
+                }
+
+                var observed = Proof(ownerGeneration: generation);
+                var row = ReadDictionary(observed, "event");
+                var entities = ReadDictionaryList(row, "entities");
+                var owner = ReadDictionary(observed, "ownership");
+                add("owned_history_event_proof_observes_actual_persisted_material",
+                    ReadBool(observed, "ok", false) && ReadString(observed, "result", "") == "observed"
+                    && ReadInt(observed, "eventProofVersion", -1) == 1 && row != null && !row.ContainsKey("checksum")
+                    && !row.ContainsKey("knowledgeRules") && !row.ContainsKey("semantic_text") && !row.ContainsKey("entities_json")
+                    && ReadString(owner, "campaignId", "") == campaign && ReadString(owner, "timelineId", "") == timeline
+                    && ReadString(owner, "sharedActivityGeneration", "") == generation
+                    && ReadString(row, "event_id", "") == eventId && ReadLong(row, "sequence", -1) == 1
+                    && ReadDouble(row, "world_day", -1) == 18.25d && ReadString(row, "location_id", "") == "history_proof_town"
+                    && ReadString(row, "summary", "") == summary
+                    && ReadString(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "caseId", "") == "fixture_case"
+                    && entities.Select(entity => ReadString(entity, "entity_id", ""))
+                        .SequenceEqual(new[] { "fixture_accused", "fixture_witness" })
+                    && ReadBool(duplicate, "ok", false) && ReadInt(duplicate, "duplicates", -1) == 1
+                    && ReadInt(duplicate, "accepted", -1) == 0,
+                    "A successful same-ID upload with a matching producer checksum and different content does not change the observed event.");
+
+                var discarded = Proof(ephemeralId, ownerGeneration: generation);
+                var wrongId = Proof(eventId.ToUpperInvariant(), ownerGeneration: generation);
+                var unrelatedProof = Proof(unrelatedId, ownerGeneration: generation);
+                add("owned_history_event_proof_requires_an_exact_durable_row",
+                    !ReadBool(discarded, "ok", true) && ReadString(discarded, "result", "") == "not_found"
+                    && !discarded.ContainsKey("event") && ReadString(wrongId, "result", "") == "not_found"
+                    && ReadString(unrelatedProof, "result", "") == "not_found" && !unrelatedProof.ContainsKey("event"),
+                    "Ephemeral ingest, a different spelling and an unrelated category cannot prove the exact justice event.");
+
+                var stale = Proof(ownerGeneration: beforeRestore);
+                var wrongTimeline = Proof(ownerTimeline: "elsewhere", ownerGeneration: generation);
+                var unregistered = Proof(ownerCampaign: absent, ownerGeneration: generation);
+                var missingGeneration = Proof();
+                var unknownVersion = Proof(ownerGeneration: generation, version: "2");
+                add("owned_history_event_proof_requires_current_explicit_scope",
+                    new[] { stale, wrongTimeline, unregistered, missingGeneration }.All(result =>
+                        ReadString(result, "result", "") == "owner_mismatch" && !result.ContainsKey("event")
+                        && !result.ContainsKey("ownership"))
+                    && ReadString(unknownVersion, "result", "") == "invalid_request"
+                    && !unknownVersion.ContainsKey("event") && !Registered(absent)
+                    && !Directory.Exists(roots[2]) && !Directory.Exists(roots[3]),
+                    "Stale, missing, foreign and unsupported scope requests return no event and create no campaign registration.");
+
+                var repeated = Proof(ownerGeneration: generation);
+                bool clean;
+                lock (SaveSyncActiveStateLock)
+                {
+                    var active = ReadSaveSyncActiveStateLocked(campaign);
+                    clean = active?.SavePointId == "history_proof_active" && !active.Dirty;
+                }
+                bool sidecarUnchanged = File.ReadAllBytes(sidecar).SequenceEqual(cleanSidecar);
+                bool timelineUnchanged = TimelineState() == timelineBefore;
+                bool repeatedProofSucceeded = ReadBool(repeated, "ok", false);
+                bool eventUnchanged = Json.Serialize(ReadDictionary(repeated, "event")) == Json.Serialize(row);
+                bool proofReadOnly = clean && sidecarUnchanged && timelineUnchanged && repeatedProofSucceeded && eventUnchanged;
+                const string readOnlySummary = "Repeated exact proof leaves the timeline head, persisted event and active checkpoint sidecar unchanged.";
+                add("owned_history_event_proof_does_not_advance_or_dirty_history", proofReadOnly,
+                    proofReadOnly ? readOnlySummary : $"{readOnlySummary} Clean checkpoint {clean}, sidecar unchanged {sidecarUnchanged}, "
+                        + $"timeline unchanged {timelineUnchanged}, repeated proof succeeded {repeatedProofSucceeded}, event unchanged {eventUnchanged}.");
+
+                var legacy = WorldSimulationService.WorldHistoryEventApi(
+                    new Dictionary<string, string> { ["campaignId"] = campaign }, eventId);
+                add("owned_history_event_proof_preserves_legacy_event_read",
+                    ReadBool(legacy, "ok", false) && legacy.Count == 2
+                    && ReadString(ReadDictionary(legacy, "event"), "checksum", "") == "fixture-checksum"
+                    && ReadDictionary(legacy, "event").ContainsKey("knowledgeRules"),
+                    "The unversioned event read retains its legacy result shape, checksum and knowledge rules.");
+
+                // Queue the proof behind a different PostgreSQL backend holding the campaign advisory lock.
+                // Commit only after PostgreSQL confirms the reader is actually waiting.
+                const string nextGeneration = "fixture_predecessor_committed";
+                using var predecessor = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                using var predecessorTransaction = predecessor.BeginTransaction();
+                AcquirePostgreSqlTransactionMutationLock(predecessor, predecessorTransaction);
+                DialogueStore.UpdateMemoryPrecisionState2(predecessor,
+                    TestDict("generation", nextGeneration, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()), predecessorTransaction);
+                var reading = Task.Run(() => Proof(ownerGeneration: generation));
+                bool queued;
+                try
+                {
+                    queued = SpinWait.SpinUntil(() =>
+                        ReignDatabase.QuerySql(predecessor, @"SELECT pid FROM pg_locks
+WHERE locktype='advisory' AND NOT granted AND pg_backend_pid()=ANY(pg_blocking_pids(pid));",
+                            transaction: predecessorTransaction).Count > 0, TimeSpan.FromSeconds(5));
+                }
+                finally
+                {
+                    predecessorTransaction.Commit();
+                }
+                var superseded = reading.GetAwaiter().GetResult();
+                var newOwner = Proof(ownerGeneration: nextGeneration);
+                add("owned_history_event_proof_observes_predecessor_commit_after_lock_wait",
+                    queued && ReadString(superseded, "result", "") == "owner_mismatch"
+                    && !superseded.ContainsKey("event") && ReadString(newOwner, "result", "") == "observed",
+                    "A proof blocked by a prior PostgreSQL connection refuses the obsolete generation after that connection commits.");
+
+                Dictionary<string, object> CursorEvent(string id, long sequence) =>
+                    new Dictionary<string, object>(original) { ["eventId"] = id, ["sequence"] = sequence };
+
+                bool CursorsAt(long sequence, string id)
+                {
+                    using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                    var head = WorldSimulationStore.SelectWorldHistoryTimelines(connection, TestDict("id", timeline)).SingleOrDefault();
+                    var ingest = ReignDatabase.QuerySql(connection, @"SELECT last_sequence,last_event_id
+FROM world_history_ingest_state WHERE client_id='bannerlord' AND timeline_id=$timeline;",
+                        TestDict("timeline", timeline)).SingleOrDefault();
+                    return ReadLong(head, "head_sequence", -1) == sequence && ReadString(head, "head_event_id", "") == id
+                        && ReadLong(ingest, "last_sequence", -1) == sequence && ReadString(ingest, "last_event_id", "") == id;
+                }
+
+                bool UploadStoresEvent(string id, long sequence)
+                {
+                    var uploaded = Upload(CursorEvent(id, sequence));
+                    using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                    var stored = WorldSimulationStore.SelectWorldHistoryEvents4(connection,
+                        TestDict("id", id, "timeline", timeline)).SingleOrDefault();
+                    return ReadBool(uploaded, "ok", false) && ReadInt(uploaded, "accepted", -1) == 1
+                        && ReadString(stored, "event_id", "") == id && ReadLong(stored, "sequence", -1) == sequence;
+                }
+
+                add("world_history_cursors_keep_matching_pair_after_late_accepted_event",
+                    CursorsAt(3L, unrelatedId) && UploadStoresEvent("history_proof_late", 2L)
+                    && CursorsAt(3L, unrelatedId),
+                    "The ordinary wire still accepts the late row while both persisted cursors keep the newer pair.");
+
+                add("world_history_cursors_keep_established_id_on_equal_sequence_conflict",
+                    UploadStoresEvent("history_proof_equal_conflict", 3L) && CursorsAt(3L, unrelatedId),
+                    "An independently persisted equal-sequence event cannot replace an established cursor ID.");
+
+                const string nextEventId = "history_proof_newer";
+                add("world_history_cursors_advance_both_fields_to_newer_event",
+                    UploadStoresEvent(nextEventId, 4L) && CursorsAt(4L, nextEventId),
+                    "A higher sequence advances the sequence and event ID together in both cursors.");
+
+                using (var legacyCursorConnection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    ReignDatabase.ExecuteSql(legacyCursorConnection, "UPDATE world_history_timelines SET head_event_id='' WHERE timeline_id=$timeline;",
+                        TestDict("timeline", timeline));
+                    ReignDatabase.ExecuteSql(legacyCursorConnection, @"UPDATE world_history_ingest_state SET last_event_id=''
+WHERE client_id='bannerlord' AND timeline_id=$timeline;", TestDict("timeline", timeline));
+                }
+                const string legacyEventId = "history_proof_legacy_fill";
+                add("world_history_cursors_initialize_empty_legacy_id_at_matching_sequence",
+                    CursorsAt(4L, "") && UploadStoresEvent("history_proof_legacy_older", 3L) && CursorsAt(4L, "")
+                    && UploadStoresEvent(legacyEventId, 4L) && CursorsAt(4L, legacyEventId),
+                    "A blank legacy ID stays blank for earlier events and can be filled at its existing sequence.");
+            }
+            finally
+            {
+                try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                finally
+                {
+                    try { if (Registered(absent)) ReignPostgreSqlStorage.DropCampaign(absent); }
+                    finally
+                    {
+                        lock (SaveSyncActiveStateLock)
+                        {
+                            SaveSyncActiveStates.Remove(campaign);
+                            SaveSyncActiveStates.Remove(absent);
+                        }
+                        foreach (string root in roots)
+                            if (Directory.Exists(root)) Directory.Delete(root, true);
+                    }
+                }
+            }
+        }
+
+        private static void VerifyTypedArrestEffectOwner(Action<string, bool, string> add)
+        {
+            string campaign = "arrest_owner_" + Guid.NewGuid().ToString("N");
+            string missing = "arrest_absent_" + Guid.NewGuid().ToString("N");
+            const string timeline = "main", accused = "arrest_a", player = "arrest_b";
+            const string legacyCase = "legacy_case", legacyTag = "legacy_tag";
+            const string typedCase = "typed_case", typedTag = "typed_tag";
+            string pair = RelationshipsService.AmbientPairKey(accused, player);
+            string campaignRoot = StrictCampaignDirectory(campaign), fixtureRoot = SaveSyncCampaignRoot(campaign);
+            string sidecar = SaveSyncActiveStatePath(campaign);
+            string missingCampaignRoot = StrictCampaignDirectory(missing), missingFixtureRoot = SaveSyncCampaignRoot(missing);
+            string[] roots = { campaignRoot, fixtureRoot, missingCampaignRoot, missingFixtureRoot };
+            if (roots.Any(path => Directory.Exists(path) || File.Exists(path)))
+                throw new IOException("The disposable arrest owner fixture root is already occupied.");
+
+            Dictionary<string, object> Apply(Dictionary<string, object> request)
+            {
+                var access = Program.EnterCampaignRequestAccess("/arrests/case/apply");
+                try { return WorldSimulationService.ArrestCaseApplyApi(request); }
+                finally { Program.ExitCampaignRequestAccess(access); }
+            }
+
+            Dictionary<string, object> Request(string caseId, string tag, int delta) =>
+                TestDict("campaignId", campaign, "timelineId", timeline, "operation", "apply",
+                    "caseId", caseId, "accusedHeroId", accused, "playerHeroId", player,
+                    "reputationTagId", tag, "relationshipDelta", delta, "reputationValue", -8,
+                    "worldDay", 17d, "description", "Disposable arrest owner fixture.");
+
+            Dictionary<string, object> CaseKey(string caseId, string tag) =>
+                TestDict("campaign", campaign, "timeline", timeline, "case", caseId,
+                    "subject", accused, "player", player, "tag", tag);
+
+            (int Affinity, int Cases, int Reputations, string Evidence) State(string caseId, string tag)
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                var chemistry = RelationshipsStore.SelectRelationshipPairChemistry8(connection, TestDict("pair", pair)).Single();
+                var key = CaseKey(caseId, tag);
+                var cases = WorldSimulationStore.SelectArrestCaseEffects(connection, key);
+                var reputations = WorldSimulationStore.SelectCharacterReputations(connection, key);
+                return (ReadInt(chemistry, "affinity_a_to_b", int.MinValue), cases.Count, reputations.Count,
+                    Json.Serialize(TestDict("pair", chemistry, "cases", cases, "reputation", reputations)));
+            }
+
+            bool CommittedCase(string caseId, string tag, int delta)
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                var key = CaseKey(caseId, tag);
+                var state = WorldSimulationStore.SelectArrestCaseEffects(connection, key).SingleOrDefault();
+                var reputation = WorldSimulationStore.SelectCharacterReputations(connection, key).SingleOrDefault();
+                var snapshot = TryParseJsonObject(ReadString(reputation, "snapshot_json", "{}"));
+                return ReadString(state, "case_id", "") == caseId && ReadString(state, "tag_id", "") == tag
+                    && ReadString(state, "accused_id", "") == accused && ReadString(state, "player_id", "") == player
+                    && !ReadBool(state, "rescinded", true) && ReadString(snapshot, "arrestCaseId", "") == caseId
+                    && ReadInt(snapshot, "arrestAppliedRelationshipDelta", int.MinValue) == delta;
+            }
+
+            string Generation()
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                return ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "<missing>");
+            }
+
+            string HistoryHead()
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                var row = WorldSimulationStore.SelectWorldHistoryTimelines(connection, TestDict("id", timeline)).Single();
+                return Json.Serialize(TestDict("active", WorldSimulationService.ActiveWorldHistoryTimeline(connection),
+                    "sequence", ReadLong(row, "head_sequence", -1), "event", ReadString(row, "head_event_id", "")));
+            }
+
+            bool Occupied(string id)
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(id);
+                return connection != null;
+            }
+
+            if (Occupied(campaign) || Occupied(missing))
+                throw new IOException("The disposable arrest owner fixture campaign is already registered.");
+
+            try
+            {
+                var opened = WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", timeline));
+                if (!ReadBool(opened, "ok", false) || ReadString(opened, "timelineId", "") != timeline)
+                    throw new InvalidOperationException("The fixture did not open the expected World History timeline.");
+                using (var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                    var seeded = RelationshipsStore.InsertOrIgnoreRelationshipPairChemistry(connection,
+                        TestDict("pair", pair, "a", accused, "b", player, "typeA", "ISTJ", "typeB", "ISTJ",
+                            "baseAB", 50, "baseBA", 50, "chanceAB", 50, "chanceBA", 50, "day", 17,
+                            "shard", 0, "version", 1, "ts", 0L));
+                    if (seeded.Count != 1) throw new InvalidOperationException("The disposable arrest affinity row was not seeded.");
+                }
+
+                var legacy = Apply(Request(legacyCase, legacyTag, -4));
+                add("arrest_effect_owner_legacy_sync_path_commits",
+                    ReadBool(legacy, "ok", false) && ReadString(legacy, "operation", "") == "apply"
+                    && ReadInt(legacy, "appliedRelationshipDelta", int.MinValue) == -4
+                    && State(legacyCase, legacyTag).Affinity == -4 && CommittedCase(legacyCase, legacyTag, -4),
+                    "The untyped synchronous caller still initializes storage and commits its exact affinity and reputation.");
+
+                string oldGeneration = Generation();
+                var typedRequest = Request(typedCase, typedTag, -6);
+                typedRequest["sharedActivityGeneration"] = oldGeneration;
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign);
+                string currentGeneration = Generation();
+                using (var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    if (currentGeneration == "<missing>" || oldGeneration == "<missing>" || currentGeneration == oldGeneration
+                        || WorldSimulationService.ActiveWorldHistoryTimeline(connection) != timeline)
+                        throw new InvalidOperationException("The fixture did not advance the persisted restore owner on the same timeline.");
+                }
+
+                const string pointId = "arrest_fixture_active";
+                MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", pointId));
+                byte[] cleanSidecar = File.ReadAllBytes(sidecar);
+                var untouched = State(typedCase, typedTag);
+                if (untouched.Cases != 0 || untouched.Reputations != 0 || untouched.Affinity != -4)
+                    throw new InvalidOperationException("The dormant typed case did not have the expected initial state.");
+                bool StillClean()
+                {
+                    lock (SaveSyncActiveStateLock)
+                    {
+                        var cached = ReadSaveSyncActiveStateLocked(campaign);
+                        return !cached.Dirty && cached.SavePointId == pointId && cleanSidecar.SequenceEqual(File.ReadAllBytes(sidecar));
+                    }
+                }
+
+                var stale = Apply(typedRequest);
+                add("arrest_effect_owner_stale_same_timeline_preserves_state",
+                    !ReadBool(stale, "ok", true) && ReadString(stale, "status", "") == "ownership_mismatch"
+                    && State(typedCase, typedTag) == untouched && !CommittedCase(typedCase, typedTag, -6) && StillClean(),
+                    "The older restore request creates no case or reputation row, leaves the affinity row unchanged, and preserves the clean sidecar bytes and cache.");
+
+                var invalid = new Dictionary<string, object>(typedRequest) { ["sharedActivityGeneration"] = true };
+                var absent = new Dictionary<string, object>(typedRequest)
+                { ["campaignId"] = missing, ["sharedActivityGeneration"] = currentGeneration };
+                var malformedResult = Apply(invalid);
+                var absentResult = Apply(absent);
+                add("arrest_effect_owner_denies_malformed_and_unregistered",
+                    !ReadBool(malformedResult, "ok", true) && ReadString(malformedResult, "status", "") == "ownership_mismatch"
+                    && !ReadBool(absentResult, "ok", true) && ReadString(absentResult, "status", "") == "ownership_mismatch"
+                    && !Occupied(missing) && !Directory.Exists(missingFixtureRoot)
+                    && !Directory.Exists(missingCampaignRoot)
+                    && State(typedCase, typedTag) == untouched && StillClean(),
+                    "Malformed and unregistered typed requests perform no fallback registration or case, affinity, or active-state write.");
+
+                const string aliasCase = "owner_alias_case", aliasTag = "owner_alias_tag";
+                var aliasBefore = State(aliasCase, aliasTag);
+                var alias = Request(aliasCase, aliasTag, -5);
+                alias["SharedActivityGeneration"] = currentGeneration;
+                var aliasBody = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(alias));
+                if (aliasBody == null || !aliasBody.ContainsKey("SharedActivityGeneration") || aliasBody.ContainsKey("sharedActivityGeneration"))
+                    throw new InvalidOperationException("The alternate-case fixture did not retain the wire discriminator.");
+                var aliasResult = Apply(aliasBody);
+                add("arrest_effect_owner_rejects_alternate_case_discriminator",
+                    aliasBefore.Cases == 0 && aliasBefore.Reputations == 0
+                    && !ReadBool(aliasResult, "ok", true) && ReadString(aliasResult, "status", "") == "ownership_mismatch"
+                    && State(aliasCase, aliasTag) == aliasBefore && StillClean(),
+                    "An alternate-case discriminator cannot fall back to the untyped route or change case, affinity, reputation, or sidecar state.");
+
+                const string duplicateCase = "owner_duplicate_case", duplicateTag = "owner_duplicate_tag";
+                var duplicateBefore = State(duplicateCase, duplicateTag);
+                var duplicate = Request(duplicateCase, duplicateTag, -5);
+                duplicate["sharedActivityGeneration"] = currentGeneration;
+                duplicate["SharedActivityGeneration"] = currentGeneration;
+                var duplicateBody = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(duplicate));
+                if (duplicateBody == null || duplicateBody.Keys.Count(key => string.Equals(key,
+                    "sharedActivityGeneration", StringComparison.OrdinalIgnoreCase)) != 2)
+                    throw new InvalidOperationException("The duplicate fixture did not retain both wire discriminator keys.");
+                var duplicateResult = Apply(duplicateBody);
+                add("arrest_effect_owner_rejects_multiple_equivalent_discriminators",
+                    duplicateBefore.Cases == 0 && duplicateBefore.Reputations == 0
+                    && !ReadBool(duplicateResult, "ok", true) && ReadString(duplicateResult, "status", "") == "ownership_mismatch"
+                    && State(duplicateCase, duplicateTag) == duplicateBefore && StillClean(),
+                    "Two case-equivalent discriminator keys are denied before any case, affinity, reputation, or sidecar change.");
+
+                var current = Apply(new Dictionary<string, object>(typedRequest) { ["sharedActivityGeneration"] = currentGeneration });
+                add("arrest_effect_owner_current_exact_scope_commits",
+                    ReadBool(current, "ok", false) && ReadString(current, "caseId", "") == typedCase
+                    && ReadString(current, "operation", "") == "apply" && ReadString(current, "reputationTagId", "") == typedTag
+                    && ReadInt(current, "appliedRelationshipDelta", int.MinValue) == -6
+                    && State(typedCase, typedTag).Affinity == -10 && CommittedCase(typedCase, typedTag, -6)
+                    && ReadBool(CampaignFileService.ReadAtomicallyReplacedJsonObject(sidecar), "dirty", false),
+                    "The exact registered active restore owner applies its own measured effect and marks the published sidecar dirty.");
+
+                const string rollbackCase = "rollback_case", rollbackTag = "rollback_tag";
+                const string addConstraint = "ALTER TABLE arrest_case_effect_state ADD CONSTRAINT d23_fixture_reject_case CHECK (case_id <> 'rollback_case') NOT VALID;";
+                const string dropConstraint = "ALTER TABLE arrest_case_effect_state DROP CONSTRAINT d23_fixture_reject_case;";
+                var retry = Request(rollbackCase, rollbackTag, -3);
+                retry["sharedActivityGeneration"] = currentGeneration;
+                var previousCase = State(rollbackCase, rollbackTag);
+                var previousLegacy = State(legacyCase, legacyTag);
+                var previousTyped = State(typedCase, typedTag);
+                string previousHead = HistoryHead();
+                if (previousCase.Cases != 0 || previousCase.Reputations != 0 || previousCase.Affinity != -10)
+                    throw new InvalidOperationException("The disposable rollback case was not new.");
+                MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", pointId));
+
+                using (var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    ReignDatabase.ExecuteSql(connection, addConstraint);
+                    try
+                    {
+                        // The new nonzero effect writes affinity and reputation before the final case INSERT.
+                        var rejected = Apply(retry);
+                        string error = ReadString(rejected, "error", "");
+                        var persisted = CampaignFileService.ReadAtomicallyReplacedJsonObject(sidecar);
+                        add("arrest_effect_owner_final_insert_rolls_back",
+                            !ReadBool(rejected, "ok", true) && ReadString(rejected, "caseId", "") == rollbackCase
+                            && error.Contains(Npgsql.PostgresErrorCodes.CheckViolation, StringComparison.Ordinal)
+                            && error.Contains("d23_fixture_reject_case", StringComparison.Ordinal)
+                            && State(rollbackCase, rollbackTag) == previousCase
+                            && State(legacyCase, legacyTag) == previousLegacy && State(typedCase, typedTag) == previousTyped
+                            && HistoryHead() == previousHead && Generation() == currentGeneration
+                            && ReadString(persisted, "savePointId", "") == pointId,
+                            "Rejecting the final PostgreSQL case insert rolls back the earlier affinity and reputation changes and preserves the case and history head.");
+                    }
+                    finally { ReignDatabase.ExecuteSql(connection, dropConstraint); }
+                }
+
+                var recovered = Apply(retry);
+                var replayed = Apply(retry);
+                var recoveredState = State(rollbackCase, rollbackTag);
+                add("arrest_effect_owner_retry_after_rollback_commits_once",
+                    ReadBool(recovered, "ok", false) && !ReadBool(recovered, "idempotent", true)
+                    && ReadString(recovered, "caseId", "") == rollbackCase && ReadString(recovered, "reputationTagId", "") == rollbackTag
+                    && ReadInt(recovered, "appliedRelationshipDelta", int.MinValue) == -3
+                    && ReadBool(replayed, "ok", false) && ReadBool(replayed, "idempotent", false)
+                    && ReadInt(replayed, "appliedRelationshipDelta", int.MinValue) == -3
+                    && recoveredState.Affinity == -13 && recoveredState.Cases == 1 && recoveredState.Reputations == 1
+                    && CommittedCase(rollbackCase, rollbackTag, -3) && HistoryHead() == previousHead,
+                    "The same typed request commits once when the constraint is removed. Repeating it does not duplicate the affinity movement or case.");
+
+                const string receiptCase = "versioned_case", receiptTag = "versioned_tag";
+                string preReceiptPoint = "arrest_pre_receipt_" + Guid.NewGuid().ToString("N");
+                string committedReceiptPoint = "arrest_committed_receipt_" + Guid.NewGuid().ToString("N");
+                Dictionary<string, object> Versioned(long revision, int delta, string caseId = receiptCase, string tag = receiptTag)
+                {
+                    var request = Request(caseId, tag, delta);
+                    request["arrestEffectVersion"] = 2;
+                    request["expectedMaterialRevision"] = revision;
+                    request["effectIntentId"] = revision.ToString(CultureInfo.InvariantCulture) + "_" + Guid.NewGuid().ToString("N");
+                    request["sharedActivityGeneration"] = Generation();
+                    request["chargeCategory"] = "espionage";
+                    request["severity"] = "serious";
+                    request["causeEstablished"] = true;
+                    request["evidenceStatus"] = "established_after_arrest";
+                    request["evidenceIds"] = "fixture_disclosed_evidence";
+                    return request;
+                }
+
+                Dictionary<string, object> ReceiptState(string caseId = receiptCase, string tag = receiptTag)
+                {
+                    using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                    return WorldSimulationStore.SelectArrestCaseEffects(connection, CaseKey(caseId, tag), includeReceipt: true).SingleOrDefault();
+                }
+
+                byte[] CleanBytes()
+                {
+                    MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", pointId));
+                    return File.ReadAllBytes(sidecar);
+                }
+
+                bool StillCleanBytes(byte[] bytes)
+                {
+                    lock (SaveSyncActiveStateLock)
+                    {
+                        var cached = ReadSaveSyncActiveStateLocked(campaign);
+                        return !cached.Dirty && cached.SavePointId == pointId && bytes.SequenceEqual(File.ReadAllBytes(sidecar));
+                    }
+                }
+
+                Dictionary<string, object> Inspection(Dictionary<string, object> material)
+                {
+                    var query = new Dictionary<string, object>(material) { ["operation"] = "inspect" };
+                    query.Remove("expectedMaterialRevision");
+                    query.Remove("effectIntentId");
+                    return Json.Deserialize<Dictionary<string, object>>(Json.Serialize(query));
+                }
+
+                ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, preReceiptPoint);
+                var firstIntent = Versioned(0, -7);
+                var inspection = Inspection(firstIntent);
+                var cleanInspection = CleanBytes();
+                var beforeInspection = State(receiptCase, receiptTag);
+                var ready = Apply(inspection);
+                var forbiddenInspection = new Dictionary<string, object>(inspection) { ["effectIntentId"] = firstIntent["effectIntentId"] };
+                var foreignInspection = new Dictionary<string, object>(inspection) { ["sharedActivityGeneration"] = oldGeneration };
+                add("arrest_captured_repair_inspection_ready_is_read_only",
+                    ReadBool(ready, "ok", false) && ReadString(ready, "status", "") == "ready"
+                    && ReadString(ready, "operation", "") == "inspect" && ReadInt(ready, "arrestEffectVersion", 0) == 2
+                    && ReadLong(ready, "materialRevision", -1) == 0
+                    && ReadString(ready, "campaignId", "") == campaign && ReadString(ready, "timelineId", "") == timeline
+                    && ReadString(ready, "caseId", "") == receiptCase && ReadString(ready, "reputationTagId", "") == receiptTag
+                    && ReadString(ready, "playerHeroId", "") == player && ReadString(ready, "accusedHeroId", "") == accused
+                    && ReadString(ready, "sharedActivityGeneration", "<missing>") == Generation()
+                    && ReadString(Apply(forbiddenInspection), "status", "") == "invalid_effect_intent"
+                    && ReadString(Apply(foreignInspection), "status", "") == "ownership_mismatch"
+                    && State(receiptCase, receiptTag) == beforeInspection && ReceiptState() == null
+                    && StillCleanBytes(cleanInspection),
+                    "An exact registered inspection discovers the empty material revision. An injected intent or old owner cannot read or mutate it.");
+                var firstReceipt = Apply(Json.Deserialize<Dictionary<string, object>>(Json.Serialize(firstIntent)));
+                string committed = Json.Serialize(firstReceipt);
+                var firstState = State(receiptCase, receiptTag);
+                var firstStored = ReceiptState();
+                add("arrest_effect_v2_commit_has_exact_measured_receipt",
+                    ReadBool(firstReceipt, "ok", false) && ReadString(firstReceipt, "status", "") == "committed"
+                    && ReadInt(firstReceipt, "arrestEffectVersion", 0) == 2
+                    && ReadString(firstReceipt, "effectIntentId", "") == ReadString(firstIntent, "effectIntentId", "-")
+                    && ReadLong(firstReceipt, "materialRevision", -1) == 1
+                    && ReadLong(firstStored, "material_revision", -1) == 1 && ReadString(firstStored, "effect_receipt_json", "") == committed
+                    && ReadInt(firstReceipt, "appliedRelationshipDelta", int.MinValue) == -7
+                    && firstState.Affinity == -20 && CommittedCase(receiptCase, receiptTag, -7)
+                    && ReadBool(CampaignFileService.ReadAtomicallyReplacedJsonObject(sidecar), "dirty", false),
+                    "The exact successful measured response, revision, affinity and reputation commit together and dirty the active checkpoint.");
+                ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, committedReceiptPoint);
+
+                var cleanReplay = CleanBytes();
+                var changedMaterial = new Dictionary<string, object>(firstIntent) { ["worldDay"] = 18d };
+                var malformedVersion = new Dictionary<string, object>(firstIntent);
+                malformedVersion.Remove("arrestEffectVersion");
+                malformedVersion["ArrestEffectVersion"] = 2;
+                var changedRevision = new Dictionary<string, object>(firstIntent) { ["expectedMaterialRevision"] = 1 };
+                bool replayIsReadOnly = Json.Serialize(Apply(firstIntent)) == committed
+                    && ReadString(Apply(changedMaterial), "status", "") == "intent_conflict"
+                    && ReadString(Apply(Json.Deserialize<Dictionary<string, object>>(Json.Serialize(malformedVersion))), "status", "") == "invalid_effect_intent"
+                    && ReadString(Apply(changedRevision), "status", "") == "invalid_effect_intent";
+                add("arrest_effect_v2_replay_and_conflicts_are_read_only",
+                    replayIsReadOnly && State(receiptCase, receiptTag) == firstState
+                    && Json.Serialize(ReceiptState()) == Json.Serialize(firstStored) && StillCleanBytes(cleanReplay),
+                    "An exact replay returns the same committed object without rewriting the reputation or sidecar. Malformed or altered intents do not mutate.");
+
+                var settledInspection = new Dictionary<string, object>(inspection) { ["worldDay"] = 22d };
+                var settled = Apply(settledInspection);
+                var changedEvidence = new Dictionary<string, object>(settledInspection) { ["evidenceIds"] = "later_material" };
+                var mismatched = Apply(changedEvidence);
+                add("arrest_captured_repair_inspection_uses_exact_active_material",
+                    ReadBool(settled, "ok", false) && ReadString(settled, "status", "") == "settled"
+                    && ReadBool(settled, "relationshipEffectResolved", false)
+                    && ReadInt(settled, "appliedRelationshipDelta", int.MinValue) == -7
+                    && ReadLong(settled, "materialRevision", -1) == 1
+                    && !ReadBool(mismatched, "ok", true) && ReadString(mismatched, "status", "") == "material_mismatch"
+                    && !ReadBool(mismatched, "relationshipEffectResolved", true)
+                    && State(receiptCase, receiptTag) == firstState && Json.Serialize(ReceiptState()) == Json.Serialize(firstStored)
+                    && StillCleanBytes(cleanReplay),
+                    "An identical established case returns the measured effect at the existing revision. A conflicting disclosure cannot acquire permission to rebase it.");
+
+                var secondIntent = Versioned(1, -9);
+                var secondReceipt = Apply(secondIntent);
+                var secondState = State(receiptCase, receiptTag);
+                var cleanTyped = CleanBytes();
+                var older = Apply(firstIntent);
+                add("arrest_effect_v2_newer_typed_effect_fences_older",
+                    ReadString(secondReceipt, "status", "") == "committed" && ReadLong(secondReceipt, "materialRevision", -1) == 2
+                    && ReadString(older, "status", "") == "stale_material" && ReadLong(older, "materialRevision", -1) == 2
+                    && secondState.Affinity == -22 && State(receiptCase, receiptTag) == secondState && StillCleanBytes(cleanTyped),
+                    "A previous committed intent cannot replay success or overwrite a later typed material revision.");
+
+                var legacyReplacement = Apply(Request(receiptCase, receiptTag, -4));
+                var legacyState = State(receiptCase, receiptTag);
+                var cleanLegacy = CleanBytes();
+                var beforeLegacyIntent = Apply(secondIntent);
+                var legacyReceiptRow = ReceiptState();
+                add("arrest_effect_v2_ordinary_and_generation_only_writes_fence_older",
+                    ReadBool(legacyReplacement, "ok", false) && !legacyReplacement.ContainsKey("arrestEffectVersion")
+                    && ReadString(beforeLegacyIntent, "status", "") == "stale_material" && ReadLong(beforeLegacyIntent, "materialRevision", -1) == 3
+                    && ReadString(legacyReceiptRow, "effect_intent_id", "<missing>") == ""
+                    && legacyState.Affinity == -17 && State(receiptCase, receiptTag) == legacyState && StillCleanBytes(cleanLegacy),
+                    "An ordinary writer updates the revision and clears the old receipt without exposing v2 fields on the legacy response.");
+
+                var ownedRescind = Request(receiptCase, receiptTag, 0);
+                ownedRescind["operation"] = "rescind";
+                ownedRescind["sharedActivityGeneration"] = Generation();
+                var revoked = Apply(ownedRescind);
+                var terminalState = State(receiptCase, receiptTag);
+                var cleanTerminal = CleanBytes();
+                var lateApply = Apply(secondIntent);
+                add("arrest_effect_v2_late_apply_cannot_revive_rescission",
+                    ReadBool(revoked, "ok", false) && !revoked.ContainsKey("arrestEffectVersion")
+                    && ReadString(lateApply, "status", "") == "terminal_rescinded" && ReadString(lateApply, "operation", "") == "apply"
+                    && ReadLong(lateApply, "materialRevision", -1) == 4 && terminalState.Affinity == -13
+                    && State(receiptCase, receiptTag) == terminalState && StillCleanBytes(cleanTerminal),
+                    "The generation-only rescission keeps its original shape and defeats a stale typed apply with an explicit terminal result.");
+
+                var terminalInspection = Apply(inspection);
+                add("arrest_captured_repair_terminal_inspection_never_reapplies",
+                    !ReadBool(terminalInspection, "ok", true) && ReadString(terminalInspection, "operation", "") == "inspect"
+                    && ReadString(terminalInspection, "status", "") == "terminal_rescinded"
+                    && ReadLong(terminalInspection, "materialRevision", -1) == 4
+                    && !ReadBool(terminalInspection, "relationshipEffectResolved", true)
+                    && State(receiptCase, receiptTag) == terminalState && StillCleanBytes(cleanTerminal),
+                    "A retained tombstone settles a daily attempt without a new effect, measured-success claim, or sidecar write.");
+
+                const string rejectedIntentCase = "failed_receipt_case", rejectedIntentTag = "failed_receipt_tag";
+                var rejectedIntent = Versioned(0, -12, rejectedIntentCase, rejectedIntentTag);
+                var beforeRejectedReceipt = State(rejectedIntentCase, rejectedIntentTag);
+                using (var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    ReignDatabase.ExecuteSql(connection, "ALTER TABLE arrest_case_effect_state ADD CONSTRAINT d23_reject_receipt CHECK (case_id <> 'failed_receipt_case' OR effect_intent_id = '') NOT VALID;");
+                    try
+                    {
+                        var denied = Apply(rejectedIntent);
+                        add("arrest_effect_v2_failed_receipt_rolls_back_effect",
+                            !ReadBool(denied, "ok", true) && ReadString(denied, "error", "").Contains("d23_reject_receipt", StringComparison.Ordinal)
+                            && State(rejectedIntentCase, rejectedIntentTag) == beforeRejectedReceipt
+                            && ReceiptState(rejectedIntentCase, rejectedIntentTag) == null,
+                            "Rejecting the versioned case-row receipt rolls back both prior effect writes and leaves no receipt.");
+                    }
+                    finally { ReignDatabase.ExecuteSql(connection, "ALTER TABLE arrest_case_effect_state DROP CONSTRAINT d23_reject_receipt;"); }
+                }
+
+                ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, committedReceiptPoint);
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign);
+                var postRestoreClean = CleanBytes();
+                var pendingAfterRestore = new Dictionary<string, object>(firstIntent) { ["sharedActivityGeneration"] = Generation() };
+                bool restoredReceipt = ReadString(Apply(firstIntent), "status", "") == "ownership_mismatch"
+                    && Json.Serialize(Apply(pendingAfterRestore)) == committed
+                    && State(receiptCase, receiptTag) == firstState && StillCleanBytes(postRestoreClean);
+                ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, preReceiptPoint);
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign);
+                var pendingBeforeCommit = State(receiptCase, receiptTag);
+                var activeIntent = new Dictionary<string, object>(firstIntent) { ["sharedActivityGeneration"] = Generation() };
+                add("arrest_effect_v2_checkpoint_replays_only_under_current_owner",
+                    restoredReceipt && pendingBeforeCommit.Cases == 0 && pendingBeforeCommit.Reputations == 0 && pendingBeforeCommit.Affinity == -13
+                    && Json.Serialize(Apply(activeIntent)) == committed && State(receiptCase, receiptTag).Affinity == -20,
+                    "A restored committed schema replays the exact receipt only for its current owner. A restored pre-commit schema accepts the still-matching pending intent once.");
+
+                using (var olderSchema = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    ReignDatabase.ExecuteSql(olderSchema, @"ALTER TABLE arrest_case_effect_state
+DROP COLUMN effect_receipt_json,DROP COLUMN effect_intent_material,DROP COLUMN effect_intent_id,DROP COLUMN material_revision;");
+                    ReignDatabase.ExecuteSql(olderSchema, "UPDATE schema_meta SET value='5' WHERE key=$key;",
+                        TestDict("key", CampaignMigrationVersionKey));
+                }
+                var beforeMigration = State(receiptCase, receiptTag);
+                var cleanOld = CleanBytes();
+                var unavailable = Apply(activeIntent);
+                bool heldWithoutDdl;
+                using (var olderSchema = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                    heldWithoutDdl = !WorldSimulationStore.ArrestEffectReceiptSchemaReady(olderSchema);
+                bool versionedDidNotUpgrade = ReadString(unavailable, "status", "") == "arrest_effect_schema_unavailable"
+                    && beforeMigration == State(receiptCase, receiptTag) && StillCleanBytes(cleanOld) && heldWithoutDdl;
+                var oldOwner = Request(receiptCase, receiptTag, -7);
+                oldOwner["sharedActivityGeneration"] = Generation();
+                var stillLegacy = Apply(oldOwner);
+                using var migrated = ReignDatabase.OpenCampaignConnection(campaign);
+                add("arrest_effect_v2_registered_old_schema_requires_normal_migration",
+                    versionedDidNotUpgrade && ReadBool(stillLegacy, "ok", false) && !stillLegacy.ContainsKey("arrestEffectVersion")
+                    && WorldSimulationStore.ArrestEffectReceiptSchemaReady(migrated)
+                    && ReadLong(ReceiptState(), "material_revision", -1) == 0 && CommittedCase(receiptCase, receiptTag, -7),
+                    "A registered v5 schema keeps its owner-only compatibility and stays unmodified by v2 admission. The normal campaign open migrates without losing existing material.");
+            }
+            finally
+            {
+                try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                finally
+                {
+                    try { if (Occupied(missing)) ReignPostgreSqlStorage.DropCampaign(missing); }
+                    finally
+                    {
+                        lock (SaveSyncActiveStateLock)
+                        {
+                            SaveSyncActiveStates.Remove(campaign);
+                            SaveSyncActiveStates.Remove(missing);
+                        }
+                        foreach (string root in roots)
+                            if (Directory.Exists(root)) Directory.Delete(root, true);
+                    }
+                }
+            }
+        }
+
         private static void RunSaveSyncFencedRecoveryTests(Action<string, bool, string> add, string token, string sibling)
         {
             string campaign = "save_recovery_" + token;

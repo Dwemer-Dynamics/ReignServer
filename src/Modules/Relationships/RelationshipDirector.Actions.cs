@@ -406,11 +406,19 @@ namespace ReignBetaServer
         }
 
         internal static Dictionary<string, object> RelationshipDirectorReportActionApi(Dictionary<string, object> payload)
+            => RelationshipDirectorReportAction(payload, null);
+
+        private static Dictionary<string, object> RelationshipDirectorReportAction(
+            Dictionary<string, object> payload, Dictionary<string, object> owner)
         {
-            string campaignId=ReadString(payload,"campaignId","default"),id=ReadFirstString(payload,"directorActionId","director_action_id"),status=ReadString(payload,"status","completed");
+            bool typed = owner != null;
+            string campaignId = typed ? (string)owner["campaignId"] : ReadString(payload, "campaignId", "default");
+            string id = typed ? (string)payload["directorActionId"] : ReadFirstString(payload, "directorActionId", "director_action_id");
+            string status = typed ? (string)payload["status"] : ReadString(payload, "status", "completed");
             bool nativeTarget = IsRelationshipNativeTargetId(id);
+            if (typed && nativeTarget) return RelationshipDirectorOwnerError();
             // A completed divorce can ingest world history under relationship ownership.
-            using var timelineScope = status == "completed" && !nativeTarget
+            using var timelineScope = typed || status == "completed" && !nativeTarget
                 ? WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId) : null;
             using var ownership = PersistenceService.EnterCampaignWorkLock(CampaignRelationshipWriteLock(campaignId));
             if (nativeTarget)
@@ -421,11 +429,26 @@ namespace ReignBetaServer
                     return ReportRelationshipNativeTarget(targetConnection, payload);
                 }
             }
-            using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(campaignId))
+            using(ReignDbConnection connection = typed
+                ? ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaignId, trackCampaignMutations: true)
+                : ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                EnsureRelationshipDirectorSchema(connection);
-                Dictionary<string, object> action=RelationshipsStore.SelectRelationshipDirectorActions6(connection, new Dictionary<string, object>{{"id",id}}).FirstOrDefault()??new Dictionary<string, object>();
-                Dictionary<string, object> actionPayload=TryParseJsonObject(ReadString(action,"payload_json","{}"))??new Dictionary<string, object>();
+                string ownerTimeline = typed ? (string)owner["timelineId"] : "";
+                // Keep the timeline scope across admission and the legacy writer.
+                // Its World History and memory projections may open their own SQL connections.
+                if (typed && (connection == null
+                    || !WorldSimulationService.NoticeAcknowledgementOwnerMatches(connection, null, owner, campaignId, ownerTimeline)
+                    || !WorldSimulationService.TableExists(connection, "relationship_director_actions")))
+                    return RelationshipDirectorOwnerError();
+                if (!typed) EnsureRelationshipDirectorSchema(connection);
+                var action = RelationshipsStore.SelectRelationshipDirectorActions6(connection, TestDict("id", id)).FirstOrDefault();
+                string actionJson = ReadString(action, "payload_json", "{}");
+                var actionPayload = typed ? TryParseStrictJsonObject(actionJson)
+                    : TryParseJsonObject(actionJson) ?? new Dictionary<string, object>();
+                if (typed && (action == null || !RelationshipDirectorTimelineMatches(actionPayload, ownerTimeline)))
+                    return RelationshipDirectorOwnerError();
+                if (typed) EnsureRelationshipDirectorSchema(connection);
+                action ??= new Dictionary<string, object>();
                 bool arrangedReport=ReadString(actionPayload,"route","")=="arranged";
                 string completedMarriageEvaluation="";
                 using(var reportTransaction=arrangedReport?connection.BeginTransaction():null)
@@ -678,8 +701,50 @@ namespace ReignBetaServer
 			});
 		}
 
+        private static Dictionary<string, object> ReportOwnedRelationshipDirectorActions(Dictionary<string, object> payload)
+        {
+            var owner = ReadRelationshipDirectorOwner(payload);
+            if (owner == null) return RelationshipDirectorOwnerError();
+            string campaign = (string)owner["campaignId"];
+            string timeline = (string)owner["timelineId"];
+            if (!payload.TryGetValue("receipts", out object raw) || !(raw is IList receiptValues)
+                || receiptValues.Count == 0 || receiptValues.Count > 500)
+                return RelationshipDirectorOwnerError();
+            var receipts = ReadDictionaryList(payload, "receipts");
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            if (receipts.Count != receiptValues.Count || receipts.Any(receipt =>
+                !receipt.TryGetValue("directorActionId", out object idValue) || !(idValue is string id)
+                || string.IsNullOrWhiteSpace(id) || !ids.Add(id) || IsRelationshipNativeTargetId(id)
+                || !receipt.TryGetValue("timelineId", out object timelineValue)
+                || !(timelineValue is string receiptTimeline) || receiptTimeline != timeline
+                || !receipt.TryGetValue("status", out object statusValue)
+                || !(statusValue is string status) || string.IsNullOrWhiteSpace(status)))
+                return RelationshipDirectorOwnerError();
+
+            using var timelineScope = WorldSimulationService.EnterWorldHistoryTimelineScope(campaign);
+            // Check once before echoing an owner and again at each row admission.
+            using (var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+            {
+                if (connection == null || !WorldSimulationService.NoticeAcknowledgementOwnerMatches(connection, null, owner, campaign, timeline))
+                    return RelationshipDirectorOwnerError();
+            }
+
+            var results = new List<Dictionary<string, object>>(receipts.Count);
+            foreach (var receipt in receipts)
+            {
+                var single = new Dictionary<string, object>(receipt, StringComparer.OrdinalIgnoreCase)
+                    { ["campaignId"] = campaign };
+                var result = RelationshipDirectorReportAction(single, owner);
+                result["directorActionId"] = receipt["directorActionId"];
+                results.Add(result);
+            }
+            return TestDict("ok", results.All(result => ReadBool(result, "ok", false)),
+                "ownership", owner, "reportedCount", results.Count, "results", results);
+        }
+
         internal static Dictionary<string, object> RelationshipDirectorReportActionsApi(Dictionary<string, object> payload)
         {
+            if (payload?.ContainsKey("ownership") == true) return ReportOwnedRelationshipDirectorActions(payload);
             string campaignId = ReadString(payload, "campaignId", "default");
             List<Dictionary<string, object>> receipts = ReadDictionaryList(payload, "receipts").Take(500).ToList();
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();

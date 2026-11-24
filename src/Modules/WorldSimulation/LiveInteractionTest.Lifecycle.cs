@@ -333,6 +333,14 @@ namespace ReignBetaServer
                 ["queuedUtc"] = DateTimeOffset.UtcNow.ToString("o"),
                 ["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o")
             };
+            // Execution evidence belongs to the server and cannot be copied from queued input.
+            command.Remove("executionObservationVersion");
+            command.Remove("executionRetryGeneration");
+            command.Remove("issuedExecutionObservations");
+            command.Remove("executionEvidence");
+            command.Remove("executionObservation");
+            command.Remove("executionStartIdentity");
+            command.Remove("partyAgencyAcceptedSendExecution");
             if (mode.Equals("social_balance", StringComparison.OrdinalIgnoreCase))
             {
                 Dictionary<string, object> enrollment = ReadDictionary(input, "enrollment");
@@ -427,6 +435,11 @@ namespace ReignBetaServer
                 result["commands"] = commands;
                 result["assertions"] = ReadDictionaryList(run, "assertions");
                 result["failures"] = ReadDictionaryList(run, "failures");
+                if (IsLiveTestExecutionEvidenceRun(run))
+                {
+                    result["executionObservationVersion"] = LiveTestExecutionObservationVersion;
+                    result["executionStartIdentity"] = ReadDictionary(run, "executionStartIdentity");
+                }
             }
             return result;
         }

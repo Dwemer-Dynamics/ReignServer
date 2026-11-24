@@ -565,8 +565,8 @@ namespace ReignBetaServer
                     ["description"] = notableDefinition.Description,
                     ["source"] = "notable_mbti_template"
                 };
-                CachePermanentRelationshipMbti(campaignId, heroId,
-                    resolvedNotable);
+                if (!RelationshipStandingContext.DefersPublicationFor(connection))
+                    CachePermanentRelationshipMbti(campaignId, heroId, resolvedNotable);
                 return resolvedNotable;
             }
             Dictionary<string, object> stored = RelationshipsStore.SelectRelationshipPersonalities2(connection, new Dictionary<string, object> { ["hero"] = heroId }).FirstOrDefault();
@@ -580,8 +580,8 @@ namespace ReignBetaServer
                     ["description"] = ReadString(stored, "description", ""),
                     ["source"] = ReadString(stored, "source", "persisted")
                 };
-                CachePermanentRelationshipMbti(campaignId, heroId,
-                    resolvedStored);
+                if (!RelationshipStandingContext.DefersPublicationFor(connection))
+                    CachePermanentRelationshipMbti(campaignId, heroId, resolvedStored);
                 return resolvedStored;
             }
 
@@ -640,8 +640,8 @@ namespace ReignBetaServer
                 ["description"] = resolvedDefinition.Description,
                 ["source"] = source
             };
-            CachePermanentRelationshipMbti(campaignId, heroId,
-                resolvedProfile);
+            if (!RelationshipStandingContext.DefersPublicationFor(connection))
+                CachePermanentRelationshipMbti(campaignId, heroId, resolvedProfile);
             return resolvedProfile;
         }
 

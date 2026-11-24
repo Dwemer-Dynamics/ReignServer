@@ -466,7 +466,8 @@ namespace ReignBetaServer
             string generationOperationId,
             string generationStartedUtc,
             Dictionary<string, object> timing,
-            long durationMs)
+            long durationMs,
+            Dictionary<string, object> refreshPublication)
         {
             if (string.IsNullOrWhiteSpace(heroId))
             {
@@ -481,13 +482,14 @@ namespace ReignBetaServer
             string portraitPath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.png");
             string sourcePath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "source.png");
             string promptPath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "prompt.txt");
-            Directory.CreateDirectory(Path.GetDirectoryName(portraitPath));
             lock (Program.FileLock)
             {
+                PersistenceService.RequireSaveSyncCampaignAvailable(campaignId);
+                Directory.CreateDirectory(Path.GetDirectoryName(portraitPath));
                 File.WriteAllBytes(portraitPath, imageBytes);
                 File.WriteAllBytes(sourcePath, sourceImage);
                 File.WriteAllText(promptPath, prompt ?? "", Encoding.UTF8);
-                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.json"), new Dictionary<string, object>
+                var metadata = new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["heroStringId"] = heroId,
@@ -509,7 +511,9 @@ namespace ReignBetaServer
                     ["physicalConfidence"] = physicalConfidence ?? new Dictionary<string, object>(),
                     ["storedPath"] = portraitPath,
                     ["updatedUtc"] = DateTime.UtcNow.ToString("o")
-                });
+                };
+                if (refreshPublication != null) metadata[PortraitRefreshPublicationKey] = refreshPublication;
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.json"), metadata);
             }
 
             return portraitPath;

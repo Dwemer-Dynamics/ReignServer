@@ -508,8 +508,8 @@ namespace ReignBetaServer
             };
             lock (SaveSyncActiveStateLock)
             {
+                WriteSaveSyncActiveState(campaignId, state, dirty: false);
                 SaveSyncActiveStates[campaignId] = state;
-                WriteSaveSyncActiveState(campaignId, state);
             }
         }
 
@@ -530,14 +530,7 @@ namespace ReignBetaServer
             string relative = full.Substring(campaigns.Length);
             int separator = relative.IndexOf(Path.DirectorySeparatorChar);
             if (separator <= 0) return;
-            string campaignId = relative.Substring(0, separator);
-            lock (SaveSyncActiveStateLock)
-            {
-                SaveSyncActiveState state = ReadSaveSyncActiveStateLocked(campaignId);
-                if (state.Dirty) return;
-                state.Dirty = true;
-                WriteSaveSyncActiveState(campaignId, state);
-            }
+            MarkSaveSyncActiveStateDirty(relative.Substring(0, separator));
         }
 
         internal static void MarkSaveSyncActiveStateDirty(string campaignId)
@@ -548,8 +541,9 @@ namespace ReignBetaServer
                 SaveSyncActiveState state =
                     ReadSaveSyncActiveStateLocked(campaignId);
                 if (state.Dirty) return;
+                // Keep this attempt retryable until the durable sidecar is published.
+                WriteSaveSyncActiveState(campaignId, state, dirty: true);
                 state.Dirty = true;
-                WriteSaveSyncActiveState(campaignId, state);
             }
         }
 
@@ -608,22 +602,31 @@ namespace ReignBetaServer
             return loaded;
         }
 
-        private static void WriteSaveSyncActiveState(string campaignId, SaveSyncActiveState state)
+        private static void WriteSaveSyncActiveState(string campaignId, SaveSyncActiveState state, bool dirty)
         {
             string path = SaveSyncActiveStatePath(campaignId);
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             string temp = path + ".tmp_" + Guid.NewGuid().ToString("N");
-            File.WriteAllText(temp, Json.Serialize(new Dictionary<string, object>
+            try
             {
-                ["format"] = "bannerlord-reign-save-sync-active-state",
-                ["version"] = 1,
-                ["campaignId"] = campaignId,
-                ["savePointId"] = state.SavePointId ?? "",
-                ["calendarSha256"] = state.CalendarSha256 ?? "",
-                ["dirty"] = state.Dirty,
-                ["updatedUtc"] = DateTime.UtcNow.ToString("o")
-            }), new UTF8Encoding(false));
-            ReplaceSaveSyncFileWithRetry(temp, path);
+                File.WriteAllText(temp, Json.Serialize(new Dictionary<string, object>
+                {
+                    ["format"] = "bannerlord-reign-save-sync-active-state",
+                    ["version"] = 1,
+                    ["campaignId"] = campaignId,
+                    ["savePointId"] = state.SavePointId ?? "",
+                    ["calendarSha256"] = state.CalendarSha256 ?? "",
+                    ["dirty"] = dirty,
+                    ["updatedUtc"] = DateTime.UtcNow.ToString("o")
+                }), new UTF8Encoding(false));
+                ReplaceSaveSyncFileWithRetry(temp, path);
+            }
+            catch
+            {
+                // The active marker may be retried. Only remove the temporary created by this publication.
+                TryDeleteFile(temp);
+                throw;
+            }
         }
 
         internal static void ResumePendingSaveSyncOptimizations()

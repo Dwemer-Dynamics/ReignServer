@@ -101,6 +101,13 @@ WHERE rst.subject_id=$id ORDER BY ro.world_day DESC LIMIT 500;", parameters, tra
 WHERE letter_id=$id AND (sender_id=$hero OR recipient_id=$hero) AND status=$expected RETURNING status;", parameters, transaction);
         }
 
+        internal static List<Dictionary<string, object>> UpdateEditorSummaryText(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"UPDATE summaries SET summary=$value
+WHERE summary_id=$id AND owner_id=$hero AND status='active' AND summary COLLATE ""C""=$expected RETURNING summary;", parameters, transaction);
+        }
+
         internal static List<Dictionary<string, object>> SelectConceptions(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, "SELECT * FROM conceptions WHERE mother_id=$id OR biological_father_id=$id OR legal_father_id=$id ORDER BY updated_ts DESC LIMIT 500;", parameters, transaction);
