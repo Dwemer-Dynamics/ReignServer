@@ -80,6 +80,35 @@ class PrecisionContracts(unittest.TestCase):
 
 
 class RuntimePrecisionContracts(unittest.TestCase):
+    def test_local_search_materializes_only_best_eligible_document_hits(self):
+        np = worker.np
+        ids = [str(i) for i in range(2005)]
+        base = {"eligibilityVersion": 2, "ownerId": "npc_a", "knownBy": ["npc_b"],
+                "privateMental": False, "hiddenFrom": [], "timelineId": "branch",
+                "restoreGeneration": "current", "worldDay": 20, "status": "active"}
+        payloads = [dict(base, documentId="long") for _ in range(2000)]
+        payloads += [dict(base, documentId="late"), dict(base), dict(base, documentId="tied"),
+                     dict(base, documentId="hidden", hiddenFrom=["npc_b"]), None]
+        matrix = np.zeros((len(ids), worker.MODEL_DIMENSIONS), dtype=np.float32)
+        matrix[:2000, 0] = 1.0
+        matrix[2000:2003, :2] = [0.8, 0.6]
+        matrix[2003:, 0] = 1.0
+        index = {"ids": ids, "payloads": payloads, "matrix": matrix,
+                 "points": dict(zip(ids, payloads)), "matrix_rebuild_count": 0}
+        filters = {"observerId": "npc_b", "timelineId": "branch",
+                   "restoreGeneration": "current", "asOfWorldDay": 30}
+        state = worker.WorkerState(Path(tempfile.gettempdir()) / "unused")
+        query = [1.0] + [0.0] * (worker.MODEL_DIMENSIONS - 1)
+        unbounded, _ = state.search_local_index(index, query, filters)
+        self.assertEqual(len(unbounded), 2003)
+        for limit in (1, 2, 4, 512):
+            with self.subTest(limit=limit):
+                bounded, timings = state.search_local_index(index, query, filters, document_limit=limit)
+                self.assertEqual(bounded, worker.unique_document_hits(unbounded, limit))
+                self.assertEqual(timings["localCandidatePoints"], len(unbounded))
+        self.assertEqual({hit["id"] for hit in bounded if "documentId" not in hit["payload"]}, {"2001"})
+        self.assertNotIn("2003", [hit["id"] for hit in bounded])
+
     def test_compact_archive_reload_matches_native_and_preserves_all_sources(self):
         from compact_store import CompactQdrantLocal
         from qdrant_client import QdrantClient, models

@@ -31,6 +31,20 @@ namespace ReignLiveTest
                 String(native, "schema") == "reign-gossip-clock-runtime-v1" && String(native, "campaignId") == campaign && String(native, "timelineId") == timeline,
                 native.ContainsKey("lastError") ? String(native, "lastError") : null);
         }
+        private static string PassiveWorldNpcLivesBlocker(Dictionary<string, object> runtime, string campaign, string timeline)
+        {
+            var native = ReadObject(runtime, "npcLives");
+            var saveSync = ReadObject(runtime, "saveSync");
+            bool scopeCurrent = campaign.Length > 0 && timeline.Length > 0
+                && String(runtime, "campaignId") == campaign && String(saveSync, "timelineId") == timeline
+                && String(native, "campaignId") == campaign && String(native, "timelineId") == timeline;
+            long Count(string name) => native.TryGetValue(name, out object raw) && (raw is int || raw is long)
+                ? ReadLong(native, name, -1) : -1;
+            return PassiveWorldCheckpointPolicy.NpcLivesBlocker(String(native, "schema"), scopeCurrent,
+                native.TryGetValue("snapshotReady", out object snapshot) && snapshot is bool ready ? ready : (bool?)null,
+                native.TryGetValue("mutationInFlight", out object mutation) && mutation is bool active ? active : (bool?)null,
+                Count("pendingReceipts"), Count("dueNativeRewards"));
+        }
         private static bool _observeGovernmentNewsForPassiveWorldControl;
         private static string _checkpointPeriodicPollToken;
         private static Dictionary<string, object> _checkpointPeriodicPollRuntime;
@@ -199,9 +213,9 @@ namespace ReignLiveTest
             if (NativeCheckpointNotSubmitted(saved, ownership))
                 return ReportCheckpointNotSubmitted(saved, ownership);
             Dictionary<string, object> finalRuntime =
-                WaitForPassiveWorldPostSaveRuntime(campaignId, saveName);
+                WaitForPassiveWorldPostSaveRuntime(campaignId, timelineId, saveName);
             bool postSaveRuntimeQuiesced =
-                PassiveWorldPostSaveRuntimeQuiesced(finalRuntime, saveName);
+                PassiveWorldPostSaveRuntimeQuiesced(finalRuntime, campaignId, timelineId, saveName);
             Dictionary<string, object> finalStatus = CompactPassiveWorldStatus(
                 finalRuntime, campaignId, timelineId);
             return new Dictionary<string, object>
@@ -211,6 +225,7 @@ namespace ReignLiveTest
                 ["timelineId"] = timelineId,
                 ["drain"] = drained,
                 ["postSaveRuntimeQuiesced"] = postSaveRuntimeQuiesced,
+                ["npcLivesCheckpointBlocker"] = PassiveWorldNpcLivesBlocker(ReadObject(finalRuntime, "runtime"), campaignId, timelineId),
                 ["save"] = CompactPassiveWorldSave(saved, finalRuntime),
                 ["report"] = finalStatus
             };
@@ -328,9 +343,9 @@ namespace ReignLiveTest
 
             Dictionary<string, object> finalRuntime = string.IsNullOrWhiteSpace(saveName)
                 ? Runtime(new[] { "status", "--campaign", campaignId })
-                : WaitForPassiveWorldPostSaveRuntime(campaignId, saveName);
+                : WaitForPassiveWorldPostSaveRuntime(campaignId, timelineId, saveName);
             bool postSaveRuntimeQuiesced = string.IsNullOrWhiteSpace(saveName)
-                || PassiveWorldPostSaveRuntimeQuiesced(finalRuntime, saveName);
+                || PassiveWorldPostSaveRuntimeQuiesced(finalRuntime, campaignId, timelineId, saveName);
             Dictionary<string, object> finalStatus = PassiveWorldStatus(
                 finalRuntime, campaignId, timelineId);
             return new Dictionary<string, object>
@@ -343,6 +358,7 @@ namespace ReignLiveTest
                 ["advanceRun"] = CompactPassiveWorldRun(run),
                 ["catchUp"] = caughtUp,
                 ["postSaveRuntimeQuiesced"] = postSaveRuntimeQuiesced,
+                ["npcLivesCheckpointBlocker"] = PassiveWorldNpcLivesBlocker(ReadObject(finalRuntime, "runtime"), campaignId, timelineId),
                 ["save"] = CompactPassiveWorldSave(save, finalRuntime),
                 ["report"] = CompactPassiveWorldStatus(
                     finalRuntime, campaignId, timelineId)
@@ -489,6 +505,7 @@ namespace ReignLiveTest
                     nextHoldRenewal = DateTime.UtcNow.AddSeconds(20);
                 }
                 bool gossipQuiescent = PersonalGossipCheckpointQuiescent(gossip, nativeRuntime, campaignId, timelineId);
+                string npcLivesBlocker = PassiveWorldNpcLivesBlocker(nativeRuntime, campaignId, timelineId);
                 string actionFailure = PassiveWorldCheckpointPolicy.ActionFailureError(
                     ReadLong(ReadObject(latest, "pipeline"), "failedActions", -1));
                 if (!string.IsNullOrEmpty(actionFailure))
@@ -613,6 +630,7 @@ namespace ReignLiveTest
                     && GovernmentRuntimeQuiescent(nativeRuntime)
                     && RulerRuntimeQuiescent(nativeRuntime)
                     && gossipQuiescent
+                    && npcLivesBlocker.Length == 0
                     && !ReadBoolean(diplomacy, "inFlight")
                     && nativeEffectsPending == 0
                     && nativeEffectsFailed == 0
@@ -638,6 +656,7 @@ namespace ReignLiveTest
                     ["government"] = !GovernmentRuntimeQuiescent(nativeRuntime),
                     ["rulers"] = !RulerRuntimeQuiescent(nativeRuntime),
                     ["personalGossip"] = !gossipQuiescent,
+                    ["npcLives"] = npcLivesBlocker.Length != 0,
                     ["diplomacy"] = ReadBoolean(diplomacy, "inFlight"),
                     ["worldHistory"] = ReadLong(worldHistory, "pendingCount", -1) != 0 || ReadBoolean(worldHistory, "uploadInFlight"),
                     ["nativeOffline"] = !ReadBoolean(latestRuntime, "gameOnline"),
@@ -653,6 +672,7 @@ namespace ReignLiveTest
                         ["ok"] = true,
                         ["status"] = "caught_up",
                         ["personalGossip"] = latestGossip,
+                        ["npcLivesCheckpointBlocker"] = npcLivesBlocker,
                         ["catchUpMs"] = gateTimer.ElapsedMilliseconds,
                         ["blockedObservationMs"] = blockedMs,
                         ["requiredStableObservations"] = PassiveWorldStableObservationCount,
@@ -669,6 +689,7 @@ namespace ReignLiveTest
                 ["ok"] = false,
                 ["status"] = "catch_up_timeout",
                 ["personalGossip"] = latestGossip,
+                ["npcLivesCheckpointBlocker"] = PassiveWorldNpcLivesBlocker(ReadObject(latestRuntime, "runtime"), campaignId, timelineId),
                 ["catchUpMs"] = gateTimer.ElapsedMilliseconds,
                 ["blockedObservationMs"] = blockedMs,
                 ["error"] = "Passive systems and native diplomacy did not remain caught up for the required quiescence window before the timeout.",
@@ -726,6 +747,7 @@ namespace ReignLiveTest
                 ["clanAccords"] = ReadObject(native, "clanAccords"),
                 ["government"] = ReadObject(native, "government"),
                 ["personalGossip"] = ReadObject(native, "personalGossip"),
+                ["npcLives"] = ReadObject(native, "npcLives"),
                 ["saveSync"] = new Dictionary<string, object>
                 {
                     ["alignmentPending"] = ReadBoolean(saveSync, "alignmentPending"),
@@ -835,6 +857,7 @@ namespace ReignLiveTest
 
         private static Dictionary<string, object> WaitForPassiveWorldPostSaveRuntime(
             string campaignId,
+            string timelineId,
             string saveName)
         {
             DateTime deadline = DateTime.UtcNow.AddSeconds(45);
@@ -843,7 +866,7 @@ namespace ReignLiveTest
             do
             {
                 latest = Runtime(new[] { "status", "--campaign", campaignId });
-                if (PassiveWorldPostSaveRuntimeQuiesced(latest, saveName))
+                if (PassiveWorldPostSaveRuntimeQuiesced(latest, campaignId, timelineId, saveName))
                 {
                     if (!quiescentSinceUtc.HasValue)
                         quiescentSinceUtc = DateTime.UtcNow;
@@ -863,6 +886,8 @@ namespace ReignLiveTest
 
         private static bool PassiveWorldPostSaveRuntimeQuiesced(
             Dictionary<string, object> value,
+            string campaignId,
+            string timelineId,
             string saveName)
         {
             Dictionary<string, object> runtime = ReadObject(value, "runtime");
@@ -882,6 +907,7 @@ namespace ReignLiveTest
                 && ClanAccordsRuntimeQuiescent(runtime)
                 && GovernmentRuntimeQuiescent(runtime)
                 && RulerRuntimeQuiescent(runtime)
+                && PassiveWorldNpcLivesBlocker(runtime, campaignId, timelineId).Length == 0
                 && !ReadBoolean(saveSync, "alignmentPending")
                 && ReadBoolean(saveSync, "ready")
                 && !ReadBoolean(diplomacy, "inFlight")

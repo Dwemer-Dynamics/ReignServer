@@ -477,56 +477,81 @@ namespace ReignBetaServer
             lock (Program.FileLock)
             {
                 PersistenceService.RequireSaveSyncPathAvailable(path);
-                string directory = Path.GetDirectoryName(path);
-                string serialized = Json.Serialize(value);
-                for (int attempt = 0; ; attempt++)
-                {
-                    Directory.CreateDirectory(directory);
-                    // Use a short same-directory name so installed Bannerlord paths
-                    // remain below the legacy Win32 path limit.
-                    string temp = Path.Combine(
-                        directory,
-                        "~" + Guid.NewGuid().ToString("N").Substring(0, 8));
-                    try
-                    {
-                        File.WriteAllText(temp, serialized, new UTF8Encoding(false));
-                        if (File.Exists(path))
-                        {
-                            const uint moveFileReplaceExisting = 0x1;
-                            const uint moveFileWriteThrough = 0x8;
-                            if (!PersistenceService.MoveFileEx(temp, path,
-                                moveFileReplaceExisting | moveFileWriteThrough))
-                                throw new IOException(
-                                    "Atomic JSON replacement failed.",
-                                    new System.ComponentModel.Win32Exception(
-                                        System.Runtime.InteropServices.Marshal.GetLastWin32Error()));
-                        }
-                        else File.Move(temp, path);
-                        break;
-                    }
-                    catch (DirectoryNotFoundException) when (attempt < 7)
-                    {
-                        // Save Sync and verification sandboxes replace whole campaign
-                        // directories atomically. Retry if the leaf disappears between
-                        // the write and replace.
-                        Thread.Yield();
-                    }
-                    catch (IOException) when (attempt < 20)
-                    {
-                        // Another Reign process (for example a parallel verification
-                        // fixture or the vector worker) can briefly have the destination
-                        // open. Keep atomic replacement semantics and retry the bounded
-                        // transient sharing violation instead of corrupting the profile.
-                        Thread.Sleep(Math.Min(100, 5 * (attempt + 1)));
-                    }
-                    catch (UnauthorizedAccessException) when (attempt < 20)
-                    {
-                        Thread.Sleep(Math.Min(100, 5 * (attempt + 1)));
-                    }
-                    finally { PersistenceService.TryDeleteFile(temp); }
-                }
+                WriteJsonObjectLocked(path, value);
             }
             PersistenceService.MarkSaveSyncActiveStateDirtyForPath(path);
+        }
+
+        internal static bool TryUpdateJsonObject(string path,
+            Func<Dictionary<string, object>, Dictionary<string, object>> update)
+        {
+            PersistenceService.ThrowIfCampaignRequestReplaced();
+            lock (Program.FileLock)
+            {
+                PersistenceService.RequireSaveSyncPathAvailable(path);
+                if (!File.Exists(path)) return false;
+                string source = File.ReadAllText(path, Encoding.UTF8).TrimStart();
+                if (!source.StartsWith("{", StringComparison.Ordinal)) return false;
+                var current = TryParseStrictJsonObject(source);
+                if (current == null) return false;
+                var next = update(current);
+                if (next == null) return false;
+                WriteJsonObjectLocked(path, next);
+            }
+            PersistenceService.MarkSaveSyncActiveStateDirtyForPath(path);
+            return true;
+        }
+
+        private static void WriteJsonObjectLocked(string path, object value)
+        {
+            string directory = Path.GetDirectoryName(path);
+            string serialized = Json.Serialize(value);
+            for (int attempt = 0; ; attempt++)
+            {
+                Directory.CreateDirectory(directory);
+                // Use a short same-directory name so installed Bannerlord paths
+                // remain below the legacy Win32 path limit.
+                string temp = Path.Combine(
+                    directory,
+                    "~" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                try
+                {
+                    File.WriteAllText(temp, serialized, new UTF8Encoding(false));
+                    if (File.Exists(path))
+                    {
+                        const uint moveFileReplaceExisting = 0x1;
+                        const uint moveFileWriteThrough = 0x8;
+                        if (!PersistenceService.MoveFileEx(temp, path,
+                            moveFileReplaceExisting | moveFileWriteThrough))
+                            throw new IOException(
+                                "Atomic JSON replacement failed.",
+                                new System.ComponentModel.Win32Exception(
+                                    System.Runtime.InteropServices.Marshal.GetLastWin32Error()));
+                    }
+                    else File.Move(temp, path);
+                    break;
+                }
+                catch (DirectoryNotFoundException) when (attempt < 7)
+                {
+                    // Save Sync and verification sandboxes replace whole campaign
+                    // directories atomically. Retry if the leaf disappears between
+                    // the write and replace.
+                    Thread.Yield();
+                }
+                catch (IOException) when (attempt < 20)
+                {
+                    // Another Reign process (for example a parallel verification
+                    // fixture or the vector worker) can briefly have the destination
+                    // open. Keep atomic replacement semantics and retry the bounded
+                    // transient sharing violation instead of corrupting the profile.
+                    Thread.Sleep(Math.Min(100, 5 * (attempt + 1)));
+                }
+                catch (UnauthorizedAccessException) when (attempt < 20)
+                {
+                    Thread.Sleep(Math.Min(100, 5 * (attempt + 1)));
+                }
+                finally { PersistenceService.TryDeleteFile(temp); }
+            }
         }
 
         internal static void EnsureJsonObjectFile(string path, Dictionary<string, object> fallback)

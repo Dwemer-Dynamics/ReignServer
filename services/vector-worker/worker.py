@@ -424,8 +424,10 @@ class WorkerState:
                     index["matrix"][position].fill(0)
                     index["free_positions"].append(position)
 
-    def search_local_index(self, index: dict[str, Any], vector: list[float],
-                           filters: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    def search_local_index(
+        self, index: dict[str, Any], vector: list[float], filters: dict[str, Any],
+        document_limit: int | None = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         started = time.perf_counter()
         if index["matrix"] is None:
             self.rebuild_local_matrix(index)
@@ -438,13 +440,24 @@ class WorkerState:
             query_vector = np.asarray(vector, dtype=np.float32)
             query_vector = query_vector / max(float(np.linalg.norm(query_vector)), 1e-12)
             candidate_scores = index["matrix"][matching] @ query_vector
-            # Inspect every eligible chunk before document deduplication. A long
-            # document must not displace another document's later answer.
+            # Rank every eligible chunk so a long document cannot displace a
+            # later answer. Only materialize the winning hit for each document.
             selected = np.argsort(candidate_scores)[::-1]
-            results = [{"id": index["ids"][matching[int(position)]],
-                        "score": float(candidate_scores[int(position)]),
-                        "payload": index["payloads"][matching[int(position)]]}
-                       for position in selected]
+            seen_documents = set()
+            for candidate in selected:
+                rank = int(candidate)
+                position = matching[rank]
+                point_id = index["ids"][position]
+                payload = index["payloads"][position]
+                if document_limit is not None:
+                    document_id = payload.get("documentId") or point_id
+                    if document_id in seen_documents:
+                        continue
+                    seen_documents.add(document_id)
+                results.append({"id": point_id, "score": float(candidate_scores[rank]),
+                                "payload": payload})
+                if document_limit is not None and len(results) >= document_limit:
+                    break
         return results, {"localMatrixRebuildMs": int((rebuilt - started) * 1000),
                          "localFilterMs": int((filtered - rebuilt) * 1000),
                          "localScoreAndSortMs": int((time.perf_counter() - filtered) * 1000),
@@ -859,7 +872,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 if provider != "qdrant":
                     index = STATE.load_local_index(client, collection)
-                    results, local_timing = STATE.search_local_index(index, vector, body.get("filters") or {})
+                    results, local_timing = STATE.search_local_index(
+                        index, vector, body.get("filters") or {}, document_limit=limit)
                     gate_timing.update(local_timing)
                 else:
                     response = client.query_points_groups(
@@ -876,7 +890,8 @@ class Handler(BaseHTTPRequestHandler):
                         {"id": str(point.id), "score": float(point.score), "payload": point.payload or {}}
                         for group in response.groups for point in group.hits
                     ]
-        results = unique_document_hits(results, limit)
+        if provider == "qdrant":
+            results = unique_document_hits(results, limit)
         timing = STATE.record_operation("search", True, started, gate_timing)
         self.send_json(200, {"ok": True, "results": results, "collection": collection, "provider": provider,
                              "eligibilityApplied": bool((body.get("filters") or {}).get("observerId")),
