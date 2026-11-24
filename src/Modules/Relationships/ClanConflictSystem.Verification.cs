@@ -438,6 +438,7 @@ namespace ReignBetaServer
                     ["ok"] = true, ["count"] = fetchedRows.Count,
                     ["notices"] = fetchedRows.Cast<object>().ToList()
                 });
+                RunOwnedNoticePersistenceSelfTests(add, persistenceCampaign, persistenceTimeline, fetchedIncident);
                 string acknowledgedJson = Json.Serialize(AcknowledgeClanConflictNotice(new Dictionary<string, object>
                 {
                     ["campaignId"] = persistenceCampaign, ["timelineId"] = persistenceTimeline,
@@ -472,6 +473,131 @@ namespace ReignBetaServer
             try { ReignPostgreSqlStorage.DropCampaign(persistenceCampaign); } catch { }
             PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(persistenceCampaign));
             return rows;
+        }
+
+        private static void RunOwnedNoticePersistenceSelfTests(Action<string, bool, string> add,
+            string campaign, string timeline, string clanIncident)
+        {
+            const string first = "notice_owner_pressure_a";
+            const string second = "notice_owner_pressure_b";
+            string EffectId(string incident) => incident + "_effect";
+            Dictionary<string, string> Query(string generation) => new Dictionary<string, string>
+            {
+                ["campaignId"] = campaign, ["timelineId"] = timeline, ["sharedActivityGeneration"] = generation
+            };
+            Dictionary<string, object> Ack(string generation, string incident) =>
+                TestDict("campaignId", campaign, "timelineId", timeline, "sharedActivityGeneration", generation,
+                    "incidentId", incident, "worldDay", 503d);
+            Dictionary<string, object> PressureAck(string generation, params string[] effects)
+            {
+                var body = Ack(generation, first);
+                body["effectReceipts"] = effects.Select(id => TestDict("effectId", id, "ok", true, "before", 50d, "after", 40d)).ToList();
+                return DiplomacyService.AcknowledgePoliticalPressureNotice(body);
+            }
+            bool Ok(Dictionary<string, object> response) => ReadBool(response, "ok", false);
+            bool Owns(Dictionary<string, object> response, string generation)
+            {
+                var owner = ReadDictionary(response, "ownership");
+                return Ok(response) && ReadString(owner, "campaignId", "") == campaign
+                    && ReadString(owner, "timelineId", "") == timeline
+                    && ReadString(owner, "sharedActivityGeneration", "<missing>") == generation;
+            }
+            string ReadGeneration()
+            {
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                return ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "<missing>");
+            }
+            List<Dictionary<string, object>> ReadEffects(ReignDbConnection connection, string incident) =>
+                DiplomacyStore.SelectPoliticalPressureNativeEffects(connection, TestDict("incident", incident));
+            string Snapshot()
+            {
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                return Json.Serialize(TestDict(
+                    "incidents", WorldSimulationStore.SelectPoliticalPressureIncidents(connection).OrderBy(row => ReadString(row, "incident_id", "")).ToList(),
+                    "effects", ReadEffects(connection, first).Concat(ReadEffects(connection, second)).ToList(),
+                    "activity", WorldSimulationStore.SelectPoliticalPressureActivity(connection),
+                    "clan", RelationshipsStore.SelectClanConflictIncidents(connection, TestDict("campaign", campaign, "timeline", timeline))));
+            }
+            try
+            {
+                var opened = WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", timeline));
+                if (!Ok(opened) || ReadString(opened, "timelineId", "") != timeline || string.IsNullOrEmpty(clanIncident))
+                    throw new InvalidOperationException("The disposable notice scope did not initialize.");
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaign))
+                {
+                    DiplomacyService.EnsurePoliticalPressureSchema(connection);
+                    var fields = new Dictionary<string, object>();
+                    foreach (string key in new[] { "archetype_id", "polarity", "channel", "severity", "origin_kingdom_id", "target_kingdom_id",
+                        "origin_kingdom_name", "target_kingdom_name", "origin_ruler_id", "target_ruler_id", "origin_ruler_name", "target_ruler_name",
+                        "origin_clans_json", "origin_lords_json", "target_clans_json", "target_lords_json", "trait_routes_json",
+                        "trait_rolls_json", "origin_stance", "target_stance", "headline", "narrative", "llm_selector_status",
+                        "llm_narration_status", "correlation_id" })
+                        fields[key] = "";
+                    foreach (string key in new[] { "severity_rank", "pressure_amount", "relationship_penalty", "origin_war_count",
+                        "target_war_count", "hostile_chance", "polarity_roll", "origin_pressure_before", "origin_pressure_after",
+                        "target_pressure_before", "target_pressure_after", "created_ts", "updated_ts" })
+                        fields[key] = 0;
+                    fields["campaign_id"] = campaign;
+                    fields["timeline_id"] = timeline;
+                    foreach (string incident in new[] { first, second })
+                    {
+                        int day = incident == first ? 501 : 502;
+                        fields["incident_id"] = incident;
+                        fields["day_key"] = day;
+                        fields["world_day"] = day;
+                        WorldSimulationStore.InsertPoliticalPressureIncidents(connection, string.Join(",", fields.Keys),
+                            string.Join(",", fields.Keys.Select(key => "$" + key)), fields);
+                        DiplomacyStore.InsertOrIgnorePoliticalPressureNativeEffects(connection, TestDict("id", EffectId(incident),
+                            "incident", incident, "campaign", campaign, "timeline", timeline, "day", day, "target", "fixture_settlement", "ts", 0L));
+                    }
+                }
+
+                string original = ReadGeneration();
+                var pressureFetch = DiplomacyService.NextPoliticalPressureNotices(Query(original));
+                var clanFetch = NextClanConflictNotices(Query(original));
+                var pressureNotices = ReadDictionaryList(pressureFetch, "notices");
+                add("typed_notice_fetch_uses_postgresql_owner",
+                    Owns(pressureFetch, original) && Owns(clanFetch, original) && pressureNotices.Count == 2
+                    && ReadDictionaryList(pressureNotices[0], "nativeEffects").Any(row => ReadString(row, "effect_id", "") == EffectId(first))
+                    && ReadDictionaryList(clanFetch, "notices").Any(row => ReadString(row, "incident_id", "") == clanIncident),
+                    "Both typed GETs return their exact persisted owner and the matching real notice rows.");
+
+                string beforeMixed = Snapshot();
+                bool mixedRejected = !Ok(PressureAck(original, EffectId(first), EffectId(second)));
+                add("typed_notice_pressure_denies_mixed_incident_receipt",
+                    mixedRejected && Snapshot() == beforeMixed,
+                    "A mixed pressure receipt does not update either pending effect, incident or activity.");
+
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign);
+                string current = ReadGeneration();
+                string beforeStale = Snapshot();
+                bool staleDenied = !Ok(DiplomacyService.NextPoliticalPressureNotices(Query(original)))
+                    && !Ok(NextClanConflictNotices(Query(original)))
+                    && !Ok(PressureAck(original, EffectId(first)))
+                    && !Ok(AcknowledgeClanConflictNotice(Ack(original, clanIncident)));
+                add("typed_notice_restore_generation_fences_fetch_and_ack",
+                    current != original && staleDenied && Snapshot() == beforeStale,
+                    "The persisted generation advance fences stale GET and ACK requests without changing notice state.");
+
+                var currentPressure = DiplomacyService.NextPoliticalPressureNotices(Query(current));
+                var currentClan = NextClanConflictNotices(Query(current));
+                bool acknowledged = Ok(PressureAck(current, EffectId(first))) && Ok(AcknowledgeClanConflictNotice(Ack(current, clanIncident)));
+                using var check = ReignDatabase.OpenCampaignConnection(campaign);
+                var pressureRows = WorldSimulationStore.SelectPoliticalPressureIncidents(check);
+                add("typed_notice_current_owner_acknowledges_exact_rows",
+                    Owns(currentPressure, current) && Owns(currentClan, current) && acknowledged
+                    && ReadString(ReadEffects(check, first).SingleOrDefault(), "status", "") == "applied"
+                    && ReadString(ReadEffects(check, second).SingleOrDefault(), "status", "") == "pending"
+                    && ReadString(pressureRows.Single(row => ReadString(row, "incident_id", "") == first), "notice_status", "") == "acknowledged"
+                    && ReadString(pressureRows.Single(row => ReadString(row, "incident_id", "") == second), "notice_status", "") == "fetched"
+                    && WorldSimulationStore.SelectPoliticalPressureActivity(check).Count == 1
+                    && ReadDictionaryList(NextClanConflictNotices(Query(current)), "notices").Count == 0,
+                    "The current persisted owner can acknowledge the exact notices without applying an unrelated pressure effect.");
+            }
+            catch (Exception ex)
+            {
+                add("typed_notice_postgresql_fixture", false, "Scoped notice fixture failed: " + ex.Message);
+            }
         }
 
         // Byte equality of the typed clan-conflict contract against the pre-contract Dictionary shapes.

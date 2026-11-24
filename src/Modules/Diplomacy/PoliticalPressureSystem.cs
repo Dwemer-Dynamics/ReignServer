@@ -956,25 +956,51 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> NextPoliticalPressureNotices(Dictionary<string, string> query)
         {
             PoliticalPressureNoticesRequest request = PoliticalPressureNoticesRequest.FromQuery(query);
+            if (query?.ContainsKey("sharedActivityGeneration") == true)
+                return WorldSimulationService.ReadOwnedNoticeSnapshot(query, (connection, transaction, campaign, timeline) =>
+                    ReadPoliticalPressureNotices(connection, campaign, timeline, request.Limit, transaction));
             string campaignId = request.CampaignId;
             string timelineId = request.TimelineId;
-            int limit = request.Limit;
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                List<Dictionary<string, object>> incidents = DiplomacyStore.SelectPoliticalPressureIncidents4(connection, limit.ToString(CultureInfo.InvariantCulture),                    new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
-                foreach (Dictionary<string, object> incident in incidents)
-                {
-                    incident["news_description"] = PoliticalPressureCatalog.FirstOrDefault(a => a.Id == ReadString(incident, "archetype_id", ""))?.Description ?? "";
-                    string id = ReadString(incident, "incident_id", "");
-                    incident["nativeEffects"] = DiplomacyStore.SelectPoliticalPressureNativeEffects(connection, new Dictionary<string, object> { ["incident"] = id });
-                    DiplomacyStore.UpdatePoliticalPressureIncidents2(connection, new Dictionary<string, object> { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = id });
-                }
-                // Current directed state, including zeros after consumed diplomacy; incident history is not readiness.
-                var readinessRows = DiplomacyStore.SelectPoliticalPressureState3(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId });
-                return new PoliticalPressureNoticesResponse(incidents,
-                    new PoliticalPressureReadiness(campaignId, timelineId, readinessRows)).ToDictionary();
+                return ReadPoliticalPressureNotices(connection, campaignId, timelineId, request.Limit);
             }
+        }
+
+        private static Dictionary<string, object> ReadPoliticalPressureNotices(ReignDbConnection connection,
+            string campaignId, string timelineId, int limit, ReignDbTransaction ownedTransaction = null)
+        {
+            bool owned = ownedTransaction != null;
+            var scope = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId };
+            List<Dictionary<string, object>> incidents = owned && !WorldSimulationService.TableExists(connection, "political_pressure_incidents")
+                ? new List<Dictionary<string, object>>()
+                : DiplomacyStore.SelectPoliticalPressureIncidents4(connection, limit.ToString(CultureInfo.InvariantCulture), scope, ownedTransaction);
+            if (owned && incidents.Count != 0 && !WorldSimulationService.TableExists(connection, "political_pressure_native_effects"))
+                return null;
+            foreach (Dictionary<string, object> incident in incidents)
+            {
+                incident["news_description"] = PoliticalPressureCatalog.FirstOrDefault(a => a.Id == ReadString(incident, "archetype_id", ""))?.Description ?? "";
+                string id = ReadString(incident, "incident_id", "");
+                long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                if (owned)
+                {
+                    var notice = new Dictionary<string, object>(scope) { ["incident"] = id, ["ts"] = ts };
+                    incident["nativeEffects"] = DiplomacyStore.ReadOwnedPoliticalPressureEffects(connection, notice, ownedTransaction);
+                    DiplomacyStore.MarkOwnedPoliticalPressureNoticeFetched(connection, notice, ownedTransaction);
+                }
+                else
+                {
+                    incident["nativeEffects"] = DiplomacyStore.SelectPoliticalPressureNativeEffects(connection, new Dictionary<string, object> { ["incident"] = id });
+                    DiplomacyStore.UpdatePoliticalPressureIncidents2(connection, new Dictionary<string, object> { ["ts"] = ts, ["id"] = id });
+                }
+            }
+            // Current directed state, including zeros after consumed diplomacy; incident history is not readiness.
+            var readinessRows = owned && !WorldSimulationService.TableExists(connection, "political_pressure_state")
+                ? new List<Dictionary<string, object>>()
+                : DiplomacyStore.SelectPoliticalPressureState3(connection, scope, ownedTransaction);
+            return new PoliticalPressureNoticesResponse(incidents,
+                new PoliticalPressureReadiness(campaignId, timelineId, readinessRows)).ToDictionary();
         }
 
         internal static Dictionary<string, object> AcknowledgePoliticalPressureNotice(Dictionary<string, object> payload)
@@ -986,25 +1012,51 @@ namespace ReignBetaServer
             string incidentId = request.IncidentId;
             double receiptDay = request.WorldDay;
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            if (string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(timelineId)
+                || string.IsNullOrWhiteSpace(incidentId))
+                return PoliticalPressureAcknowledgeResponse.NotFound().ToDictionary();
+            using var timelineScope = WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId);
+            using (ReignDbConnection connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(
+                campaignId, trackCampaignMutations: true))
             {
-                EnsurePoliticalPressureSchema(connection);
-                if (ReadInt(DiplomacyStore.CountPoliticalPressureIncidents(connection, new Dictionary<string, object> { ["id"] = incidentId }).FirstOrDefault(), "count", 0) == 0)
+                if (connection == null) return PoliticalPressureAcknowledgeResponse.NotFound().ToDictionary();
+                using var transaction = connection.BeginTransaction();
+                AcquirePostgreSqlTransactionMutationLock(connection, transaction);
+                var scope = new Dictionary<string, object>
+                {
+                    ["incident"] = incidentId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["ts"] = ts
+                };
+                if (!WorldSimulationService.NoticeAcknowledgementOwnerMatches(connection, transaction, payload, campaignId, timelineId)
+                    || !WorldSimulationService.TableExists(connection, "political_pressure_incidents")
+                    || !WorldSimulationService.TableExists(connection, "political_pressure_activity")
+                    || !DiplomacyStore.LockPoliticalPressureAcknowledgement(connection, scope, transaction))
                     return PoliticalPressureAcknowledgeResponse.NotFound().ToDictionary();
+                if (request.EffectReceipts.Count != 0)
+                {
+                    if (!WorldSimulationService.TableExists(connection, "political_pressure_native_effects"))
+                        return PoliticalPressureAcknowledgeResponse.NotFound().ToDictionary();
+                    var effects = new HashSet<string>(DiplomacyStore
+                        .LockPoliticalPressureAcknowledgementEffects(connection, scope, transaction)
+                        .Select(effect => ReadString(effect, "effect_id", "")), StringComparer.Ordinal);
+                    if (request.EffectReceipts.Any(receipt =>
+                        string.IsNullOrWhiteSpace(receipt.EffectId) || !effects.Remove(receipt.EffectId)))
+                        return PoliticalPressureAcknowledgeResponse.NotFound().ToDictionary();
+                }
                 foreach (PoliticalPressureEffectReceipt receipt in request.EffectReceipts)
                 {
-                    DiplomacyStore.UpdatePoliticalPressureNativeEffects(connection, new Dictionary<string, object>
+                    DiplomacyStore.UpdatePoliticalPressureNativeEffects(connection, new Dictionary<string, object>(scope)
                         {
                             ["status"] = receipt.Ok ? "applied" : "failed",
                             ["before"] = receipt.Before, ["after"] = receipt.After,
-                            ["day"] = receiptDay, ["error"] = receipt.Error, ["ts"] = ts, ["id"] = receipt.EffectId
-                        });
+                            ["day"] = receiptDay, ["error"] = receipt.Error, ["id"] = receipt.EffectId
+                        }, transaction);
                 }
-                DiplomacyStore.UpdatePoliticalPressureIncidents3(connection, new Dictionary<string, object> { ["ts"] = ts, ["id"] = incidentId });
+                DiplomacyStore.UpdatePoliticalPressureIncidents3(connection, scope, transaction);
+                RecordPoliticalPressureActivity(campaignId, timelineId, receiptDay, incidentId, null, null,
+                    "message_receipt", "", "", "", "acknowledged", 0, 0, 0, 0, "", incidentId,
+                    "Game message displayed and native effects reported.", payload, connection, transaction);
+                transaction.Commit();
             }
-            RecordPoliticalPressureActivity(campaignId, timelineId, receiptDay, incidentId, null, null,
-                "message_receipt", "", "", "", "acknowledged", 0, 0, 0, 0, "", incidentId,
-                "Game message displayed and native effects reported.", payload);
             WorldSimulationService.InvalidateWorldTestOverviewCache(campaignId, timelineId);
             return PoliticalPressureAcknowledgeResponse.Acknowledged(incidentId).ToDictionary();
         }
@@ -1013,13 +1065,16 @@ namespace ReignBetaServer
             double worldDay, string incidentId, Dictionary<string, object> actor, Dictionary<string, object> target,
             string eventType, string polarity, string channel, string severity, string status,
             int before, int after, int roll, int chance, string actionId, string correlation,
-            string reason, Dictionary<string, object> payload)
+            string reason, Dictionary<string, object> payload, ReignDbConnection existingConnection = null,
+            ReignDbTransaction transaction = null)
         {
             string activityId = correlation + ":" + eventType + ":" + (actionId ?? "") + ":" + (incidentId ?? "");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection ownedConnection = existingConnection == null
+                ? ReignDatabase.OpenCampaignConnection(campaignId) : null)
             {
-                EnsurePoliticalPressureSchema(connection);
+                ReignDbConnection connection = existingConnection ?? ownedConnection;
+                if (ownedConnection != null) EnsurePoliticalPressureSchema(connection);
                 DiplomacyStore.InsertOrIgnorePoliticalPressureActivity(connection, new Dictionary<string, object>
                     {
                         ["id"] = activityId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = worldDay,
@@ -1030,7 +1085,7 @@ namespace ReignBetaServer
                         ["status"] = status ?? "", ["before"] = before, ["after"] = after, ["roll"] = roll,
                         ["chance"] = chance, ["action"] = actionId ?? "", ["correlation"] = correlation ?? "",
                         ["reason"] = reason ?? "", ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts
-                    });
+                    }, transaction);
                 WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
                     "political_pressures", activityId, new Dictionary<string, object>
                     {

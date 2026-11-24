@@ -217,7 +217,8 @@ RETURNING (xmax = 0) AS inserted;", connection, transaction))
             }
         }
 
-        internal static NpgsqlConnection TryOpenRegisteredCampaignConnection(string campaignId)
+        internal static NpgsqlConnection TryOpenRegisteredCampaignConnection(string campaignId,
+            bool trackCampaignMutations = false)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
@@ -244,6 +245,11 @@ SELECT EXISTS(
                 }
 
                 SetSearchPath(connection, schema);
+                if (trackCampaignMutations)
+                    CampaignConnectionIdentities.Add(connection, new CampaignConnectionIdentity
+                    {
+                        CampaignId = normalizedCampaignId
+                    });
                 return connection;
             }
             catch

@@ -679,27 +679,43 @@ namespace ReignBetaServer
             Dictionary<string, string> query)
         {
             ClanConflictNoticesRequest request = ClanConflictNoticesRequest.FromQuery(query);
+            if (query?.ContainsKey("sharedActivityGeneration") == true)
+                return WorldSimulationService.ReadOwnedNoticeSnapshot(query, (connection, transaction, campaign, timeline) =>
+                    ReadClanConflictNotices(connection, campaign, timeline, request.Limit, transaction));
             string campaignId = request.CampaignId;
             string timelineId = request.TimelineId;
-            int limit = request.Limit;
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureClanConflictSchema(connection);
-                List<Dictionary<string, object>> notices = RelationshipsStore.SelectClanConflictIncidents4(connection, limit.ToString(CultureInfo.InvariantCulture),                    new Dictionary<string, object>
-                    {
-                        ["campaign"] = campaignId, ["timeline"] = timelineId
-                    });
-                foreach (Dictionary<string, object> notice in notices)
+                return ReadClanConflictNotices(connection, campaignId, timelineId, request.Limit);
+            }
+        }
+
+        private static Dictionary<string, object> ReadClanConflictNotices(ReignDbConnection connection,
+            string campaignId, string timelineId, int limit, ReignDbTransaction ownedTransaction = null)
+        {
+            bool owned = ownedTransaction != null;
+            var scope = new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId };
+            var notices = owned && !WorldSimulationService.TableExists(connection, "clan_conflict_incidents")
+                ? new List<Dictionary<string, object>>()
+                : RelationshipsStore.SelectClanConflictIncidents4(connection, limit.ToString(CultureInfo.InvariantCulture), scope, ownedTransaction);
+            foreach (Dictionary<string, object> notice in notices)
+            {
+                notice["news_description"] = ClanConflictCatalog.FirstOrDefault(a => a.Id == ReadString(notice, "archetype_id", ""))?.Description ?? "";
+                string id = ReadString(notice, "incident_id", "");
+                long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                if (owned)
                 {
-                    notice["news_description"] = ClanConflictCatalog.FirstOrDefault(a => a.Id == ReadString(notice, "archetype_id", ""))?.Description ?? "";
+                    var ownedNotice = new Dictionary<string, object>(scope) { ["incident"] = id, ["ts"] = ts };
+                    RelationshipsStore.MarkOwnedClanConflictNoticeFetched(connection, ownedNotice, ownedTransaction);
+                }
+                else
                     RelationshipsStore.UpdateClanConflictIncidents2(connection, new Dictionary<string, object>
                         {
-                            ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                            ["incident"] = ReadString(notice, "incident_id", "")
+                            ["ts"] = ts, ["incident"] = id
                         });
-                }
-                return new ClanConflictNoticesResponse(notices).ToDictionary();
             }
+            return new ClanConflictNoticesResponse(notices).ToDictionary();
         }
 
         internal static Dictionary<string, object> AcknowledgeClanConflictNotice(
@@ -709,20 +725,25 @@ namespace ReignBetaServer
             string campaignId = request.CampaignId;
             string timelineId = request.TimelineId;
             string incidentId = request.IncidentId;
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            if (string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(timelineId)
+                || string.IsNullOrWhiteSpace(incidentId))
+                return ClanConflictAcknowledgeResponse.NotFound().ToDictionary();
+            using var timelineScope = WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId);
+            using (ReignDbConnection connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(
+                campaignId, trackCampaignMutations: true))
             {
-                EnsureClanConflictSchema(connection);
-                int found = ReadInt(RelationshipsStore.CountClanConflictIncidents3(connection, new Dictionary<string, object>
+                if (connection == null) return ClanConflictAcknowledgeResponse.NotFound().ToDictionary();
+                using var transaction = connection.BeginTransaction();
+                AcquirePostgreSqlTransactionMutationLock(connection, transaction);
+                if (!WorldSimulationService.NoticeAcknowledgementOwnerMatches(connection, transaction, payload, campaignId, timelineId)
+                    || !WorldSimulationService.TableExists(connection, "clan_conflict_incidents")
+                    || !RelationshipsStore.AcknowledgeClanConflictIncident(connection, new Dictionary<string, object>
                     {
                         ["incident"] = incidentId, ["campaign"] = campaignId,
-                        ["timeline"] = timelineId
-                    }).FirstOrDefault(), "count", 0);
-                if (found == 0) return ClanConflictAcknowledgeResponse.NotFound().ToDictionary();
-                RelationshipsStore.UpdateClanConflictIncidents3(connection, new Dictionary<string, object>
-                    {
-                        ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                        ["incident"] = incidentId
-                    });
+                        ["timeline"] = timelineId, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                    }, transaction))
+                    return ClanConflictAcknowledgeResponse.NotFound().ToDictionary();
+                transaction.Commit();
             }
             WorldSimulationService.InvalidateWorldTestOverviewCache(campaignId, timelineId);
             return ClanConflictAcknowledgeResponse.Acknowledged(incidentId).ToDictionary();

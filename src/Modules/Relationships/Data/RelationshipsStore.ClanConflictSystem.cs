@@ -269,16 +269,20 @@ AND notice_status IN ('ready','fetched') ORDER BY world_day,incident_id LIMIT "
 notice_status='fetched',updated_ts=$ts WHERE incident_id=$incident;", parameters, transaction);
         }
 
-        internal static List<Dictionary<string, object>> CountClanConflictIncidents3(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static void MarkOwnedClanConflictNoticeFetched(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
         {
-            return ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
-FROM clan_conflict_incidents WHERE incident_id=$incident AND campaign_id=$campaign AND timeline_id=$timeline;", parameters, transaction);
+            ReignDatabase.ExecuteSql(connection, @"UPDATE clan_conflict_incidents SET notice_status='fetched',updated_ts=$ts
+WHERE incident_id=$incident AND campaign_id=$campaign AND timeline_id=$timeline
+AND notice_status IN ('ready','fetched');", parameters, transaction);
         }
 
-        internal static void UpdateClanConflictIncidents3(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static bool AcknowledgeClanConflictIncident(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
         {
-            ReignDatabase.ExecuteSql(connection, @"UPDATE clan_conflict_incidents SET
-notice_status='acknowledged',updated_ts=$ts WHERE incident_id=$incident;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"UPDATE clan_conflict_incidents SET
+notice_status='acknowledged',updated_ts=$ts WHERE incident_id=$incident
+AND campaign_id=$campaign AND timeline_id=$timeline RETURNING incident_id;", parameters, transaction).Count == 1;
         }
     }
 }
