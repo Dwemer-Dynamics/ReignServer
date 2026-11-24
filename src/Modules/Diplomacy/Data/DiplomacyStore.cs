@@ -531,7 +531,12 @@ ON CONFLICT(campaign_id,timeline_id,actor_kingdom_id,target_kingdom_id) DO NOTHI
 WHERE campaign_id=$campaign AND timeline_id=$timeline AND actor_kingdom_id=$actor AND target_kingdom_id=$target
 FOR UPDATE;", parameters, transaction);
             if (rows.Count != 1) throw new InvalidOperationException("The exact political pressure direction disappeared.");
-            return (int)rows[0]["pressure_value"];
+            return rows[0]["pressure_value"] switch
+            {
+                int value => value,
+                long value => checked((int)value),
+                _ => throw new InvalidOperationException("The stored political pressure is not an integer.")
+            };
         }
 
         internal static List<Dictionary<string, object>> UpsertPoliticalPressureState(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
