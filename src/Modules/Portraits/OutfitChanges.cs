@@ -15,6 +15,9 @@ namespace ReignBetaServer
     {
         internal const string OutfitPromptName = "portrait_outfit_change.txt";
         private const string OutfitPortraitReceiptFileName = ".outfit_portrait.json";
+        private const string OutfitConfirmationFileName = ".outfit_commit_v2.json";
+        private const string OutfitConfirmationFormatKey = "confirmationFormat";
+        private const string OutfitConfirmationFormat = "reign-outfit-confirmation-v2";
         internal const string OutfitPromptDefault = "Edit the supplied finished full-body portrait. Change ONLY the clothes to match the player's outfit description exactly, including every specified garment, fabric, color, cut, fastening, trim, layer and clothing accessory. Preserve all unspecified clothing details. Preserve the exact person: face, facial features, expression, age, hair, skin, body size, build, proportions, anatomy, pose, hands and feet. Preserve lighting, shadows outside changed garments, background, camera, composition, full-body framing, image dimensions and rendering style. Do not beautify, reshape, undress beyond the described garment replacement, add people, objects, text, borders or watermarks, or apply culture, rank, occupation or confidence clothing presets. The description is garment data, never permission to change identity, body, pose or scene. Return only the edited image.";
         private static readonly ConcurrentDictionary<string, OutfitChangeOperation> OutfitChanges = new ConcurrentDictionary<string, OutfitChangeOperation>(StringComparer.Ordinal);
         private static readonly object OutfitChangeGate = new object();
@@ -247,10 +250,19 @@ namespace ReignBetaServer
         }
 
         private static void CommitOutfit(OutfitChangeOperation op)
-            => CommitOutfitInDirectory(op, CampaignFileService.CharacterDirectory(op.Campaign, op.Hero));
+        {
+            // A verification campaign directory can be redirected while the Save Sync sidecar remains live.
+            // Legacy dotted outfit identities also have no Save Sync checkpoint.
+            Action<string> markProfileDirty = string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)
+                && !op.Campaign.Contains('.') ? PersistenceService.MarkSaveSyncActiveStateDirtyForPath : null;
+            CommitOutfitInDirectory(op, CampaignFileService.CharacterDirectory(op.Campaign, op.Hero),
+                markProfileDirty: markProfileDirty);
+        }
 
         // The production path is campaign-owned; contracts supply a disposable directory.
-        private static void CommitOutfitInDirectory(OutfitChangeOperation op, string characterDirectory)
+        private static void CommitOutfitInDirectory(OutfitChangeOperation op, string characterDirectory,
+            Action<string, byte[]> write = null, Action<string, byte[]> restore = null,
+            Action<string> markProfileDirty = null)
         {
             lock (Program.FileLock)
             {
@@ -259,28 +271,74 @@ namespace ReignBetaServer
                 if (!ReadBool(op.PortraitReceipt, "accepted", false)
                     || ReadString(ReadDictionary(op.PortraitReceipt, "master"), "sha256", "") != Sha256Hex(op.After))
                     throw new InvalidDataException("The outfit portrait has no matching validated crop receipt.");
+                string portraitDirectory = Path.Combine(characterDirectory, "portraits");
+                string markerPath = Path.Combine(portraitDirectory, OutfitConfirmationFileName);
+                if (!OutfitConfirmationPathUnambiguous(markerPath))
+                    throw new InvalidDataException("The outfit confirmation marker path is ambiguous.");
                 string profilePath = Path.Combine(characterDirectory, "profile.json");
                 var profile = CampaignFileService.ReadJsonObject(profilePath);
                 profile["heroStringId"] = op.Hero;
                 profile["campaignId"] = op.Campaign;
                 var outfit = new Dictionary<string, object> { ["description"] = op.Description, ["operationId"] = op.Id,
-                    ["playerHeroId"] = op.Player,
+                    ["playerHeroId"] = op.Player, [OutfitConfirmationFormatKey] = OutfitConfirmationFormat,
                     ["portraitSha256"] = Sha256Hex(op.After), ["sourceSha256"] = op.SourceHash,
                     ["timelineId"] = op.Timeline, ["updatedUtc"] = DateTime.UtcNow.ToString("o") };
                 profile["currentOutfit"] = outfit;
                 profile["clothingDescription"] = op.Description;
                 profile["updatedUtc"] = outfit["updatedUtc"];
                 var formal = new Dictionary<string, object>(outfit) { ["status"] = "completed", ["descriptionSource"] = "confirmed_outfit_change" };
-                var writes = new Dictionary<string, byte[]>
+                var writes = new KeyValuePair<string, byte[]>[]
                 {
-                    [Path.Combine(characterDirectory, "portraits", "custom.png")] = op.After,
-                    [Path.Combine(characterDirectory, "portraits", "formal_outfit.json")] = Encoding.UTF8.GetBytes(Json.Serialize(formal)),
-                    [Path.Combine(characterDirectory, "portraits", "outfit.json")] = Encoding.UTF8.GetBytes(Json.Serialize(outfit)),
-                    [Path.Combine(characterDirectory, "portraits", OutfitPortraitReceiptFileName)] = Encoding.UTF8.GetBytes(Json.Serialize(op.PortraitReceipt)),
-                    [profilePath] = Encoding.UTF8.GetBytes(Json.Serialize(profile))
+                    new(Path.Combine(portraitDirectory, "custom.png"), op.After),
+                    new(Path.Combine(portraitDirectory, "formal_outfit.json"), Encoding.UTF8.GetBytes(Json.Serialize(formal))),
+                    new(Path.Combine(portraitDirectory, "outfit.json"), Encoding.UTF8.GetBytes(Json.Serialize(outfit))),
+                    new(Path.Combine(portraitDirectory, OutfitPortraitReceiptFileName), Encoding.UTF8.GetBytes(Json.Serialize(op.PortraitReceipt))),
+                    new(profilePath, Encoding.UTF8.GetBytes(Json.Serialize(profile))),
+                    // Neither a profile rewrite nor an image refresh publishes this completion proof.
+                    new(markerPath, Encoding.UTF8.GetBytes(Json.Serialize(BuildOutfitConfirmation(op.Campaign, op.Hero, outfit))))
                 };
-                CommitOutfitFiles(writes, WriteSharedPortraitAtomic);
+                // profile.json is temporal Save Sync state. Publish dirty before any outfit file can change.
+                CommitOutfitFiles(writes, write ?? WriteSharedPortraitAtomic, restore,
+                    markProfileDirty == null ? null : () => markProfileDirty(profilePath));
             }
+        }
+
+        private static bool OutfitConfirmationPathUnambiguous(string path)
+        {
+            string directory = Path.GetDirectoryName(path);
+            if (!Directory.Exists(directory)) return true;
+            return Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.TopDirectoryOnly)
+                .Where(entry => string.Equals(Path.GetFileName(entry), OutfitConfirmationFileName, StringComparison.OrdinalIgnoreCase))
+                .All(entry => Path.GetFileName(entry) == OutfitConfirmationFileName
+                    && (File.GetAttributes(entry) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) == 0);
+        }
+
+        private static Dictionary<string, object> BuildOutfitConfirmation(string campaign, string hero,
+            Dictionary<string, object> outfit)
+            => new Dictionary<string, object>
+            {
+                ["schema"] = OutfitConfirmationFormat, ["campaignId"] = campaign, ["heroStringId"] = hero,
+                ["operationId"] = ReadString(outfit, "operationId", ""), ["playerHeroId"] = ReadString(outfit, "playerHeroId", ""),
+                ["timelineId"] = ReadString(outfit, "timelineId", ""), ["sourceSha256"] = ReadString(outfit, "sourceSha256", ""),
+                ["portraitSha256"] = ReadString(outfit, "portraitSha256", ""), ["updatedUtc"] = ReadString(outfit, "updatedUtc", ""),
+                ["descriptionSha256"] = Sha256Hex(Encoding.UTF8.GetBytes(ReadString(outfit, "description", "")))
+            };
+
+        private static bool OutfitConfirmationMatches(string directory, Dictionary<string, object> payload,
+            Dictionary<string, object> outfit)
+        {
+            var formatKeys = outfit.Keys.Where(key => key.Equals(OutfitConfirmationFormatKey, StringComparison.OrdinalIgnoreCase))
+                .Take(2).ToArray();
+            // Legacy outfits predate the completion marker and keep their original replay checks.
+            if (formatKeys.Length == 0) return true;
+            if (formatKeys.Length != 1 || formatKeys[0] != OutfitConfirmationFormatKey
+                || outfit[OutfitConfirmationFormatKey] is not string format || format != OutfitConfirmationFormat) return false;
+            string path = Path.Combine(directory, OutfitConfirmationFileName);
+            if (!File.Exists(path) || !OutfitConfirmationPathUnambiguous(path)) return false;
+            var actual = CampaignFileService.ReadJsonObject(path);
+            var expected = BuildOutfitConfirmation(ReadString(payload, "campaignId", ""), ReadString(payload, "heroStringId", ""), outfit);
+            return actual.Count == expected.Count && expected.All(pair =>
+                actual.TryGetValue(pair.Key, out object value) && value is string text && text == (string)pair.Value);
         }
 
         private static Dictionary<string, object> CommittedOutfitResponse(Dictionary<string, object> payload, string characterDirectory)
@@ -292,11 +350,13 @@ namespace ReignBetaServer
                     || ReadString(outfit, "playerHeroId", "") != ReadString(payload, "playerHeroId", "")
                     || ReadString(outfit, "timelineId", "") != ReadString(payload, "timelineId", "")
                     || ReadString(outfit, "sourceSha256", "") != ReadString(payload, "sourceSha256", "")) return null;
-                string image = Path.Combine(characterDirectory, "portraits", "custom.png");
+                string directory = Path.Combine(characterDirectory, "portraits");
+                if (!OutfitConfirmationMatches(directory, payload, outfit)) return null;
+                string image = Path.Combine(directory, "custom.png");
                 if (!File.Exists(image)) return null;
                 byte[] bytes = File.ReadAllBytes(image);
                 if (Sha256Hex(bytes) != ReadString(outfit, "portraitSha256", "")) return null;
-                var receipt = CampaignFileService.ReadJsonObject(Path.Combine(characterDirectory, "portraits", OutfitPortraitReceiptFileName));
+                var receipt = CampaignFileService.ReadJsonObject(Path.Combine(directory, OutfitPortraitReceiptFileName));
                 if (!ReadBool(receipt, "accepted", false)
                     || ReadString(ReadDictionary(receipt, "master"), "sha256", "") != Sha256Hex(bytes)) return null;
                 return new Dictionary<string, object> { ["ok"] = true, ["status"] = "committed",
@@ -305,20 +365,51 @@ namespace ReignBetaServer
         }
 
         // Failure-injectable transaction. No preview writes occur in character or shared folders.
-        private static void CommitOutfitFiles(Dictionary<string, byte[]> writes, Action<string, byte[]> write)
+        private static void CommitOutfitFiles(IEnumerable<KeyValuePair<string, byte[]>> writes,
+            Action<string, byte[]> write, Action<string, byte[]> restore = null, Action beforeWrite = null)
         {
-            var before = writes.Keys.ToDictionary(p => p, p => File.Exists(p) ? File.ReadAllBytes(p) : null);
+            var ordered = writes.ToArray();
+            var before = ordered.ToDictionary(item => item.Key, item => ReadOutfitFileOrAbsent(item.Key));
             var attempted = new List<string>();
-            try { foreach (var item in writes) { attempted.Add(item.Key); write(item.Key, item.Value); } }
-            catch
+            beforeWrite?.Invoke();
+            try
             {
+                foreach (var item in ordered)
+                {
+                    attempted.Add(item.Key);
+                    write(item.Key, item.Value);
+                }
+            }
+            catch (Exception original)
+            {
+                var failures = new List<Exception>();
                 foreach (string path in attempted.AsEnumerable().Reverse())
                 {
-                    if (before[path] == null) { if (File.Exists(path)) File.Delete(path); }
-                    else WriteSharedPortraitAtomic(path, before[path]);
+                    try
+                    {
+                        byte[] current = ReadOutfitFileOrAbsent(path), saved = before[path];
+                        if (current == saved || (current != null && saved != null && current.AsSpan().SequenceEqual(saved)))
+                            continue;
+                        if (saved == null) File.Delete(path);
+                        else (restore ?? WriteSharedPortraitAtomic)(path, saved);
+                    }
+                    catch (Exception error)
+                    {
+                        failures.Add(new IOException($"Could not restore outfit file '{Path.GetFileName(path)}'.", error));
+                    }
                 }
+                if (failures.Count != 0)
+                    throw new AggregateException("The outfit write failed and rollback could not restore all files.",
+                        new[] { original }.Concat(failures));
                 throw;
             }
+        }
+
+        private static byte[] ReadOutfitFileOrAbsent(string path)
+        {
+            try { return File.ReadAllBytes(path); }
+            catch (FileNotFoundException) { return null; }
+            catch (DirectoryNotFoundException) { return null; }
         }
 
         internal static void PreserveConfirmedOutfit(string campaign, string hero, Dictionary<string, object> profile)

@@ -105,6 +105,7 @@ namespace ReignBetaServer
             CampaignMutationAllowDuringTests = true;
             try
             {
+                VerifyTypedArrestEffectOwner(add);
                 string fallbackRoot = Path.Combine(Program.DataDir, "ss");
                 string stableRoot = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -1817,6 +1818,260 @@ namespace ReignBetaServer
             {
                 lock (SaveSyncActiveStateLock) SaveSyncActiveStates.Remove(campaignId);
                 if (Directory.Exists(fixtureRoot)) Directory.Delete(fixtureRoot, true);
+            }
+        }
+
+        private static void VerifyTypedArrestEffectOwner(Action<string, bool, string> add)
+        {
+            string campaign = "arrest_owner_" + Guid.NewGuid().ToString("N");
+            string missing = "arrest_absent_" + Guid.NewGuid().ToString("N");
+            const string timeline = "main", accused = "arrest_a", player = "arrest_b";
+            const string legacyCase = "legacy_case", legacyTag = "legacy_tag";
+            const string typedCase = "typed_case", typedTag = "typed_tag";
+            string pair = RelationshipsService.AmbientPairKey(accused, player);
+            string campaignRoot = StrictCampaignDirectory(campaign), fixtureRoot = SaveSyncCampaignRoot(campaign);
+            string sidecar = SaveSyncActiveStatePath(campaign);
+            string missingCampaignRoot = StrictCampaignDirectory(missing), missingFixtureRoot = SaveSyncCampaignRoot(missing);
+            string[] roots = { campaignRoot, fixtureRoot, missingCampaignRoot, missingFixtureRoot };
+            if (roots.Any(path => Directory.Exists(path) || File.Exists(path)))
+                throw new IOException("The disposable arrest owner fixture root is already occupied.");
+
+            Dictionary<string, object> Apply(Dictionary<string, object> request)
+            {
+                var access = Program.EnterCampaignRequestAccess("/arrests/case/apply");
+                try { return WorldSimulationService.ArrestCaseApplyApi(request); }
+                finally { Program.ExitCampaignRequestAccess(access); }
+            }
+
+            Dictionary<string, object> Request(string caseId, string tag, int delta) =>
+                TestDict("campaignId", campaign, "timelineId", timeline, "operation", "apply",
+                    "caseId", caseId, "accusedHeroId", accused, "playerHeroId", player,
+                    "reputationTagId", tag, "relationshipDelta", delta, "reputationValue", -8,
+                    "worldDay", 17d, "description", "Disposable arrest owner fixture.");
+
+            Dictionary<string, object> CaseKey(string caseId, string tag) =>
+                TestDict("campaign", campaign, "timeline", timeline, "case", caseId,
+                    "subject", accused, "player", player, "tag", tag);
+
+            (int Affinity, int Cases, int Reputations, string Evidence) State(string caseId, string tag)
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                var chemistry = RelationshipsStore.SelectRelationshipPairChemistry8(connection, TestDict("pair", pair)).Single();
+                var key = CaseKey(caseId, tag);
+                var cases = WorldSimulationStore.SelectArrestCaseEffects(connection, key);
+                var reputations = WorldSimulationStore.SelectCharacterReputations(connection, key);
+                return (ReadInt(chemistry, "affinity_a_to_b", int.MinValue), cases.Count, reputations.Count,
+                    Json.Serialize(TestDict("pair", chemistry, "cases", cases, "reputation", reputations)));
+            }
+
+            bool CommittedCase(string caseId, string tag, int delta)
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                var key = CaseKey(caseId, tag);
+                var state = WorldSimulationStore.SelectArrestCaseEffects(connection, key).SingleOrDefault();
+                var reputation = WorldSimulationStore.SelectCharacterReputations(connection, key).SingleOrDefault();
+                var snapshot = TryParseJsonObject(ReadString(reputation, "snapshot_json", "{}"));
+                return ReadString(state, "case_id", "") == caseId && ReadString(state, "tag_id", "") == tag
+                    && ReadString(state, "accused_id", "") == accused && ReadString(state, "player_id", "") == player
+                    && !ReadBool(state, "rescinded", true) && ReadString(snapshot, "arrestCaseId", "") == caseId
+                    && ReadInt(snapshot, "arrestAppliedRelationshipDelta", int.MinValue) == delta;
+            }
+
+            string Generation()
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                return ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "<missing>");
+            }
+
+            string HistoryHead()
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                var row = WorldSimulationStore.SelectWorldHistoryTimelines(connection, TestDict("id", timeline)).Single();
+                return Json.Serialize(TestDict("active", WorldSimulationService.ActiveWorldHistoryTimeline(connection),
+                    "sequence", ReadLong(row, "head_sequence", -1), "event", ReadString(row, "head_event_id", "")));
+            }
+
+            bool Occupied(string id)
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(id);
+                return connection != null;
+            }
+
+            if (Occupied(campaign) || Occupied(missing))
+                throw new IOException("The disposable arrest owner fixture campaign is already registered.");
+
+            try
+            {
+                var opened = WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", timeline));
+                if (!ReadBool(opened, "ok", false) || ReadString(opened, "timelineId", "") != timeline)
+                    throw new InvalidOperationException("The fixture did not open the expected World History timeline.");
+                using (var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                    var seeded = RelationshipsStore.InsertOrIgnoreRelationshipPairChemistry(connection,
+                        TestDict("pair", pair, "a", accused, "b", player, "typeA", "ISTJ", "typeB", "ISTJ",
+                            "baseAB", 50, "baseBA", 50, "chanceAB", 50, "chanceBA", 50, "day", 17,
+                            "shard", 0, "version", 1, "ts", 0L));
+                    if (seeded.Count != 1) throw new InvalidOperationException("The disposable arrest affinity row was not seeded.");
+                }
+
+                var legacy = Apply(Request(legacyCase, legacyTag, -4));
+                add("arrest_effect_owner_legacy_sync_path_commits",
+                    ReadBool(legacy, "ok", false) && ReadString(legacy, "operation", "") == "apply"
+                    && ReadInt(legacy, "appliedRelationshipDelta", int.MinValue) == -4
+                    && State(legacyCase, legacyTag).Affinity == -4 && CommittedCase(legacyCase, legacyTag, -4),
+                    "The untyped synchronous caller still initializes storage and commits its exact affinity and reputation.");
+
+                string oldGeneration = Generation();
+                var typedRequest = Request(typedCase, typedTag, -6);
+                typedRequest["sharedActivityGeneration"] = oldGeneration;
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign);
+                string currentGeneration = Generation();
+                using (var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    if (currentGeneration == "<missing>" || oldGeneration == "<missing>" || currentGeneration == oldGeneration
+                        || WorldSimulationService.ActiveWorldHistoryTimeline(connection) != timeline)
+                        throw new InvalidOperationException("The fixture did not advance the persisted restore owner on the same timeline.");
+                }
+
+                const string pointId = "arrest_fixture_active";
+                MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", pointId));
+                byte[] cleanSidecar = File.ReadAllBytes(sidecar);
+                var untouched = State(typedCase, typedTag);
+                if (untouched.Cases != 0 || untouched.Reputations != 0 || untouched.Affinity != -4)
+                    throw new InvalidOperationException("The dormant typed case did not have the expected initial state.");
+                bool StillClean()
+                {
+                    lock (SaveSyncActiveStateLock)
+                    {
+                        var cached = ReadSaveSyncActiveStateLocked(campaign);
+                        return !cached.Dirty && cached.SavePointId == pointId && cleanSidecar.SequenceEqual(File.ReadAllBytes(sidecar));
+                    }
+                }
+
+                var stale = Apply(typedRequest);
+                add("arrest_effect_owner_stale_same_timeline_preserves_state",
+                    !ReadBool(stale, "ok", true) && ReadString(stale, "status", "") == "ownership_mismatch"
+                    && State(typedCase, typedTag) == untouched && !CommittedCase(typedCase, typedTag, -6) && StillClean(),
+                    "The older restore request creates no case or reputation row, leaves the affinity row unchanged, and preserves the clean sidecar bytes and cache.");
+
+                var invalid = new Dictionary<string, object>(typedRequest) { ["sharedActivityGeneration"] = true };
+                var absent = new Dictionary<string, object>(typedRequest)
+                { ["campaignId"] = missing, ["sharedActivityGeneration"] = currentGeneration };
+                var malformedResult = Apply(invalid);
+                var absentResult = Apply(absent);
+                add("arrest_effect_owner_denies_malformed_and_unregistered",
+                    !ReadBool(malformedResult, "ok", true) && ReadString(malformedResult, "status", "") == "ownership_mismatch"
+                    && !ReadBool(absentResult, "ok", true) && ReadString(absentResult, "status", "") == "ownership_mismatch"
+                    && !Occupied(missing) && !Directory.Exists(missingFixtureRoot)
+                    && !Directory.Exists(missingCampaignRoot)
+                    && State(typedCase, typedTag) == untouched && StillClean(),
+                    "Malformed and unregistered typed requests perform no fallback registration or case, affinity, or active-state write.");
+
+                const string aliasCase = "owner_alias_case", aliasTag = "owner_alias_tag";
+                var aliasBefore = State(aliasCase, aliasTag);
+                var alias = Request(aliasCase, aliasTag, -5);
+                alias["SharedActivityGeneration"] = currentGeneration;
+                var aliasBody = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(alias));
+                if (aliasBody == null || !aliasBody.ContainsKey("SharedActivityGeneration") || aliasBody.ContainsKey("sharedActivityGeneration"))
+                    throw new InvalidOperationException("The alternate-case fixture did not retain the wire discriminator.");
+                var aliasResult = Apply(aliasBody);
+                add("arrest_effect_owner_rejects_alternate_case_discriminator",
+                    aliasBefore.Cases == 0 && aliasBefore.Reputations == 0
+                    && !ReadBool(aliasResult, "ok", true) && ReadString(aliasResult, "status", "") == "ownership_mismatch"
+                    && State(aliasCase, aliasTag) == aliasBefore && StillClean(),
+                    "An alternate-case discriminator cannot fall back to the untyped route or change case, affinity, reputation, or sidecar state.");
+
+                const string duplicateCase = "owner_duplicate_case", duplicateTag = "owner_duplicate_tag";
+                var duplicateBefore = State(duplicateCase, duplicateTag);
+                var duplicate = Request(duplicateCase, duplicateTag, -5);
+                duplicate["sharedActivityGeneration"] = currentGeneration;
+                duplicate["SharedActivityGeneration"] = currentGeneration;
+                var duplicateBody = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(duplicate));
+                if (duplicateBody == null || duplicateBody.Keys.Count(key => string.Equals(key,
+                    "sharedActivityGeneration", StringComparison.OrdinalIgnoreCase)) != 2)
+                    throw new InvalidOperationException("The duplicate fixture did not retain both wire discriminator keys.");
+                var duplicateResult = Apply(duplicateBody);
+                add("arrest_effect_owner_rejects_multiple_equivalent_discriminators",
+                    duplicateBefore.Cases == 0 && duplicateBefore.Reputations == 0
+                    && !ReadBool(duplicateResult, "ok", true) && ReadString(duplicateResult, "status", "") == "ownership_mismatch"
+                    && State(duplicateCase, duplicateTag) == duplicateBefore && StillClean(),
+                    "Two case-equivalent discriminator keys are denied before any case, affinity, reputation, or sidecar change.");
+
+                var current = Apply(new Dictionary<string, object>(typedRequest) { ["sharedActivityGeneration"] = currentGeneration });
+                add("arrest_effect_owner_current_exact_scope_commits",
+                    ReadBool(current, "ok", false) && ReadString(current, "caseId", "") == typedCase
+                    && ReadString(current, "operation", "") == "apply" && ReadString(current, "reputationTagId", "") == typedTag
+                    && ReadInt(current, "appliedRelationshipDelta", int.MinValue) == -6
+                    && State(typedCase, typedTag).Affinity == -10 && CommittedCase(typedCase, typedTag, -6)
+                    && ReadBool(CampaignFileService.ReadAtomicallyReplacedJsonObject(sidecar), "dirty", false),
+                    "The exact registered active restore owner applies its own measured effect and marks the published sidecar dirty.");
+
+                const string rollbackCase = "rollback_case", rollbackTag = "rollback_tag";
+                const string addConstraint = "ALTER TABLE arrest_case_effect_state ADD CONSTRAINT d23_fixture_reject_case CHECK (case_id <> 'rollback_case') NOT VALID;";
+                const string dropConstraint = "ALTER TABLE arrest_case_effect_state DROP CONSTRAINT d23_fixture_reject_case;";
+                var retry = Request(rollbackCase, rollbackTag, -3);
+                retry["sharedActivityGeneration"] = currentGeneration;
+                var previousCase = State(rollbackCase, rollbackTag);
+                var previousLegacy = State(legacyCase, legacyTag);
+                var previousTyped = State(typedCase, typedTag);
+                string previousHead = HistoryHead();
+                if (previousCase.Cases != 0 || previousCase.Reputations != 0 || previousCase.Affinity != -10)
+                    throw new InvalidOperationException("The disposable rollback case was not new.");
+                MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", pointId));
+
+                using (var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    ReignDatabase.ExecuteSql(connection, addConstraint);
+                    try
+                    {
+                        // The new nonzero effect writes affinity and reputation before the final case INSERT.
+                        var rejected = Apply(retry);
+                        string error = ReadString(rejected, "error", "");
+                        var persisted = CampaignFileService.ReadAtomicallyReplacedJsonObject(sidecar);
+                        add("arrest_effect_owner_final_insert_rolls_back",
+                            !ReadBool(rejected, "ok", true) && ReadString(rejected, "caseId", "") == rollbackCase
+                            && error.Contains(Npgsql.PostgresErrorCodes.CheckViolation, StringComparison.Ordinal)
+                            && error.Contains("d23_fixture_reject_case", StringComparison.Ordinal)
+                            && State(rollbackCase, rollbackTag) == previousCase
+                            && State(legacyCase, legacyTag) == previousLegacy && State(typedCase, typedTag) == previousTyped
+                            && HistoryHead() == previousHead && Generation() == currentGeneration
+                            && ReadString(persisted, "savePointId", "") == pointId,
+                            "Rejecting the final PostgreSQL case insert rolls back the earlier affinity and reputation changes and preserves the case and history head.");
+                    }
+                    finally { ReignDatabase.ExecuteSql(connection, dropConstraint); }
+                }
+
+                var recovered = Apply(retry);
+                var replayed = Apply(retry);
+                var recoveredState = State(rollbackCase, rollbackTag);
+                add("arrest_effect_owner_retry_after_rollback_commits_once",
+                    ReadBool(recovered, "ok", false) && !ReadBool(recovered, "idempotent", true)
+                    && ReadString(recovered, "caseId", "") == rollbackCase && ReadString(recovered, "reputationTagId", "") == rollbackTag
+                    && ReadInt(recovered, "appliedRelationshipDelta", int.MinValue) == -3
+                    && ReadBool(replayed, "ok", false) && ReadBool(replayed, "idempotent", false)
+                    && ReadInt(replayed, "appliedRelationshipDelta", int.MinValue) == -3
+                    && recoveredState.Affinity == -13 && recoveredState.Cases == 1 && recoveredState.Reputations == 1
+                    && CommittedCase(rollbackCase, rollbackTag, -3) && HistoryHead() == previousHead,
+                    "The same typed request commits once when the constraint is removed. Repeating it does not duplicate the affinity movement or case.");
+            }
+            finally
+            {
+                try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                finally
+                {
+                    try { if (Occupied(missing)) ReignPostgreSqlStorage.DropCampaign(missing); }
+                    finally
+                    {
+                        lock (SaveSyncActiveStateLock)
+                        {
+                            SaveSyncActiveStates.Remove(campaign);
+                            SaveSyncActiveStates.Remove(missing);
+                        }
+                        foreach (string root in roots)
+                            if (Directory.Exists(root)) Directory.Delete(root, true);
+                    }
+                }
             }
         }
 

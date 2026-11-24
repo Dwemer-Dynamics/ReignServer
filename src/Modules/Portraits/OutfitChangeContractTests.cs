@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using AIPortraits;
 using ReignPortraits;
 
@@ -137,8 +138,8 @@ namespace ReignBetaServer
                     ApplyConfirmedOutfit(outfit, nativeRefresh);
                     bool staleRejected = false;
                     try { CommitOutfitInDirectory(op, root); } catch (InvalidOperationException) { staleRejected = true; }
-                    var confirmation = new Dictionary<string, object> { ["operationId"] = op.Id, ["playerHeroId"] = op.Player,
-                        ["timelineId"] = op.Timeline, ["sourceSha256"] = op.SourceHash };
+                    var confirmation = new Dictionary<string, object> { ["campaignId"] = op.Campaign, ["heroStringId"] = op.Hero,
+                        ["operationId"] = op.Id, ["playerHeroId"] = op.Player, ["timelineId"] = op.Timeline, ["sourceSha256"] = op.SourceHash };
                     var recoveredResult = CommittedOutfitResponse(confirmation, root);
                     bool recovered = ReadString(recoveredResult, "status", "") == "committed"
                         && ReadDictionary(recoveredResult, "portraitReceipt") != null;
@@ -153,12 +154,18 @@ namespace ReignBetaServer
                 }
                 finally
                 {
-                    foreach (string name in new[] { "custom.png", "outfit.json", "formal_outfit.json", OutfitPortraitReceiptFileName })
+                    foreach (string name in new[] { "custom.png", "outfit.json", "formal_outfit.json", OutfitPortraitReceiptFileName, OutfitConfirmationFileName })
                     { string file = Path.Combine(root, "portraits", name); if (File.Exists(file)) File.Delete(file); }
                     if (Directory.Exists(Path.Combine(root, "portraits"))) Directory.Delete(Path.Combine(root, "portraits"));
                     File.Delete(profilePath); Directory.Delete(root);
                 }
             });
+            Check("confirmation_requires_final_marker_after_reseal", VerifyOutfitConfirmationPrefixes);
+            Check("confirmation_marker_preserves_legacy_and_refresh", VerifyOutfitConfirmationCompatibility);
+            Check("confirmation_marker_failure_rolls_back", VerifyOutfitConfirmationRollback);
+            Check("confirmation_denied_marker_preserves_preimages", VerifyOutfitDeniedMarker);
+            Check("confirmation_rollback_continues_after_restore_error", VerifyOutfitRollbackContinues);
+            Check("profile_checkpoint_invalidated_before_any_outfit_write", VerifyOutfitProfileInvalidation);
             Check("custom_full_derivative_set_preserves_shared_and_other_save", () => {
                 string root = Path.Combine(Path.GetTempPath(), "reign-outfit-derivatives-" + Guid.NewGuid().ToString("N"));
                 string shared = Path.Combine(root, "_shared", "npc"), other = Path.Combine(root, "other-save", "npc"), current = Path.Combine(root, "current-save", "npc");
@@ -197,6 +204,282 @@ namespace ReignBetaServer
                 }
             });
             return rows;
+        }
+
+        private static bool VerifyOutfitConfirmationPrefixes()
+            => WithOutfitConfirmationFixture((root, op, request) =>
+            {
+                string portraits = Path.Combine(root, "portraits");
+                string profile = Path.Combine(root, "profile.json");
+                string outfitPath = Path.Combine(portraits, "outfit.json");
+                string markerPath = Path.Combine(portraits, OutfitConfirmationFileName);
+                var order = new List<string>();
+                bool everyIncompletePrefixDenied = CommittedOutfitResponse(request, root) == null;
+                bool resealed = false;
+                CommitOutfitInDirectory(op, root, (path, bytes) =>
+                {
+                    WriteSharedPortraitAtomic(path, bytes);
+                    order.Add(Path.GetFileName(path));
+                    if (order.Count == 4)
+                    {
+                        // The same projection applied by ordinary CharacterProfiles upsert.
+                        var native = new Dictionary<string, object> { ["name"] = "Fresh native profile" };
+                        ApplyConfirmedOutfit(CampaignFileService.ReadJsonObject(outfitPath), native);
+                        WriteSharedPortraitAtomic(profile, Encoding.UTF8.GetBytes(Json.Serialize(native)));
+                        resealed = ReadString(CampaignFileService.ReadJsonObject(profile), "clothingDescription", "") == op.Description;
+                    }
+                    if (path != markerPath)
+                        everyIncompletePrefixDenied &= CommittedOutfitResponse(request, root) == null;
+                });
+
+                var confirmed = CommittedOutfitResponse(request, root);
+                byte[] marker = File.ReadAllBytes(markerPath);
+                File.Delete(markerPath);
+                string alternate = Path.Combine(portraits, OutfitConfirmationFileName.ToUpperInvariant());
+                File.WriteAllBytes(alternate, marker);
+                bool alternateCaseDenied = CommittedOutfitResponse(request, root) == null;
+                return order.SequenceEqual(new[] { "custom.png", "formal_outfit.json", "outfit.json",
+                        OutfitPortraitReceiptFileName, "profile.json", OutfitConfirmationFileName })
+                    && everyIncompletePrefixDenied && resealed && alternateCaseDenied
+                    && ReadString(confirmed, "status", "") == "committed"
+                    && ReadString(confirmed, "imageBase64", "") == Convert.ToBase64String(op.After);
+            });
+
+        private static bool VerifyOutfitConfirmationCompatibility()
+            => WithOutfitConfirmationFixture((root, op, request) =>
+            {
+                CommitOutfitInDirectory(op, root);
+                string portraits = Path.Combine(root, "portraits");
+                string profilePath = Path.Combine(root, "profile.json");
+                string outfitPath = Path.Combine(portraits, "outfit.json");
+                string markerPath = Path.Combine(portraits, OutfitConfirmationFileName);
+                byte[] marker = File.ReadAllBytes(markerPath);
+                byte[] versioned = File.ReadAllBytes(outfitPath);
+
+                var profile = CampaignFileService.ReadJsonObject(profilePath);
+                profile["name"] = "Independent profile edit";
+                WriteSharedPortraitAtomic(profilePath, Encoding.UTF8.GetBytes(Json.Serialize(profile)));
+                bool unrelatedProfileAccepted = CommittedOutfitResponse(request, root) != null;
+
+                var sameImageReceipt = OutfitContractReceipt(op.After, 768, 1024);
+                sameImageReceipt["fixtureOnlyAnnotation"] = "A new validated crop receipt";
+                ReplaceRefreshedCharacterOverrideInDirectory(portraits, op.After, sameImageReceipt, WriteSharedPortraitAtomic);
+                bool sameImageRefreshAccepted = ReadString(ReadDictionary(CommittedOutfitResponse(request, root), "portraitReceipt"),
+                    "fixtureOnlyAnnotation", "") == "A new validated crop receipt"
+                    && File.ReadAllBytes(markerPath).SequenceEqual(marker);
+
+                var outfit = CampaignFileService.ReadJsonObject(outfitPath);
+                outfit[OutfitConfirmationFormatKey] = "future-format";
+                WriteSharedPortraitAtomic(outfitPath, Encoding.UTF8.GetBytes(Json.Serialize(outfit)));
+                bool unknownFormatDenied = CommittedOutfitResponse(request, root) == null;
+                outfit.Remove(OutfitConfirmationFormatKey);
+                WriteSharedPortraitAtomic(outfitPath, Encoding.UTF8.GetBytes(Json.Serialize(outfit)));
+                File.Delete(markerPath);
+                bool legacyAccepted = CommittedOutfitResponse(request, root) != null;
+
+                WriteSharedPortraitAtomic(outfitPath, versioned);
+                WriteSharedPortraitAtomic(markerPath, marker);
+                byte[] changedImage = { 7, 8, 9 };
+                ReplaceRefreshedCharacterOverrideInDirectory(portraits, changedImage,
+                    OutfitContractReceipt(changedImage, 768, 1024), WriteSharedPortraitAtomic);
+                var refreshedProfile = new Dictionary<string, object>();
+                ApplyConfirmedOutfit(CampaignFileService.ReadJsonObject(outfitPath), refreshedProfile);
+                return unrelatedProfileAccepted && sameImageRefreshAccepted && unknownFormatDenied && legacyAccepted
+                    && CommittedOutfitResponse(request, root) == null
+                    && ReadString(refreshedProfile, "clothingDescription", "") == op.Description
+                    && File.ReadAllBytes(markerPath).SequenceEqual(marker);
+            });
+
+        private static bool VerifyOutfitConfirmationRollback()
+            => WithOutfitConfirmationFixture((root, op, request) =>
+            {
+                CommitOutfitInDirectory(op, root);
+                var originals = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+                    .ToDictionary(path => path, File.ReadAllBytes, StringComparer.Ordinal);
+                var next = MakeLaterOutfitFixture(op);
+                var other = new Dictionary<string, object>(request) { ["operationId"] = next.Id, ["sourceSha256"] = next.SourceHash };
+                bool failed = false, previousMarkerNeverConfirmsNext = true;
+                try
+                {
+                    CommitOutfitInDirectory(next, root, (path, bytes) =>
+                    {
+                        WriteSharedPortraitAtomic(path, bytes);
+                        if (Path.GetFileName(path) == OutfitConfirmationFileName)
+                            throw new IOException("Injected confirmation publication fault");
+                        previousMarkerNeverConfirmsNext &= CommittedOutfitResponse(other, root) == null;
+                    });
+                }
+                catch (IOException ex) when (ex.Message == "Injected confirmation publication fault") { failed = true; }
+
+                return failed && previousMarkerNeverConfirmsNext && originals.Count == 6
+                    && Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length == originals.Count
+                    && originals.All(pair => File.ReadAllBytes(pair.Key).SequenceEqual(pair.Value))
+                    && CommittedOutfitResponse(request, root) != null && CommittedOutfitResponse(other, root) == null;
+            });
+
+        private static bool VerifyOutfitDeniedMarker()
+            => WithOutfitConfirmationFixture((root, op, request) => CheckDeniedOutfitMarker(root, op, request, false))
+                && WithOutfitConfirmationFixture((root, op, request) => CheckDeniedOutfitMarker(root, op, request, true));
+
+        private static bool CheckDeniedOutfitMarker(string root, OutfitChangeOperation op, Dictionary<string, object> request,
+            bool committedPreviously)
+        {
+            if (committedPreviously) CommitOutfitInDirectory(op, root);
+            var originals = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+                .ToDictionary(path => path, File.ReadAllBytes, StringComparer.Ordinal);
+            var next = committedPreviously ? MakeLaterOutfitFixture(op) : op;
+            var nextRequest = new Dictionary<string, object>(request) { ["operationId"] = next.Id, ["sourceSha256"] = next.SourceHash };
+            var denied = new UnauthorizedAccessException("Injected marker write denial before publication");
+            var restored = new List<string>();
+            bool sameException = false;
+            int forwardWrites = 0;
+            try
+            {
+                CommitOutfitInDirectory(next, root, (path, bytes) =>
+                {
+                    if (Path.GetFileName(path) == OutfitConfirmationFileName) throw denied;
+                    WriteSharedPortraitAtomic(path, bytes);
+                    forwardWrites++;
+                }, (path, bytes) =>
+                {
+                    string name = Path.GetFileName(path);
+                    if (name == OutfitConfirmationFileName) throw denied;
+                    WriteSharedPortraitAtomic(path, bytes);
+                    restored.Add(name);
+                });
+            }
+            catch (UnauthorizedAccessException ex) when (ReferenceEquals(ex, denied)) { sameException = true; }
+
+            return sameException && forwardWrites == 5 && CommittedOutfitResponse(nextRequest, root) == null
+                && originals.Count == (committedPreviously ? 6 : 0)
+                && Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length == originals.Count
+                && originals.All(pair => File.ReadAllBytes(pair.Key).SequenceEqual(pair.Value))
+                && (committedPreviously
+                    ? restored.SequenceEqual(new[] { "profile.json", OutfitPortraitReceiptFileName, "outfit.json", "formal_outfit.json", "custom.png" })
+                        && CommittedOutfitResponse(request, root) != null
+                    : restored.Count == 0);
+        }
+
+        private static bool VerifyOutfitRollbackContinues()
+            => WithOutfitConfirmationFixture((root, op, request) =>
+            {
+                CommitOutfitInDirectory(op, root);
+                var originals = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+                    .ToDictionary(path => path, File.ReadAllBytes, StringComparer.Ordinal);
+                var next = MakeLaterOutfitFixture(op);
+                var nextRequest = new Dictionary<string, object>(request) { ["operationId"] = next.Id, ["sourceSha256"] = next.SourceHash };
+                var denied = new UnauthorizedAccessException("Injected marker write denial before publication");
+                var restoreError = new IOException("Injected receipt restore failure");
+                var attempted = new List<string>();
+                bool exactReportedErrors = false;
+                try
+                {
+                    CommitOutfitInDirectory(next, root, (path, bytes) =>
+                    {
+                        if (Path.GetFileName(path) == OutfitConfirmationFileName) throw denied;
+                        WriteSharedPortraitAtomic(path, bytes);
+                    }, (path, bytes) =>
+                    {
+                        string name = Path.GetFileName(path);
+                        attempted.Add(name);
+                        if (name == OutfitPortraitReceiptFileName) throw restoreError;
+                        WriteSharedPortraitAtomic(path, bytes);
+                    });
+                }
+                catch (AggregateException ex)
+                {
+                    exactReportedErrors = ex.InnerExceptions.Count == 2 && ReferenceEquals(ex.InnerExceptions[0], denied)
+                        && ex.InnerExceptions[1].Message == $"Could not restore outfit file '{OutfitPortraitReceiptFileName}'."
+                        && ReferenceEquals(ex.InnerExceptions[1].InnerException, restoreError);
+                }
+                return exactReportedErrors
+                    && attempted.SequenceEqual(new[] { "profile.json", OutfitPortraitReceiptFileName, "outfit.json", "formal_outfit.json", "custom.png" })
+                    && Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length == originals.Count
+                    && originals.All(pair => File.ReadAllBytes(pair.Key).SequenceEqual(pair.Value)
+                        == (Path.GetFileName(pair.Key) != OutfitPortraitReceiptFileName))
+                    && CommittedOutfitResponse(request, root) == null && CommittedOutfitResponse(nextRequest, root) == null;
+            });
+
+        private static bool VerifyOutfitProfileInvalidation()
+            => WithOutfitConfirmationFixture((root, op, request) =>
+            {
+                string profile = Path.Combine(root, "profile.json");
+                int dirtyAttempts = 0, writes = 0;
+                bool beforeAnyWrite = true;
+                var denied = new IOException("Injected profile dirty publication failure");
+                void PublishDirty(string path)
+                {
+                    dirtyAttempts++;
+                    beforeAnyWrite &= path == profile && Monitor.IsEntered(Program.FileLock)
+                        && writes == 0 && Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length == 0;
+                }
+                void Write(string path, byte[] bytes)
+                {
+                    writes++;
+                    WriteSharedPortraitAtomic(path, bytes);
+                }
+
+                op.StoredSourceHash = "stale";
+                bool staleRejected = false;
+                try { CommitOutfitInDirectory(op, root, Write, markProfileDirty: PublishDirty); }
+                catch (InvalidOperationException) { staleRejected = true; }
+                if (!staleRejected || dirtyAttempts != 0 || writes != 0) return false;
+
+                op.StoredSourceHash = "";
+                bool sameException = false;
+                try
+                {
+                    CommitOutfitInDirectory(op, root, Write, markProfileDirty: path =>
+                    {
+                        PublishDirty(path);
+                        throw denied;
+                    });
+                }
+                catch (IOException error) when (ReferenceEquals(error, denied)) { sameException = true; }
+                if (!sameException || dirtyAttempts != 1 || writes != 0
+                    || Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length != 0)
+                    return false;
+
+                CommitOutfitInDirectory(op, root, Write, markProfileDirty: PublishDirty);
+                return beforeAnyWrite && dirtyAttempts == 2 && writes == 6
+                    && File.Exists(profile) && CommittedOutfitResponse(request, root) != null;
+            });
+
+        private static OutfitChangeOperation MakeLaterOutfitFixture(OutfitChangeOperation op)
+        {
+            var next = new OutfitChangeOperation
+            {
+                Id = Guid.NewGuid().ToString("N"), Campaign = op.Campaign, Hero = op.Hero, Player = op.Player,
+                Timeline = op.Timeline, Description = "A new red coat.", StoredSourceHash = Sha256Hex(op.After),
+                SourceHash = "later_preview", After = new byte[] { 7, 8, 9 }
+            };
+            next.PortraitReceipt = OutfitContractReceipt(next.After, 768, 1024);
+            return next;
+        }
+
+        private static bool WithOutfitConfirmationFixture(Func<string, OutfitChangeOperation, Dictionary<string, object>, bool> check)
+        {
+            string root = Path.Combine(Path.GetTempPath(), "reign-outfit-confirmation-" + Guid.NewGuid().ToString("N"));
+            if (File.Exists(root) || Directory.Exists(root))
+                throw new IOException("The disposable outfit fixture path is already occupied.");
+            Directory.CreateDirectory(root);
+            try
+            {
+                var op = new OutfitChangeOperation
+                {
+                    Id = Guid.NewGuid().ToString("N"), Campaign = "isolated", Hero = "npc", Player = "player",
+                    Timeline = "main", Description = "A blue wool tunic.", StoredSourceHash = "",
+                    SourceHash = "preview", After = new byte[] { 3, 4, 5 }
+                };
+                op.PortraitReceipt = OutfitContractReceipt(op.After, 768, 1024);
+                var request = new Dictionary<string, object>
+                {
+                    ["campaignId"] = op.Campaign, ["heroStringId"] = op.Hero, ["operationId"] = op.Id,
+                    ["playerHeroId"] = op.Player, ["timelineId"] = op.Timeline, ["sourceSha256"] = op.SourceHash
+                };
+                return check(root, op, request);
+            }
+            finally { Directory.Delete(root, true); }
         }
 
         private static PortraitFaceFocus OutfitContractFocus() => new PortraitFaceFocus

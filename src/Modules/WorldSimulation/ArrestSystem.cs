@@ -77,6 +77,21 @@ namespace ReignBetaServer
             string accusedId = ReadString(payload, "accusedHeroId", "").Trim();
             string playerId = ReadString(payload, "playerHeroId", "").Trim();
             string tagId = ReadString(payload, "reputationTagId", "").Trim();
+            const string generationField = "sharedActivityGeneration";
+            var generationFields = payload.Keys.Where(key =>
+                string.Equals(key, generationField, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
+            bool requireOwner = generationFields.Length != 0;
+            if (requireOwner && (generationFields.Length != 1 || generationFields[0] != generationField
+                || payload[generationField] is not string
+                || !ExactArrestEffectField(payload, "campaignId", campaignId)
+                || !ExactArrestEffectField(payload, "timelineId", timelineId)
+                || !ExactArrestEffectField(payload, "operation", operation)
+                || !ExactArrestEffectField(payload, "caseId", caseId)
+                || !ExactArrestEffectField(payload, "accusedHeroId", accusedId)
+                || !ExactArrestEffectField(payload, "playerHeroId", playerId)
+                || !ExactArrestEffectField(payload, "reputationTagId", tagId)))
+                return ArrestEffectOwnerFailure("ownership_mismatch", "The arrest effect requires its exact campaign, timeline, case, and restore owner.");
+
             if (caseId.Length == 0 || accusedId.Length == 0 || playerId.Length == 0
                 || tagId.Length == 0)
                 return new Dictionary<string, object>
@@ -96,20 +111,63 @@ namespace ReignBetaServer
             string description = DialogueService.LimitText(ReadString(payload, "description", ""), 1000);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             using (EnterWorldHistoryTimelineScope(campaignId))
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            using (ReignDbConnection connection = requireOwner
+                ? ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaignId, trackCampaignMutations: true)
+                : ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                ReputationService.EnsureSocialReputationSchema(connection);
-                RelationshipsService.EnsureMbtiRelationshipSchema(connection);
-                RelationshipsService.EnsureRelationshipDirectorSchema(connection);
-                WorldSimulationStore.EnsureArrestCaseEffects(connection);
-                // ReignDatabase's PostgreSQL BEGIN takes the campaign-schema mutation lock.
-                WorldSimulationStore.Begin(connection);
+                if (connection == null)
+                    return ArrestEffectOwnerFailure("ownership_mismatch", "The arrest effect campaign is not registered.");
+
+                if (!requireOwner)
+                {
+                    ReputationService.EnsureSocialReputationSchema(connection);
+                    RelationshipsService.EnsureMbtiRelationshipSchema(connection);
+                    RelationshipsService.EnsureRelationshipDirectorSchema(connection);
+                    WorldSimulationStore.EnsureArrestCaseEffects(connection);
+                }
+                using var typedTransaction = requireOwner ? connection.BeginTransaction() : null;
+                if (requireOwner)
+                    AcquirePostgreSqlTransactionMutationLock(connection, typedTransaction);
+                else
+                    WorldSimulationStore.Begin(connection);
+
+                void CommitEffect()
+                {
+                    if (requireOwner) typedTransaction.Commit();
+                    else WorldSimulationStore.Commit(connection);
+                }
+
+                void RollbackEffect()
+                {
+                    if (requireOwner) typedTransaction.Rollback();
+                    else WorldSimulationStore.Rollback(connection);
+                }
+
                 try
                 {
-                    string activeTimeline = TableExists(connection, "world_history_timelines")
-                        ? ActiveWorldHistoryTimeline(connection) : "main";
-                    if (!string.Equals(activeTimeline, timelineId, StringComparison.Ordinal))
-                        throw new InvalidOperationException("The arrest effect does not belong to the active timeline.");
+                    if (requireOwner)
+                    {
+                        // Queries enlist in the physical transaction opened above.
+                        if (!NoticeAcknowledgementOwnerMatches(connection, typedTransaction, payload, campaignId, timelineId))
+                        {
+                            RollbackEffect();
+                            return ArrestEffectOwnerFailure("ownership_mismatch", "The arrest effect owner is no longer current.");
+                        }
+                        if (!TableExists(connection, "arrest_case_effect_state")
+                            || !TableExists(connection, "character_reputations")
+                            || !TableExists(connection, "relationship_pair_chemistry"))
+                        {
+                            RollbackEffect();
+                            return ArrestEffectOwnerFailure("arrest_effect_schema_unavailable", "The campaign arrest effect storage is not initialized.");
+                        }
+                    }
+                    else
+                    {
+                        string activeTimeline = TableExists(connection, "world_history_timelines")
+                            ? ActiveWorldHistoryTimeline(connection) : "main";
+                        if (!string.Equals(activeTimeline, timelineId, StringComparison.Ordinal))
+                            throw new InvalidOperationException("The arrest effect does not belong to the active timeline.");
+                    }
 
                     Dictionary<string, object> key = new Dictionary<string, object>
                     {
@@ -132,7 +190,7 @@ namespace ReignBetaServer
                         || states.Count == 0 && WorldSimulationStore.SelectOtherArrestCaseReputations(connection, key).Any(row =>
                             ReadString(TryParseJsonObject(ReadString(row, "snapshot_json", "")), "arrestCaseId", "") == caseId))
                     {
-                        WorldSimulationStore.Rollback(connection);
+                        RollbackEffect();
                         return new Dictionary<string, object>
                         {
                             ["ok"] = false, ["caseId"] = caseId,
@@ -146,7 +204,7 @@ namespace ReignBetaServer
                     bool rescind = operation == "rescind";
                     if (terminal && !rescind)
                     {
-                        WorldSimulationStore.Rollback(connection);
+                        RollbackEffect();
                         return new Dictionary<string, object>
                         {
                             ["ok"] = false, ["caseId"] = caseId, ["reputationTagId"] = tagId,
@@ -164,7 +222,7 @@ namespace ReignBetaServer
                     if ((recordedRescission && existing != null && !legacyRescission)
                         || (!recordedRescission && states.Count != 0 && existing == null))
                     {
-                        WorldSimulationStore.Rollback(connection);
+                        RollbackEffect();
                         return new Dictionary<string, object>
                         {
                             ["ok"] = false, ["caseId"] = caseId,
@@ -173,7 +231,7 @@ namespace ReignBetaServer
                     }
                     if (recordedRescission)
                     {
-                        WorldSimulationStore.Commit(connection);
+                        CommitEffect();
                         return ArrestEffectAcknowledgement(operation, caseId, tagId,
                             legacyUnverified ? null : applied, true);
                     }
@@ -255,20 +313,31 @@ namespace ReignBetaServer
                         key["rescinded"] = rescind;
                         WorldSimulationStore.UpsertArrestCaseEffect(connection, key);
                     }
-                    WorldSimulationStore.Commit(connection);
+                    CommitEffect();
                     RelationshipsService.InvalidateRelationshipPairStateCache(campaignId);
                     return ArrestEffectAcknowledgement(operation, caseId, tagId,
                         legacyUnverified ? null : applied, rescind ? terminal : sameRequest || correction == 0);
                 }
                 catch (Exception ex)
                 {
-                    try { WorldSimulationStore.Rollback(connection); } catch { }
+                    try { RollbackEffect(); } catch { }
                     return new Dictionary<string, object>
                     {
                         ["ok"] = false, ["caseId"] = caseId, ["error"] = ex.Message
                     };
                 }
             }
+        }
+
+        private static bool ExactArrestEffectField(Dictionary<string, object> payload, string key, string expected)
+        {
+            return !string.IsNullOrWhiteSpace(expected) && payload.TryGetValue(key, out object value)
+                && value is string supplied && string.Equals(supplied, expected, StringComparison.Ordinal);
+        }
+
+        private static Dictionary<string, object> ArrestEffectOwnerFailure(string status, string error)
+        {
+            return new Dictionary<string, object> { ["ok"] = false, ["status"] = status, ["error"] = error };
         }
 
         private static int ArrestDirectionalAffinity(Dictionary<string, object> pair, string heroA, string heroB,
