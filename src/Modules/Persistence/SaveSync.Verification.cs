@@ -2094,8 +2094,35 @@ namespace ReignBetaServer
                     }
                 }
 
+                Dictionary<string, object> Inspection(Dictionary<string, object> material)
+                {
+                    var query = new Dictionary<string, object>(material) { ["operation"] = "inspect" };
+                    query.Remove("expectedMaterialRevision");
+                    query.Remove("effectIntentId");
+                    return Json.Deserialize<Dictionary<string, object>>(Json.Serialize(query));
+                }
+
                 ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, preReceiptPoint);
                 var firstIntent = Versioned(0, -7);
+                var inspection = Inspection(firstIntent);
+                var cleanInspection = CleanBytes();
+                var beforeInspection = State(receiptCase, receiptTag);
+                var ready = Apply(inspection);
+                var forbiddenInspection = new Dictionary<string, object>(inspection) { ["effectIntentId"] = firstIntent["effectIntentId"] };
+                var foreignInspection = new Dictionary<string, object>(inspection) { ["sharedActivityGeneration"] = oldGeneration };
+                add("arrest_captured_repair_inspection_ready_is_read_only",
+                    ReadBool(ready, "ok", false) && ReadString(ready, "status", "") == "ready"
+                    && ReadString(ready, "operation", "") == "inspect" && ReadInt(ready, "arrestEffectVersion", 0) == 2
+                    && ReadLong(ready, "materialRevision", -1) == 0
+                    && ReadString(ready, "campaignId", "") == campaign && ReadString(ready, "timelineId", "") == timeline
+                    && ReadString(ready, "caseId", "") == receiptCase && ReadString(ready, "reputationTagId", "") == receiptTag
+                    && ReadString(ready, "playerHeroId", "") == player && ReadString(ready, "accusedHeroId", "") == accused
+                    && ReadString(ready, "sharedActivityGeneration", "<missing>") == Generation()
+                    && ReadString(Apply(forbiddenInspection), "status", "") == "invalid_effect_intent"
+                    && ReadString(Apply(foreignInspection), "status", "") == "ownership_mismatch"
+                    && State(receiptCase, receiptTag) == beforeInspection && ReceiptState() == null
+                    && StillCleanBytes(cleanInspection),
+                    "An exact registered inspection discovers the empty material revision. An injected intent or old owner cannot read or mutate it.");
                 var firstReceipt = Apply(Json.Deserialize<Dictionary<string, object>>(Json.Serialize(firstIntent)));
                 string committed = Json.Serialize(firstReceipt);
                 var firstState = State(receiptCase, receiptTag);
@@ -2126,6 +2153,21 @@ namespace ReignBetaServer
                     replayIsReadOnly && State(receiptCase, receiptTag) == firstState
                     && Json.Serialize(ReceiptState()) == Json.Serialize(firstStored) && StillCleanBytes(cleanReplay),
                     "An exact replay returns the same committed object without rewriting the reputation or sidecar. Malformed or altered intents do not mutate.");
+
+                var settledInspection = new Dictionary<string, object>(inspection) { ["worldDay"] = 22d };
+                var settled = Apply(settledInspection);
+                var changedEvidence = new Dictionary<string, object>(settledInspection) { ["evidenceIds"] = "later_material" };
+                var mismatched = Apply(changedEvidence);
+                add("arrest_captured_repair_inspection_uses_exact_active_material",
+                    ReadBool(settled, "ok", false) && ReadString(settled, "status", "") == "settled"
+                    && ReadBool(settled, "relationshipEffectResolved", false)
+                    && ReadInt(settled, "appliedRelationshipDelta", int.MinValue) == -7
+                    && ReadLong(settled, "materialRevision", -1) == 1
+                    && !ReadBool(mismatched, "ok", true) && ReadString(mismatched, "status", "") == "material_mismatch"
+                    && !ReadBool(mismatched, "relationshipEffectResolved", true)
+                    && State(receiptCase, receiptTag) == firstState && Json.Serialize(ReceiptState()) == Json.Serialize(firstStored)
+                    && StillCleanBytes(cleanReplay),
+                    "An identical established case returns the measured effect at the existing revision. A conflicting disclosure cannot acquire permission to rebase it.");
 
                 var secondIntent = Versioned(1, -9);
                 var secondReceipt = Apply(secondIntent);
@@ -2163,6 +2205,15 @@ namespace ReignBetaServer
                     && ReadLong(lateApply, "materialRevision", -1) == 4 && terminalState.Affinity == -13
                     && State(receiptCase, receiptTag) == terminalState && StillCleanBytes(cleanTerminal),
                     "The generation-only rescission keeps its original shape and defeats a stale typed apply with an explicit terminal result.");
+
+                var terminalInspection = Apply(inspection);
+                add("arrest_captured_repair_terminal_inspection_never_reapplies",
+                    !ReadBool(terminalInspection, "ok", true) && ReadString(terminalInspection, "operation", "") == "inspect"
+                    && ReadString(terminalInspection, "status", "") == "terminal_rescinded"
+                    && ReadLong(terminalInspection, "materialRevision", -1) == 4
+                    && !ReadBool(terminalInspection, "relationshipEffectResolved", true)
+                    && State(receiptCase, receiptTag) == terminalState && StillCleanBytes(cleanTerminal),
+                    "A retained tombstone settles a daily attempt without a new effect, measured-success claim, or sidecar write.");
 
                 const string rejectedIntentCase = "failed_receipt_case", rejectedIntentTag = "failed_receipt_tag";
                 var rejectedIntent = Versioned(0, -12, rejectedIntentCase, rejectedIntentTag);

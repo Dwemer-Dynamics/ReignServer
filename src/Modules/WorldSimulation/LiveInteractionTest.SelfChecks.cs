@@ -103,7 +103,7 @@ namespace ReignBetaServer
         private static void AddPartyAgencySendAuthorityChecks(Action<string, bool, string> add)
         {
             const string process = "f0c845c1a0134b49baa0218998fa6998";
-            const string lease = "66fe555aaa9d47bf95ccfa0211b237357";
+            const string lease = "66fe555aa9d47bf95ccfa0211b237357";
             const string campaign = "send-campaign";
             const string runId = "send-run";
             const string game = "send-game";
@@ -122,6 +122,7 @@ namespace ReignBetaServer
                 && !payload.ContainsKey(PartyAgencySendOriginField) && clearedDuplicates
                 && TakePartyAgencySendClaim(coercion) == null && coercion.Count == 0,
                 "Only a versioned typed claim survives parsing, and no raw claim reaches dialogue processing.");
+            if (claim == null) return;
 
             var observed = TestDict("campaignId", campaign, "gameInstanceId", game, "runId", runId,
                 "commandId", "send-command", "leaseId", lease, "clientProcessInstanceId", process,

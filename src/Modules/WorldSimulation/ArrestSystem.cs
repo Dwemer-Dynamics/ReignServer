@@ -95,8 +95,16 @@ namespace ReignBetaServer
             bool requestReceipt = payload.Keys.Any(IsArrestEffectReceiptField);
             if (requestReceipt && !requireOwner)
                 return ArrestEffectOwnerFailure("ownership_mismatch", "A versioned arrest effect requires a current restore owner.");
+            bool inspect = requestReceipt && operation == "inspect";
             ArrestEffectIntent intent = null;
-            if (requestReceipt && (operation != "apply" || !TryReadArrestEffectIntent(payload, out intent)))
+            if (inspect)
+            {
+                if (!ExactArrestIntentValue(payload, "arrestEffectVersion", out int version) || version != 2
+                    || payload.Keys.Any(key => !string.Equals(key, "arrestEffectVersion", StringComparison.Ordinal) && IsArrestEffectReceiptField(key))
+                    || !TryReadArrestEffectMaterial(payload, out _, out _))
+                    return ArrestEffectOwnerFailure("invalid_effect_intent", "An arrest inspection requires exact v2 material with no proposed write intent.");
+            }
+            else if (requestReceipt && (operation != "apply" || !TryReadArrestEffectIntent(payload, out intent)))
                 return ArrestEffectOwnerFailure("invalid_effect_intent", "A versioned arrest apply requires an exact intent, revision and material.");
 
             if (caseId.Length == 0 || accusedId.Length == 0 || playerId.Length == 0
@@ -106,7 +114,7 @@ namespace ReignBetaServer
                     ["ok"] = false,
                     ["error"] = "caseId, accusedHeroId, playerHeroId, and reputationTagId are required."
                 };
-            if (operation != "apply" && operation != "rescind")
+            if (!inspect && operation != "apply" && operation != "rescind")
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false, ["error"] = "operation must be apply or rescind."
@@ -220,7 +228,7 @@ namespace ReignBetaServer
                     long revision = effectState == null || !receiptSchema ? 0 : ReadLong(effectState, "material_revision", -1);
                     if (revision < 0)
                         throw new InvalidOperationException("The arrest effect material revision is invalid.");
-                    if (intent == null && terminal && !rescind)
+                    if (!inspect && intent == null && terminal && !rescind)
                     {
                         RollbackEffect();
                         return new Dictionary<string, object>
@@ -247,6 +255,15 @@ namespace ReignBetaServer
                             ["error"] = "The recorded arrest case has an inconsistent reputation state."
                         };
                     }
+                    if (inspect)
+                    {
+                        RollbackEffect();
+                        bool matching = measured && requested == desiredDelta
+                            && ArrestEffectMaterialMatches(payload, existing, priorSnapshot, description, reputationValue);
+                        string status = terminal ? "terminal_rescinded" : effectState == null && existing == null ? "ready"
+                            : matching ? "settled" : "material_mismatch";
+                        return ArrestEffectInspection(payload, revision, status, status == "settled" ? applied : (int?)null);
+                    }
                     if (intent != null && terminal)
                     {
                         RollbackEffect();
@@ -261,13 +278,7 @@ namespace ReignBetaServer
                         var receipt = TryParseJsonObject(ReadString(effectState, "effect_receipt_json", ""));
                         int receiptDelta = ReadInt(receipt, "appliedRelationshipDelta", int.MinValue);
                         if (!measured || requested != desiredDelta || receiptDelta != applied
-                            || ReadInt(existing, "reputation_value", int.MinValue) != reputationValue
-                            || ReadString(existing, "description", "") != description
-                            || ReadString(priorSnapshot, "chargeCategory", "") != ReadString(payload, "chargeCategory", "")
-                            || ReadString(priorSnapshot, "severity", "") != ReadString(payload, "severity", "")
-                            || ReadBool(priorSnapshot, "causeEstablished", false) != ReadBool(payload, "causeEstablished", false)
-                            || ReadString(priorSnapshot, "evidenceStatus", "") != ReadString(payload, "evidenceStatus", "")
-                            || ReadString(priorSnapshot, "evidenceIds", "") != ReadString(payload, "evidenceIds", "")
+                            || !ArrestEffectMaterialMatches(payload, existing, priorSnapshot, description, reputationValue)
                             || !ReadBool(receipt, "ok", false) || ReadString(receipt, "operation", "") != "apply"
                             || ReadString(receipt, "caseId", "") != caseId || ReadString(receipt, "reputationTagId", "") != tagId
                             || ReadString(receipt, "status", "") != "committed" || ReadInt(receipt, "arrestEffectVersion", 0) != 2
@@ -424,7 +435,27 @@ namespace ReignBetaServer
             if (!ExactArrestIntentValue(input, "arrestEffectVersion", out int version) || version != 2
                 || !ExactArrestIntentValue(input, "expectedMaterialRevision", out object revision) || !(revision is int or long)
                 || !ExactArrestIntentValue(input, "effectIntentId", out string id)
-                || !ExactArrestIntentValue(input, "relationshipDelta", out int delta) || delta < -100 || delta > 100
+                || !TryReadArrestEffectMaterial(input, out double day, out string material))
+                return false;
+            long expected = Convert.ToInt64(revision, CultureInfo.InvariantCulture);
+            if (expected < 0 || expected == long.MaxValue)
+                return false;
+            // Revisions form part of the intent identity so a superseded nonce cannot
+            // be reapplied by resubmitting it with a refreshed revision.
+            string prefix = expected.ToString(CultureInfo.InvariantCulture) + "_";
+            if (!id.StartsWith(prefix, StringComparison.Ordinal)
+                || !Guid.TryParseExact(id.Substring(prefix.Length), "N", out Guid nonce) || nonce == Guid.Empty
+                || id != prefix + nonce.ToString("N"))
+                return false;
+            intent = new ArrestEffectIntent(id, expected, material, day);
+            return true;
+        }
+
+        private static bool TryReadArrestEffectMaterial(Dictionary<string, object> input, out double day, out string material)
+        {
+            day = 0;
+            material = null;
+            if (!ExactArrestIntentValue(input, "relationshipDelta", out int delta) || delta < -100 || delta > 100
                 || !ExactArrestIntentValue(input, "reputationValue", out int value) || value < -100 || value > 100
                 || !ExactArrestIntentValue(input, "worldDay", out object rawDay) || !(rawDay is int or long or float or double or decimal)
                 || !ExactArrestIntentValue(input, "description", out string description)
@@ -435,22 +466,35 @@ namespace ReignBetaServer
                 || !ExactArrestIntentValue(input, "evidenceStatus", out string evidenceStatus) || evidenceStatus.Length > 128
                 || !ExactArrestIntentValue(input, "evidenceIds", out string evidenceIds) || evidenceIds.Length > 8192)
                 return false;
-            long expected = Convert.ToInt64(revision, CultureInfo.InvariantCulture);
-            double day = Convert.ToDouble(rawDay, CultureInfo.InvariantCulture);
-            if (expected < 0 || expected == long.MaxValue || !double.IsFinite(day) || day < 0)
+            day = Convert.ToDouble(rawDay, CultureInfo.InvariantCulture);
+            if (!double.IsFinite(day) || day < 0)
                 return false;
-            // Revisions form part of the intent identity so a superseded nonce cannot
-            // be reapplied by resubmitting it with a refreshed revision.
-            string prefix = expected.ToString(CultureInfo.InvariantCulture) + "_";
-            if (!id.StartsWith(prefix, StringComparison.Ordinal)
-                || !Guid.TryParseExact(id.Substring(prefix.Length), "N", out Guid nonce) || nonce == Guid.Empty
-                || id != prefix + nonce.ToString("N"))
-                return false;
-
-            string material = Json.Serialize(new object[] { delta, value, day, description, category, severity,
+            material = Json.Serialize(new object[] { delta, value, day, description, category, severity,
                 established, evidenceStatus, evidenceIds });
-            intent = new ArrestEffectIntent(id, expected, material, day);
             return true;
+        }
+
+        private static bool ArrestEffectMaterialMatches(Dictionary<string, object> payload,
+            Dictionary<string, object> reputation, Dictionary<string, object> snapshot, string description, int value) =>
+            ReadString(reputation, "status", "") == "active"
+            && ReadInt(reputation, "reputation_value", int.MinValue) == value
+            && ReadString(reputation, "description", "") == description
+            && ReadString(snapshot, "chargeCategory", "") == ReadString(payload, "chargeCategory", "")
+            && ReadString(snapshot, "severity", "") == ReadString(payload, "severity", "")
+            && ReadBool(snapshot, "causeEstablished", false) == ReadBool(payload, "causeEstablished", false)
+            && ReadString(snapshot, "evidenceStatus", "") == ReadString(payload, "evidenceStatus", "")
+            && ReadString(snapshot, "evidenceIds", "") == ReadString(payload, "evidenceIds", "");
+
+        private static Dictionary<string, object> ArrestEffectInspection(Dictionary<string, object> request,
+            long revision, string status, int? delta)
+        {
+            var response = TestDict("ok", status == "ready" || status == "settled", "operation", "inspect",
+                "arrestEffectVersion", 2, "status", status, "materialRevision", revision,
+                "appliedRelationshipDelta", delta, "relationshipEffectResolved", status == "settled");
+            foreach (string field in new[] { "campaignId", "timelineId", "sharedActivityGeneration", "caseId",
+                "accusedHeroId", "playerHeroId", "reputationTagId" })
+                response[field] = request[field];
+            return response;
         }
 
         private static Dictionary<string, object> ArrestEffectIntentStatus(ArrestEffectIntent intent,
