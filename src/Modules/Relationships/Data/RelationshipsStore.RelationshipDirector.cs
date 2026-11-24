@@ -684,10 +684,12 @@ conception_day,due_day,status,payload_json,created_ts,updated_ts) VALUES($id,$mo
             return ReignDatabase.QuerySql(connection, "SELECT * FROM conceptions WHERE conception_id=$id LIMIT 1;", parameters, transaction);
         }
 
-        internal static void UpsertParentage(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static bool TryInsertBirthParentage(ReignDbConnection connection, Dictionary<string, object> parameters,
+            ReignDbTransaction transaction)
         {
-            ReignDatabase.ExecuteSql(connection, @"INSERT OR REPLACE INTO parentage(child_id,mother_id,biological_father_id,legal_father_id,is_illegitimate,revealed,bastard_surname,conception_id,payload_json,updated_ts)
-VALUES($child,$mother,$bio,$legal,$illegitimate,$revealed,'',$conception,$payload,$ts);", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"INSERT INTO parentage(child_id,mother_id,biological_father_id,legal_father_id,is_illegitimate,revealed,bastard_surname,conception_id,payload_json,updated_ts)
+VALUES($child,$mother,$bio,$legal,$illegitimate,$revealed,'',$conception,$payload,$ts)
+ON CONFLICT(child_id) DO NOTHING RETURNING child_id;", parameters, transaction).Count == 1;
         }
 
         internal static void InsertDirectorOutbox(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

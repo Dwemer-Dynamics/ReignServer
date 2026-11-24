@@ -60,6 +60,7 @@ namespace ReignBetaServer
                     "Proceed performs one deterministic roll and retries return the same stored outcome.");
 
                 VerifyPlayerConceptionAtomicity(campaign, request, add);
+                VerifyFamilyBirthReceipts(campaign, add);
 
                 Dictionary<string, object> gate=ActionPipelineService.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"",false);
                 Dictionary<string, object> suppressed=ActionPipelineService.NormalizeConceptionGate(new Dictionary<string, object>{{"needed",true},{"completed",true},{"confidence",0.95d}},"*She inseminates him.*",true);
@@ -166,6 +167,141 @@ namespace ReignBetaServer
                     && ReadString(again, "conceptionId", "") == "d43_legacy_conception",
                     "Actions for the same pair and day cannot stand in for this conception or authorize a new native effect.");
             }
+        }
+
+        private static void VerifyFamilyBirthReceipts(string campaign, Action<string, bool, string> add)
+        {
+            const string mother = "d17_mother";
+            const string biological = "d17_biological";
+            const string intended = "d17_intended";
+            const string child = "d17_child";
+            string conception = Enumerable.Range(0, 1000).Select(i => "d17_birth_" + i)
+                .First(id => StableUnit(id + "|conceal_parentage") > 0.95d);
+
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+            EnsureRelationshipDirectorSchema(connection);
+            WorldSimulationService.EnsureWorldHistorySchema(connection);
+            DialogueService.EnsureMemoryPrecisionSchema(connection);
+            if (WorldSimulationStore.SelectWorldHistoryTimelines2(connection).Count == 0)
+            {
+                WorldSimulationStore.InsertWorldHistoryTimelines(connection, TestDict(
+                    "timeline", "d17_fixture_timeline", "campaign", campaign, "head", 0,
+                    "now", DateTime.UtcNow.ToString("o")));
+            }
+            string timeline = WorldSimulationService.ActiveWorldHistoryTimeline(connection);
+            string generation = ReadString(DialogueStore.SelectMemoryPrecisionState4(connection).Single(),
+                "restore_generation", "");
+            Dictionary<string, object> Report(string id, string status, string observedChild, string legal) => TestDict(
+                "campaignId", campaign, "timelineId", timeline, "sharedActivityGeneration", generation,
+                "conceptionId", id, "status", status, "childId", observedChild,
+                "motherId", mother, "biologicalFatherId", biological, "legalFatherId", legal,
+                "contextSource", "reign_managed", "worldDay", 78d, "fatherExposed", false);
+            void Seed(string id) => RelationshipsStore.InsertOrIgnoreConceptions(connection, TestDict(
+                "id", id, "mother", mother, "father", biological, "legal", intended,
+                "start", 42d, "due", 78d, "status", "active", "payload", "{}", "ts", 1L));
+            Dictionary<string, object> Conception(string id) =>
+                RelationshipsStore.SelectConceptions3(connection, TestDict("id", id)).Single();
+            Dictionary<string, object> Parentage(string id) =>
+                RelationshipsStore.SelectParentage(connection, TestDict("child", id)).SingleOrDefault();
+            int OutboxCount() => ReadInt(ReignDatabase.QuerySql(connection,
+                "SELECT COUNT(*) AS count FROM director_outbox WHERE kind='parentage_rumor_seed';").Single(), "count", -1);
+            bool Receipt(Dictionary<string, object> result, string id, string acknowledgedChild, bool replay)
+                => ReadBool(result, "ok", false) && ReadBool(result, "idempotent", false) == replay
+                    && ReadString(result, "campaignId", "") == campaign && ReadString(result, "timelineId", "") == timeline
+                    && ReadString(result, "conceptionId", "") == id && ReadString(result, "status", "") == "born"
+                    && ReadString(result, "childId", "") == acknowledgedChild
+                    && result.TryGetValue("sharedActivityGeneration", out object value)
+                    && value is string receiptGeneration && receiptGeneration == generation;
+
+            Seed(conception);
+            var report = Report(conception, "born", child, intended);
+            report["intendedLegalFatherId"] = intended;
+            int originalOutbox = OutboxCount();
+            const string reject = "ALTER TABLE conceptions ADD CONSTRAINT d17_fixture_reject_birth CHECK (status <> 'born') NOT VALID;";
+            const string restore = "ALTER TABLE conceptions DROP CONSTRAINT d17_fixture_reject_birth;";
+            bool rejectedAtCompletion = false;
+            ReignDatabase.ExecuteSql(connection, reject);
+            try { FamilyConceptionReportApi(report); }
+            catch (Npgsql.PostgresException ex) when (ex.SqlState == Npgsql.PostgresErrorCodes.CheckViolation
+                && ex.ConstraintName == "d17_fixture_reject_birth") { rejectedAtCompletion = true; }
+            finally { ReignDatabase.ExecuteSql(connection, restore); }
+            add("birth_receipt_failure_rolls_back_parentage_and_outbox",
+                rejectedAtCompletion && ReadString(Conception(conception), "status", "") == "active"
+                && Parentage(child) == null && OutboxCount() == originalOutbox,
+                "A PostgreSQL rejection at the final conception update rolls back both prior writes.");
+
+            var born = FamilyConceptionReportApi(report);
+            var stored = Parentage(child);
+            add("birth_receipt_exact_identity_commits_once",
+                Receipt(born, conception, child, replay: false) && ReadString(Conception(conception), "status", "") == "born"
+                && ReadString(Conception(conception), "child_id", "") == child
+                && ReadString(stored, "conception_id", "") == conception && ReadString(stored, "mother_id", "") == mother
+                && ReadString(stored, "biological_father_id", "") == biological && ReadString(stored, "legal_father_id", "") == intended
+                && ReadInt(stored, "revealed", -1) == 0 && OutboxCount() == originalOutbox + 1,
+                "The exact born outcome commits conception, parentage, and one deterministic rumor seed.");
+
+            string revealedPayload = Json.Serialize(TestDict("existingReveal", true));
+            RelationshipsStore.UpdateParentage(connection, TestDict("child", child, "surname", "d17_revealed",
+                "payload", revealedPayload, "ts", 2L));
+            var replay = FamilyConceptionReportApi(report);
+            var changedChild = FamilyConceptionReportApi(Report(conception, "born", "d17_other_child", intended));
+            var delayedActive = FamilyConceptionReportApi(Report(conception, "active", "", intended));
+            stored = Parentage(child);
+            add("birth_receipt_replay_preserves_revealed_child",
+                Receipt(replay, conception, child, replay: true) && !ReadBool(changedChild, "ok", true)
+                && !ReadBool(delayedActive, "ok", true) && ReadString(Conception(conception), "child_id", "") == child
+                && Parentage("d17_other_child") == null && ReadInt(stored, "revealed", 0) == 1
+                && ReadString(stored, "bastard_surname", "") == "d17_revealed"
+                && ReadString(stored, "payload_json", "") == revealedPayload && OutboxCount() == originalOutbox + 1,
+                "An exact replay leaves the existing reveal intact and rejects both a replacement child and a delayed active report.");
+
+            const string legacy = "d17_legacy_fallback";
+            const string legacyChild = "d17_legacy_child";
+            Seed(legacy);
+            var unsupported = FamilyConceptionReportApi(Report(legacy, "born", legacyChild, biological));
+            add("birth_receipt_legacy_fallback_requires_existing_active_evidence", !ReadBool(unsupported, "ok", true)
+                && ReadString(Conception(legacy), "status", "") == "active" && Parentage(legacyChild) == null,
+                "An uncorroborated observed legal-parent fallback does not create durable birth effects.");
+            var activation = Report(legacy, "active", "", biological);
+            activation.Remove("sharedActivityGeneration");
+            bool activationAccepted = ReadBool(FamilyConceptionReportApi(activation), "ok", false);
+            var legacyBorn = FamilyConceptionReportApi(Report(legacy, "born", legacyChild, biological));
+            var legacyReplay = FamilyConceptionReportApi(Report(legacy, "born", legacyChild, biological));
+            var legacyParentage = Parentage(legacyChild);
+            add("birth_receipt_legacy_fallback_records_observed_parent",
+                activationAccepted && Receipt(legacyBorn, legacy, legacyChild, replay: false)
+                && Receipt(legacyReplay, legacy, legacyChild, replay: true)
+                && ReadString(Conception(legacy), "legal_father_id", "") == intended
+                && ReadString(legacyParentage, "biological_father_id", "") == biological
+                && ReadString(legacyParentage, "legal_father_id", "") == biological
+                && ReadInt(legacyParentage, "is_illegitimate", 0) == 1 && OutboxCount() == originalOutbox + 1,
+                "An exact prior managed activation corroborates the fallback, preserving intended and observed parentage separately.");
+
+            const string stale = "d17_stale_scope";
+            const string staleChild = "d17_stale_child";
+            Seed(stale);
+            var staleGeneration = Report(stale, "born", staleChild, intended);
+            staleGeneration["sharedActivityGeneration"] = generation + "_stale";
+            var staleTimeline = Report(stale, "born", staleChild, intended);
+            staleTimeline["timelineId"] = timeline + "_stale";
+            var missingTimeline = Report(stale, "born", staleChild, intended);
+            missingTimeline.Remove("timelineId");
+            add("birth_receipt_rejects_stale_or_missing_typed_scope",
+                !ReadBool(FamilyConceptionReportApi(staleGeneration), "ok", true)
+                && !ReadBool(FamilyConceptionReportApi(staleTimeline), "ok", true)
+                && !ReadBool(FamilyConceptionReportApi(missingTimeline), "ok", true)
+                && ReadString(Conception(stale), "status", "") == "active"
+                && Parentage(staleChild) == null && OutboxCount() == originalOutbox + 1,
+                "Stale generation, stale timeline, and missing typed timeline all leave the seeded conception unchanged.");
+
+            var stillborn = Report("d17_native_stillborn", "born", "", biological);
+            stillborn["contextSource"] = "bannerlord_native_schedule";
+            add("birth_receipt_native_stillbirth_without_parentage",
+                Receipt(FamilyConceptionReportApi(stillborn), "d17_native_stillborn", "", replay: false)
+                && Receipt(FamilyConceptionReportApi(stillborn), "d17_native_stillborn", "", replay: true)
+                && ReadString(Conception("d17_native_stillborn"), "status", "") == "born"
+                && Parentage("") == null && OutboxCount() == originalOutbox + 1,
+                "Native delivery without a surviving child has an idempotent born receipt and no parentage or rumor row.");
         }
 
         private static bool IsIncompleteConceptionReceipt(Dictionary<string, object> result, string status, double roll) =>

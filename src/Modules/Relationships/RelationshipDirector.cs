@@ -587,45 +587,140 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> FamilyConceptionReportApi(Dictionary<string, object> payload)
         {
-            payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "default");
-            string id = ReadFirstString(payload, "conceptionId", "id");
+            payload ??= new Dictionary<string, object>();
+            string campaign = ReadString(payload, "campaignId", "default");
+            string conception = ReadFirstString(payload, "conceptionId", "id");
             string status = ReadString(payload, "status", "active");
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            string child = ReadFirstString(payload, "childId", "childHeroStringId");
+            string requestedTimeline = ReadString(payload, "timelineId", "");
+            bool nativeObservation = ReadString(payload, "contextSource", "").StartsWith("bannerlord_native", StringComparison.Ordinal);
+            if (string.IsNullOrWhiteSpace(conception) || status == "born" && child.Length == 0 && !nativeObservation)
+                return TestDict("ok", false, "error", "The birth report does not identify its observed outcome.");
+
+            // Profile reads take the file lock. Sample before taking the SQL mutation lock.
+            string reportedBiological = ReadString(payload, "biologicalFatherId", "");
+            string reportedLegal = ReadString(payload, "legalFatherId", "");
+            double? concealChance = status == "born" && child.Length != 0
+                && !reportedLegal.Equals(reportedBiological, StringComparison.OrdinalIgnoreCase)
+                ? ConcealmentChance(LoadDirectorHeroProfile(campaign, ReadString(payload, "motherId", ""), null))
+                : null;
+            using var timelineScope = WorldSimulationService.EnterWorldHistoryTimelineScope(campaign);
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+            EnsureRelationshipDirectorSchema(connection);
+            using var transaction = connection.BeginTransaction();
+            AcquirePostgreSqlTransactionMutationLock(connection, transaction);
+            string activeTimeline = WorldSimulationService.ActiveWorldHistoryTimeline(connection);
+            bool typed = payload.TryGetValue("sharedActivityGeneration", out object expected);
+            if ((typed || requestedTimeline.Length > 0) && requestedTimeline != activeTimeline
+                || typed && !DialogueService.ExactSharedActivityGenerationMatches(connection, expected))
+                return TestDict("ok", false, "error", "The conception report belongs to a different save.");
+
+            var key = TestDict("id", conception);
+            var row = RelationshipsStore.SelectConceptions3(connection, key, transaction).SingleOrDefault();
+            string serialized = Json.Serialize(payload);
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (row == null && nativeObservation && requestedTimeline == activeTimeline)
             {
-                EnsureRelationshipDirectorSchema(connection);
-                // Native observations also report births, but never enter the server conception scheduler.
-                if (ReadString(payload, "contextSource", "").StartsWith("bannerlord_native", StringComparison.Ordinal)
-                    && ReadString(payload, "timelineId", "") == WorldSimulationService.ActiveWorldHistoryTimeline(connection))
-                    RelationshipsStore.InsertOrIgnoreConceptions(connection, TestDict("id", id, "mother", ReadString(payload, "motherId", ""), "father", ReadString(payload, "biologicalFatherId", ""),
-                            "legal", ReadString(payload, "legalFatherId", ""), "start", ReadDouble(payload, "conceptionDay", 0),
-                            "due", ReadDouble(payload, "dueDay", 0), "status", status, "payload", Json.Serialize(payload), "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
-                RelationshipsStore.UpdateConceptions5(connection, new Dictionary<string, object>
+                RelationshipsStore.InsertOrIgnoreConceptions(connection, TestDict("id", conception, "mother", ReadString(payload, "motherId", ""),
+                    "father", ReadString(payload, "biologicalFatherId", ""), "legal", ReadString(payload, "legalFatherId", ""),
+                    "start", ReadDouble(payload, "conceptionDay", 0), "due", ReadDouble(payload, "dueDay", 0),
+                    "status", "active", "payload", serialized, "ts", now), transaction);
+                row = RelationshipsStore.SelectConceptions3(connection, key, transaction).SingleOrDefault();
+            }
+            if (row == null)
+                return TestDict("ok", false, "error", "The reported conception was not recorded.");
+
+            bool alreadyBorn = ReadString(row, "status", "") == "born";
+            string recordedChild = ReadString(row, "child_id", "");
+            if (alreadyBorn && (status != "born" || recordedChild != child))
+                return TestDict("ok", false, "error", "A recorded birth cannot be replaced by another outcome.");
+            if (status == "born")
+            {
+                if (!ReportBirthParentage(connection, transaction, row, payload, child, now, concealChance, out bool insertedParentage))
+                    return TestDict("ok", false, "error", "The observed birth conflicts with recorded parentage.");
+                if (alreadyBorn && !insertedParentage)
                 {
-                    ["status"] = status,["child"] = ReadFirstString(payload,"childId","childHeroStringId"),["payload"] = Json.Serialize(payload),["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),["id"] = id
-                });
-                if (status == "born")
-                {
-                    Dictionary<string, object> row = RelationshipsStore.SelectConceptions3(connection, new Dictionary<string, object>{{"id",id}}).FirstOrDefault();
-                    string child = ReadFirstString(payload,"childId","childHeroStringId");
-                    if (row != null && !string.IsNullOrWhiteSpace(child))
-                    {
-                        bool illegitimate = ReadBool(payload,"isIllegitimate",false) || !ReadString(row,"legal_father_id","").Equals(ReadString(row,"biological_father_id",""),StringComparison.OrdinalIgnoreCase);
-                        RelationshipsStore.UpsertParentage(connection, new Dictionary<string, object>{{"child",child},{"mother",ReadString(row,"mother_id","")},{"bio",ReadString(row,"biological_father_id","")},{"legal",ReadString(row,"legal_father_id","")},{"illegitimate",illegitimate?1:0},{"revealed",ReadBool(payload,"fatherExposed",false)?1:0},{"conception",id},{"payload",Json.Serialize(payload)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
-                        if (illegitimate && !ReadString(row,"legal_father_id","").Equals(ReadString(row,"biological_father_id",""),StringComparison.OrdinalIgnoreCase))
-                        {
-                            Dictionary<string, object> motherProfile=LoadDirectorHeroProfile(campaignId,ReadString(row,"mother_id",""),null);
-                            double concealChance=ConcealmentChance(motherProfile);
-                            double concealRoll=StableUnit(id+"|conceal_parentage");
-                            if(concealRoll>concealChance)
-                            {
-                                RelationshipsStore.InsertDirectorOutbox(connection, new Dictionary<string, object>{{"id","outbox_"+Guid.NewGuid().ToString("N")},{"day",ReadDouble(payload,"worldDay",0d)},{"subjects",Json.Serialize(new[]{child,ReadString(row,"mother_id",""),ReadString(row,"biological_father_id","")})},{"payload",Json.Serialize(new Dictionary<string, object>{{"childId",child},{"motherId",ReadString(row,"mother_id","")},{"biologicalFatherId",ReadString(row,"biological_father_id","")},{"legalFatherId",ReadString(row,"legal_father_id","")},{"concealChance",concealChance},{"concealRoll",concealRoll}})},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});
-                            }
-                        }
-                    }
+                    transaction.Commit();
+                    return ConceptionReportReceipt(campaign, activeTimeline, conception, status, child, payload, true);
                 }
             }
-            return new Dictionary<string, object>{{"ok",true},{"conceptionId",id},{"status",status}};
+            RelationshipsStore.UpdateConceptions5(connection,
+                TestDict("status", status, "child", child, "payload", serialized, "ts", now, "id", conception), transaction);
+            transaction.Commit();
+            return ConceptionReportReceipt(campaign, activeTimeline, conception, status, child, payload, false);
+        }
+
+        private static Dictionary<string, object> ConceptionReportReceipt(string campaign, string timeline, string conception,
+            string status, string child, Dictionary<string, object> payload, bool idempotent)
+        {
+            var result = TestDict("ok", true, "campaignId", campaign, "timelineId", timeline,
+                "conceptionId", conception, "status", status, "childId", child);
+            if (idempotent) result["idempotent"] = true;
+            if (payload.TryGetValue("sharedActivityGeneration", out object expected) && expected is string generation)
+                result["sharedActivityGeneration"] = generation;
+            return result;
+        }
+
+        private static bool ReportBirthParentage(ReignDbConnection connection, ReignDbTransaction transaction,
+            Dictionary<string, object> conception, Dictionary<string, object> payload, string child, long now,
+            double? concealChance, out bool inserted)
+        {
+            inserted = false;
+            string mother = ReadString(conception, "mother_id", "");
+            string biological = ReadString(conception, "biological_father_id", "");
+            string intendedLegal = ReadString(conception, "legal_father_id", "");
+            string legal = ReadString(payload, "legalFatherId", "");
+            string conceptionId = ReadString(conception, "conception_id", "");
+            if (mother.Length == 0 || mother != ReadString(payload, "motherId", "")
+                || biological != ReadString(payload, "biologicalFatherId", ""))
+                return false;
+            if (payload.TryGetValue("intendedLegalFatherId", out object intent)
+                && (intent is not string recordedIntent || recordedIntent != intendedLegal)) return false;
+            bool observedFallback = legal != intendedLegal;
+            if (observedFallback && (!payload.ContainsKey("sharedActivityGeneration")
+                || ReadString(payload, "contextSource", "") != "reign_managed" || legal != biological))
+                return false;
+            if (child.Length == 0) return !observedFallback; // A native delivery without a surviving child has no parentage row.
+
+            var prior = RelationshipsStore.SelectParentage(connection, TestDict("child", child), transaction).SingleOrDefault();
+            if (prior != null)
+                return ReadString(prior, "conception_id", "") == conceptionId && ReadString(prior, "mother_id", "") == mother
+                    && ReadString(prior, "biological_father_id", "") == biological && ReadString(prior, "legal_father_id", "") == legal;
+            if (observedFallback && intent is not string
+                && !MatchesLegacyManagedFallback(conception, conceptionId, mother, biological)) return false;
+
+            bool differentFather = !legal.Equals(biological, StringComparison.OrdinalIgnoreCase);
+            bool illegitimate = ReadBool(payload, "isIllegitimate", false)
+                || !intendedLegal.Equals(biological, StringComparison.OrdinalIgnoreCase);
+            if (!RelationshipsStore.TryInsertBirthParentage(connection, TestDict("child", child, "mother", mother, "bio", biological,
+                    "legal", legal, "illegitimate", illegitimate ? 1 : 0, "revealed", ReadBool(payload, "fatherExposed", false) ? 1 : 0,
+                    "conception", conceptionId, "payload", Json.Serialize(payload), "ts", now), transaction))
+                return false;
+            inserted = true;
+            if (!illegitimate || !differentFather) return true;
+            if (!concealChance.HasValue) return false;
+
+            double chance = concealChance.Value;
+            double roll = StableUnit(conceptionId + "|conceal_parentage");
+            if (roll <= chance) return true;
+            string identity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Json.Serialize(new[] { conceptionId, child }))));
+            RelationshipsStore.InsertDirectorOutbox(connection, TestDict("id", "parentage_" + identity,
+                "day", ReadDouble(payload, "worldDay", 0d), "subjects", Json.Serialize(new[] { child, mother, biological }),
+                "payload", Json.Serialize(TestDict("childId", child, "motherId", mother, "biologicalFatherId", biological,
+                    "legalFatherId", legal, "concealChance", chance, "concealRoll", roll)), "ts", now), transaction);
+            return true;
+        }
+
+        private static bool MatchesLegacyManagedFallback(Dictionary<string, object> conception, string id, string mother, string biological)
+        {
+            if (ReadString(conception, "status", "") != "active") return false;
+            var activation = TryParseStrictJsonObject(ReadString(conception, "payload_json", ""));
+            return ReadString(activation, "contextSource", "") == "reign_managed"
+                && ReadString(activation, "status", "") == "active"
+                && ReadString(activation, "conceptionId", "") == id
+                && ReadString(activation, "motherId", "") == mother
+                && ReadString(activation, "biologicalFatherId", "") == biological
+                && ReadString(activation, "legalFatherId", "") == biological;
         }
 
         internal static Dictionary<string, object> FamilyParentageRevealApi(Dictionary<string, object> payload)
