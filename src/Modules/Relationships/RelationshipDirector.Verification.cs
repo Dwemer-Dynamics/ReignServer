@@ -394,11 +394,12 @@ namespace ReignBetaServer
                     && Ids(reclaimed).SequenceEqual(new[] { current }),
                     "A fresh claim remains exclusive and becomes eligible again after five minutes.");
 
+                string claimedRowBefore = Json.Serialize(Row(current));
                 var stale = Report(staleGeneration, Receipt(current));
                 var wrongTimeline = Report(generation, Receipt(current, timeline + "_stale"));
                 add("director_owner_rejects_stale_receipts_without_writes",
                     !Ok(stale) && !Ok(wrongTimeline) && Status(current) == "claimed"
-                    && string.IsNullOrEmpty(ReadString(Row(current), "result_json", "")),
+                    && Json.Serialize(Row(current)) == claimedRowBefore,
                     "A stale generation or mismatched receipt timeline cannot complete an active claim.");
 
                 var mixed = Report(generation, Receipt(foreign), Receipt(current));
