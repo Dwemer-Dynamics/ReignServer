@@ -157,7 +157,13 @@ WHERE hero_a_id=$id OR hero_b_id=$id ORDER BY last_day DESC,updated_ts DESC LIMI
 
         internal static void InsertCharacterEditorRevisions2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO character_editor_revisions(revision_id,hero_id,section,description,before_json,after_json,native_changes_json,reconciliation_json,rollback_of,created_ts) VALUES($id,$hero,'rollback',$description,$before,$after,$native,'{}',$rollback,$ts);", parameters, transaction);
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO character_editor_revisions(revision_id,hero_id,section,description,before_json,after_json,native_changes_json,reconciliation_json,rollback_of,created_ts) VALUES($id,$hero,'rollback',$description,$before,$after,$native,$reconcile,$rollback,$ts);", parameters, transaction);
+        }
+
+        internal static void UpdateCharacterEditorRevisionReconciliation(ReignDbConnection connection, Dictionary<string, object> parameters,
+            ReignDbTransaction transaction = null)
+        {
+            ReignDatabase.ExecuteSql(connection, "UPDATE character_editor_revisions SET reconciliation_json=$reconcile WHERE revision_id=$id;", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectCharacterEditorNativeCommands4(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

@@ -2118,13 +2118,14 @@
       document.getElementById('characterRosterList').innerHTML=rows.map(x=>`<button class='characterRosterItem ${x.heroStringId===characterEditorState.heroId?'active':''}' onclick='loadCharacterEditor("${editorEscape(x.heroStringId)}")'><span class='characterRosterName'>${editorEscape(x.name)}</span><span class='characterRosterMeta'>${editorEscape(x.title||x.occupation||'')}</span><span class='characterRosterMeta'>${editorEscape(x.clanId||'No clan')} | ${editorEscape(x.kingdomId||'No kingdom')}</span>${x.pendingNativeChanges?`<span class='characterRosterMeta'>${x.pendingNativeChanges} pending change(s)</span>`:''}</button>`).join('')||'<div class="hint">No matching characters.</div>';
     }
 
+    function characterEditorResultKind(result){return !result.ok||result.reconciliationStatus==='failed'||result.historyProjectionIssues?.length?'error':'good';}
     async function loadCharacterEditor(heroId, force=false, saveResult=null) {
       if(characterEditorState.dirty.size&&!force&&!confirm('Discard unsaved character changes?'))return;
       editorStatus('Loading complete character record...'); const campaignId=editorCampaign();
       const j=await (await fetch('/character-editor/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId,heroStringId:heroId})})).json();
       if(!j.ok){editorStatus(j.error||'Character load failed.','error');return;}characterEditorState.heroId=heroId;characterEditorState.data=j;characterEditorState.original=editorClone(j);characterEditorState.dirty.clear();
       document.getElementById('characterEditorEmpty').style.display='none';document.getElementById('characterEditorWorkspace').style.display='block';renderCharacterRoster();renderCharacterEditor();
-      if(saveResult)editorStatus(saveResult.message,saveResult.historyProjectionIssues?.length?'error':'good');
+      if(saveResult)editorStatus(saveResult.message,characterEditorResultKind(saveResult));
       else editorStatus('Character loaded.');
     }
 
@@ -2268,11 +2269,11 @@
       editorStatus('Saving and rebuilding character projections...');
       const j=await (await fetch('/character-editor/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
       if(j.conflict||!j.ok){editorStatus(j.error||'Save failed.','error');return;}
-      editorStatus(j.message,j.historyProjectionIssues?.length?'error':'good');
+      editorStatus(j.message,characterEditorResultKind(j));
       data.revisionToken=j.revisionToken;dirty.clear();await loadCharacterEditor(heroId,true,j);}
     function saveAllCharacterSections(){return saveCharacterSection(true);}
     function revertCharacterDraft(){if(!characterEditorState.original)return;characterEditorState.data=editorClone(characterEditorState.original);characterEditorState.dirty.clear();renderCharacterEditor();editorStatus('Unsaved changes reverted.');}
-    async function rollbackCharacterRevision(revisionId){if(!confirm('Restore this revision? A new rollback revision will preserve the current state.'))return;const j=await (await fetch('/character-editor/rollback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionId})})).json();editorStatus(j.message||j.error,j.ok?'good':'error');if(j.ok)await loadCharacterEditor(characterEditorState.heroId,true,j);}
+    async function rollbackCharacterRevision(revisionId){if(!confirm('Restore this revision? A new rollback revision will preserve the current state.'))return;const j=await (await fetch('/character-editor/rollback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionId})})).json();editorStatus(j.message||j.error,characterEditorResultKind(j));if(j.ok)await loadCharacterEditor(characterEditorState.heroId,true,j);}
 
     async function uploadCharacterPortrait(file){if(!file)return;const reader=new FileReader();reader.onload=async()=>{editorStatus('Uploading portrait...');const j=await (await fetch('/character-editor/portrait/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,fileName:file.name,dataUrl:reader.result})})).json();if(j.ok){characterEditorState.data.portraits=j.portraits;renderCharacterEditorPanel();editorStatus('Portrait uploaded. Select it to make it active.','good');}else editorStatus(j.error,'error');};reader.readAsDataURL(file);}
     async function selectCharacterPortrait(variant){const j=await (await fetch('/character-editor/portrait/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,variant})})).json();if(j.ok){editorStatus('Active portrait updated. The game cache will refresh on the next savegame load.','good');await loadCharacterEditor(characterEditorState.heroId,true);}else editorStatus(j.error,'error');}
