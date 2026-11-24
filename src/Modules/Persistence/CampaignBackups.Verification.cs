@@ -97,6 +97,13 @@ namespace ReignBetaServer
                 Directory.CreateDirectory(Path.Combine(campaignDir, "characters", "hero_test", "memory"));
                 File.WriteAllText(Path.Combine(campaignDir, "characters", "hero_test", "memory", "memories.jsonl"), "{\"memory\":\"kept\"}\n", Encoding.UTF8);
                 CampaignFileService.WriteJsonObject(Path.Combine(campaignDir, "campaign.json"), new Dictionary<string, object> { ["campaignId"] = campaignId, ["campaignLabel"] = "Backup Test", ["mainHeroName"] = "Tester" });
+                byte[] admittedPortrait = { 1, 3, 5, 7 };
+                string admittedMaster = WriteCampaignBackupPortraitFixture(campaignDir, campaignId, "hero_test", admittedPortrait);
+                string legacyPortrait = Path.Combine(campaignDir, "characters", "legacy_hero", "portraits", "custom.png");
+                Directory.CreateDirectory(Path.GetDirectoryName(legacyPortrait));
+                File.WriteAllBytes(legacyPortrait, new byte[] { 2, 4, 6 });
+                string outfitMarker = PortraitsService.WriteCampaignBackupOutfitFixture(campaignDir, campaignId, "outfit_hero");
+                byte[] originalOutfitMarker = File.ReadAllBytes(outfitMarker);
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId)) PersistenceStore.UpsertSchemaMeta(connection);
                 Directory.CreateDirectory(Path.Combine(portraitDir, "hero_test"));
                 File.WriteAllBytes(Path.Combine(portraitDir, "hero_test", "custom.png"), new byte[] { 1, 2, 3, 4, 5 });
@@ -122,6 +129,25 @@ namespace ReignBetaServer
                     }
                 };
                 WriteSaveSyncLedger(campaignId, ledger);
+                var aliasedExport = CreateCampaignBackupArchive(campaignId.ToUpperInvariant());
+                add("export_requires_exact_portrait_campaign_owner",
+                    !ReadBool(aliasedExport, "ok", true) && ReadString(aliasedExport, "path", "") == ""
+                    && ReadString(aliasedExport, "error", "").Contains("exact identity"),
+                    "A differently spelled campaign request cannot export this campaign's portrait assets.");
+                File.WriteAllBytes(admittedMaster, new byte[] { 7, 5, 3, 1 });
+                var inconsistentExport = CreateCampaignBackupArchive(campaignId);
+                add("export_rejects_unadmitted_campaign_portrait",
+                    !ReadBool(inconsistentExport, "ok", true) && ReadString(inconsistentExport, "path", "") == ""
+                    && ReadString(inconsistentExport, "error", "").Contains("do not match the stored receipt"),
+                    "An archive cannot publish a master that disagrees with its portrait receipt.");
+                File.WriteAllBytes(admittedMaster, admittedPortrait);
+                File.Delete(outfitMarker);
+                var unconfirmedExport = CreateCampaignBackupArchive(campaignId);
+                add("export_rejects_unconfirmed_campaign_outfit",
+                    !ReadBool(unconfirmedExport, "ok", true) && ReadString(unconfirmedExport, "path", "") == ""
+                    && ReadString(unconfirmedExport, "error", "").Contains("no matching outfit confirmation"),
+                    "Export cannot publish an outfit-format portrait whose final confirmation is missing.");
+                File.WriteAllBytes(outfitMarker, originalOutfitMarker);
                 Dictionary<string, object> export = CreateCampaignBackupArchive(campaignId);
                 archivePath = ReadString(export, "path", "");
                 add("export_archive_created", ReadBool(export, "ok", false) && File.Exists(archivePath), "A complete campaign archive is created.");
@@ -178,6 +204,12 @@ namespace ReignBetaServer
                     && File.ReadAllBytes(nativeSavePath).SequenceEqual(nativeSaveBytes)
                     && ReadInt(imported, "nativeSavesRestored", 0) == 1;
                 add("import_round_trip", importRoundTrip, importRoundTrip ? "Import restores campaign files, the external portrait cache, and the exact native Bannerlord save." : "Import round trip failed: " + Json.Serialize(imported));
+                add("import_admitted_and_legacy_portrait_round_trip", importRoundTrip
+                    && new[] { admittedMaster, legacyPortrait, outfitMarker }.All(File.Exists)
+                    && File.ReadAllBytes(admittedMaster).SequenceEqual(admittedPortrait)
+                    && File.ReadAllBytes(legacyPortrait).SequenceEqual(new byte[] { 2, 4, 6 })
+                    && File.ReadAllBytes(outfitMarker).SequenceEqual(originalOutfitMarker),
+                    "A receipt-backed portrait, original markerless custom portrait and owned outfit marker retain their bytes.");
                 bool postgresPreserved = false;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId)) postgresPreserved = ReadString(PersistenceStore.SelectSchemaMeta(connection).FirstOrDefault(), "value", "") == "preserved";
                 add("postgresql_snapshot_preserved", postgresPreserved, postgresPreserved ? "The consistent PostgreSQL campaign archive survives export and import." : "The imported PostgreSQL schema did not contain the exported backup_test marker. Import result: " + Json.Serialize(imported));
@@ -731,12 +763,27 @@ WHERE r.campaign_id=@sibling AND n.nspname=current_schema());";
                 "An uncertain rename retains both versions and refuses a second move.");
         }
 
+        private static string WriteCampaignBackupPortraitFixture(string campaign, string campaignId, string hero, byte[] bytes)
+        {
+            string portraits = Path.Combine(campaign, "characters", hero, "portraits");
+            Directory.CreateDirectory(portraits);
+            string master = Path.Combine(portraits, "portrait.png");
+            File.WriteAllBytes(master, bytes);
+            CampaignFileService.WriteJsonObject(Path.Combine(portraits, "portrait.json"),
+                TestDict("campaignId", campaignId, "heroStringId", hero, "productReceipt",
+                    TestDict("schema", "reign-portrait-product-v1", "accepted", true, "master",
+                        TestDict("sha256", FileSha256(master)))));
+            return master;
+        }
+
         private static void VerifyBackupImportFailures(string campaignId, string archive, string nativeSave, string fixture,
             Action<string, bool, string> add)
         {
             string[] destinations = { StrictCampaignDirectory(campaignId), CampaignPortraitCacheDirectory(campaignId), SaveSyncCampaignRoot(campaignId) };
             foreach (string directory in destinations)
                 File.WriteAllText(Path.Combine(directory, "original-only.txt"), Path.GetFileName(directory));
+            byte[] originalPortrait = { 8, 7, 6, 5 };
+            string originalMaster = WriteCampaignBackupPortraitFixture(destinations[0], campaignId, "hero_test", originalPortrait);
             File.WriteAllText(nativeSave, "original native bytes");
             string nativeHash = FileSha256(nativeSave);
             string[] manifests = destinations.Select(dir => Json.Serialize(BackupFileManifest(dir))).ToArray();
@@ -776,6 +823,34 @@ WHERE r.campaign_id=@sibling AND n.nspname=current_schema());";
                     && OriginalDirectories() && FileSha256(nativeSave) == nativeHash && DatabaseOid() == originalOid,
                     "The injected failure preserves every original file and the original PostgreSQL schema OID.");
             }
+            void CheckPortraitConflict(string id, bool foreign, string expectedError)
+            {
+                string root = Path.Combine(fixture, id);
+                ExtractCampaignBackupSecurely(archive, root);
+                string portraits = Path.Combine(root, "campaign", "characters", "hero_test", "portraits");
+                if (foreign)
+                {
+                    string manifestPath = Path.Combine(root, "manifest.json");
+                    var manifest = CampaignFileService.ReadJsonObject(manifestPath);
+                    File.Delete(manifestPath);
+                    WriteCampaignBackupPortraitFixture(Path.Combine(root, "campaign"), campaignId + "_sibling", "hero_test",
+                        File.ReadAllBytes(Path.Combine(portraits, "portrait.png")));
+                    manifest["files"] = BackupFileManifest(root);
+                    CampaignFileService.WriteJsonObject(manifestPath, manifest);
+                }
+                else File.WriteAllText(Path.Combine(portraits, "unlisted.txt"), "unlisted portrait entry");
+                string upload = Path.Combine(fixture, id + ".reignbackup");
+                ZipFile.CreateFromDirectory(root, upload);
+                bool started = false;
+                var refused = ImportCampaignBackup(upload, new Dictionary<string, string>
+                    { ["replace"] = "true", ["replaceNativeSaves"] = "true" }, (_, _) => started = true);
+                add(id, !started && !ReadBool(refused, "ok", true) && !ReadBool(refused, "recoveryRequired", false)
+                    && ReadString(refused, "error", "").Contains(expectedError)
+                    && OriginalDirectories() && FileSha256(nativeSave) == nativeHash && DatabaseOid() == originalOid,
+                    "Import refuses the portrait archive before replacing any directory, PostgreSQL state, or native save.");
+            }
+            CheckPortraitConflict("import_refuses_foreign_portrait_owner", true, "belongs to another owner");
+            CheckPortraitConflict("import_refuses_unlisted_portrait_entry", false, "omits a campaign portrait file");
             CheckEarlyFailure("import_list_snapshots_failure", "list_snapshots");
             CheckEarlyFailure("import_partial_export_failure", "export_recovery");
             string savedNative = Path.Combine(fixture, "prior-native.sav");
@@ -840,6 +915,10 @@ WHERE r.campaign_id=@sibling AND n.nspname=current_schema());";
                 CheckEarlyFailure("import_move_aside_failure_" + names[index], "move_original", destinations[index]);
                 CheckEarlyFailure("import_install_failure_" + names[index], "install_directory", destinations[index]);
             }
+            add("import_rolls_back_admitted_portrait_after_staged_replacement",
+                File.ReadAllBytes(originalMaster).SequenceEqual(originalPortrait)
+                && OriginalDirectories() && DatabaseOid() == originalOid,
+                "The injected directory rollback restores the original admitted portrait and its matching metadata.");
             bool truncated = false;
             var invalidRecovery = Import((step, path) =>
             {
@@ -929,6 +1008,27 @@ WHERE r.campaign_id=@sibling AND n.nspname=current_schema());";
                 && ReignPostgreSqlStorage.TableRowCount(campaignId, "import_original_marker") == 1,
                 "A failed database import retains a hash-bound recovery export that restores the prior contents on this disposable database.");
             TryDeleteDirectory(ownedOperation);
+        }
+    }
+
+    internal static partial class PortraitsService
+    {
+        internal static string WriteCampaignBackupOutfitFixture(string campaignDirectory, string campaign, string hero)
+        {
+            string directory = Path.Combine(campaignDirectory, "characters", hero, "portraits");
+            Directory.CreateDirectory(directory);
+            byte[] image = { 1, 4, 9 };
+            string digest = Sha256Hex(image);
+            File.WriteAllBytes(Path.Combine(directory, "custom.png"), image);
+            var outfit = TestDict(OutfitConfirmationFormatKey, OutfitConfirmationFormat, "description", "Blue coat",
+                "operationId", Guid.NewGuid().ToString("N"), "playerHeroId", "player", "timelineId", "main",
+                "sourceSha256", digest, "portraitSha256", digest, "updatedUtc", DateTime.UtcNow.ToString("O"));
+            CampaignFileService.WriteJsonObject(Path.Combine(directory, "outfit.json"), outfit);
+            CampaignFileService.WriteJsonObject(Path.Combine(directory, OutfitPortraitReceiptFileName),
+                TestDict("schema", "reign-portrait-product-v1", "accepted", true, "master", TestDict("sha256", digest)));
+            string marker = Path.Combine(directory, OutfitConfirmationFileName);
+            CampaignFileService.WriteJsonObject(marker, BuildOutfitConfirmation(campaign, hero, outfit));
+            return marker;
         }
     }
 }

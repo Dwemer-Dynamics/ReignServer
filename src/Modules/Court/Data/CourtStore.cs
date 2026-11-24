@@ -732,6 +732,16 @@ VALUES($campaign,$timeline,$matter,$kind,$severity,$day,$payload,'pending')
 ON CONFLICT(campaign_id,timeline_id,matter_id) DO NOTHING;", parameters, transaction);
         }
 
+        internal static bool HasExactInternationalCourtQueueMaterial(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT matter_id FROM international_court_queue
+WHERE campaign_id=$campaign AND timeline_id=$timeline AND matter_id=$matter
+AND kind=$kind AND severity_rank=$severity AND created_day=$day AND payload_json=$payload
+AND status IN ('pending','resolved')
+FOR UPDATE;", parameters, transaction).Count == 1;
+        }
+
         internal static List<Dictionary<string, object>> SelectInternationalCourtQueue(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, @"SELECT payload_json FROM international_court_queue

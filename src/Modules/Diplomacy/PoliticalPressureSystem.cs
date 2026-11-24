@@ -47,7 +47,16 @@ namespace ReignBetaServer
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
             string timelineId = ReadString(payload, "timelineId", "main");
-            double worldDay = ReadDouble(payload, "worldDay", 0d);
+            double worldDay = payload.TryGetValue("worldDay", out object suppliedDay) ? suppliedDay switch
+            {
+                int day => day,
+                long day => day,
+                decimal day => (double)day,
+                double day => day,
+                _ => double.NaN
+            } : double.NaN;
+            if (!double.IsFinite(worldDay) || worldDay < 0d || worldDay >= int.MaxValue - 1d)
+                return PressureDayDeferred("invalid_day", -1);
             Dictionary<string, object> startupGrace =
                 BuildAutonomousWorldStartupGrace(payload);
             if (ReadBool(startupGrace, "locked", false))
@@ -61,40 +70,72 @@ namespace ReignBetaServer
                 };
             }
 
-            int currentDay = (int)Math.Floor(worldDay + 0.000001d);
+            int currentDay = (int)Math.Floor(worldDay);
+
             int lastProcessedDay;
+            int firstUnheld;
+            IReadOnlyList<int> unfinished;
+            using (var registered = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaignId))
+            {
+                if (registered == null) return PressureDayDeferred("scope_changed", currentDay);
+            }
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsurePoliticalPressureSchema(connection);
-                lastProcessedDay = ReadInt(DiplomacyStore.SelectPoliticalPressureDailyRolls(connection, new Dictionary<string, object>
-                    {
-                        ["campaign"] = campaignId,
-                        ["timeline"] = timelineId
-                    }).FirstOrDefault(), "latest_day", int.MinValue);
+                EnsureKingdomLeaderDiplomacySchema(connection);
+#if !REIGN_EXCLUDE_COURT
+                CourtService.EnsureInternationalCourtLifeSchema(connection);
+#endif
+                var key = TestDict("campaign", campaignId, "timeline", timelineId, "day", currentDay);
+                var witness = ReadPressureStorageWitness(connection, null, campaignId, timelineId);
+                if (!PressureWitnessMatchesWire(witness, payload))
+                    return PressureDayDeferred("scope_changed", currentDay);
+                lastProcessedDay = DiplomacyStore.ReadLastTerminalPoliticalPressureDay(connection, key);
+                key["storage"] = witness.StorageId;
+                key["generation"] = witness.RestoreGeneration;
+                unfinished = DiplomacyStore.FindUnfinishedPoliticalPressureDays(connection, null, key);
+                key["start"] = lastProcessedDay == int.MinValue
+                    ? unfinished.Count > 0 ? unfinished[0] : currentDay
+                    : Math.Min(currentDay, lastProcessedDay + 1);
+                firstUnheld = DiplomacyStore.FindFirstUnheldPoliticalPressureDay(connection, key);
             }
 
-            List<int> days = PoliticalPressureCatchUpDayKeys(
-                lastProcessedDay, currentDay);
-            List<Dictionary<string, object>> results =
-                new List<Dictionary<string, object>>(days.Count);
-            double fraction = Math.Max(0d,
-                Math.Min(0.999999d, worldDay - currentDay));
+            var days = unfinished.Concat(PoliticalPressureCatchUpDayKeys(firstUnheld - 1, currentDay))
+                .Distinct().OrderBy(day => day).Take(32).ToList();
+
+            var processed = new List<object>();
+            var results = new List<object>();
+            var heldDays = new List<object>();
+            double fraction = Math.Clamp(worldDay - currentDay, 0d, 0.999999d);
+            string status = "processed";
+            bool ok = true;
             foreach (int day in days)
             {
-                results.Add(ProcessDailyPoliticalPressure(campaignId,
-                    timelineId, day + fraction, payload));
+                var result = ProcessDailyPoliticalPressure(campaignId, timelineId, day, day + fraction, payload);
+                results.Add(result);
+                if (!ReadBool(result, "ok", false))
+                {
+                    if (ReadBool(result, "recoveryHeld", false))
+                    {
+                        heldDays.Add(day);
+                        if (day < currentDay) continue;
+                    }
+                    status = ReadString(result, "status", "recovery_required");
+                    ok = false;
+                    break;
+                }
+                processed.Add(day);
             }
-
-            return new Dictionary<string, object>
+            if (ok && !processed.Contains(currentDay))
             {
-                ["ok"] = true,
-                ["status"] = days.Count > 1 ? "caught_up" : "processed",
-                ["worldDay"] = worldDay,
-                ["lastProcessedDayBefore"] = lastProcessedDay,
-                ["processedDayCount"] = days.Count,
-                ["processedDays"] = days.Cast<object>().ToList(),
-                ["results"] = results.Cast<object>().ToList()
-            };
+                status = "catch_up_pending";
+                ok = false;
+            }
+            else if (ok && processed.Count > 1) status = "caught_up";
+
+            return TestDict("ok", ok, "status", status, "worldDay", worldDay,
+                "lastProcessedDayBefore", lastProcessedDay, "processedDayCount", processed.Count,
+                "processedDays", processed, "heldDays", heldDays, "results", results);
         }
 
         private static List<int> PoliticalPressureCatchUpDayKeys(
@@ -106,25 +147,41 @@ namespace ReignBetaServer
             if (lastProcessedDay >= currentDay)
                 return new List<int> { currentDay };
             return Enumerable.Range(lastProcessedDay + 1,
-                currentDay - lastProcessedDay).ToList();
+                Math.Min(32, currentDay - lastProcessedDay)).ToList();
         }
 
-        private static Dictionary<string, object> ProcessDailyPoliticalPressure(
-            string campaignId, string timelineId, double worldDay, Dictionary<string, object> world)
+        private static Dictionary<string, object> ProcessDailyPoliticalPressure(string campaign, string timeline,
+            int day, double worldDay, Dictionary<string, object> request)
         {
-            int day = (int)Math.Floor(worldDay + 0.000001d);
-            int dailyRoll = StableRulerD100(campaignId, timelineId, day,
-                "political-pressure:daily");
-            if (!TryClaimPoliticalPressureDailyRoll(campaignId, timelineId,
-                day, worldDay, dailyRoll))
+            int roll = StableRulerD100(campaign, timeline, day, "political-pressure:daily");
+            var disposition = ClaimPressureDay(campaign, timeline, day, worldDay, roll, request, out var claim);
+            if (disposition != null) return disposition;
+
+            if (claim.PreparedJson.Length == 0)
             {
-                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-                {
-                    EnsurePoliticalPressureSchema(connection);
-                    Dictionary<string, object> existing = DiplomacyStore.SelectPoliticalPressureDailyRolls2(connection, new Dictionary<string, object> { ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = day }).FirstOrDefault();
-                    return new Dictionary<string, object> { ["ok"] = true, ["status"] = "already_processed", ["day"] = day,
-                        ["incidentId"] = ReadString(existing, "incident_id", "") };
-                }
+                var original = TryParseJsonObject(claim.InputJson);
+                if (original == null) return PressureDayDeferred("recovery_required", day);
+                var prepared = PreparePressureDay(claim, original);
+                claim = SealPressureDay(claim, prepared);
+                if (claim == null) return PressureDayDeferred("processing", day);
+            }
+            var plan = TryParseJsonObject(claim.PreparedJson);
+            return IsOwnedPressurePlan(claim, plan)
+                ? PublishPressureDay(claim, plan) : PressureDayDeferred("recovery_required", day);
+        }
+
+        private static Dictionary<string, object> PreparePressureDay(PressureDayClaim claim, Dictionary<string, object> world)
+        {
+            string campaignId = claim.Campaign, timelineId = claim.Timeline;
+            int day = claim.Day, dailyRoll = claim.Roll;
+            double worldDay = claim.WorldDay;
+
+            Dictionary<string, object> WithoutIncident(string status, bool passed, string originKingdom)
+            {
+                var plan = PressurePlan(claim, status);
+                plan["passed"] = passed;
+                plan["originKingdom"] = originKingdom;
+                return plan;
             }
 
             List<Dictionary<string, object>> kingdoms = ReadDictionaryList(world, "kingdoms")
@@ -135,10 +192,7 @@ namespace ReignBetaServer
             if (kingdoms.Count < 2 || dailyRoll > PoliticalPressureIncidentChance)
             {
                 string status = kingdoms.Count < 2 ? "no_eligible_kingdoms" : "roll_failed";
-                RecordPoliticalPressureDailyRoll(campaignId, timelineId, day, worldDay,
-                    dailyRoll, false, status, "", "");
-                return new Dictionary<string, object> { ["ok"] = true, ["status"] = status, ["roll"] = dailyRoll,
-                    ["chance"] = PoliticalPressureIncidentChance };
+                return WithoutIncident(status, false, "");
             }
 
             Dictionary<string, object> origin = SelectPoliticalPressureOrigin(campaignId, timelineId, day, kingdoms);
@@ -149,9 +203,7 @@ namespace ReignBetaServer
             Dictionary<string, object> target = SelectPoliticalPressureTarget(campaignId, timelineId, day, origin, kingdoms, polarity);
             if (target == null)
             {
-                RecordPoliticalPressureDailyRoll(campaignId, timelineId, day, worldDay,
-                    dailyRoll, true, "no_eligible_target", ReadString(origin, "kingdomId", ""), "");
-                return new Dictionary<string, object> { ["ok"] = true, ["status"] = "no_eligible_target" };
+                return WithoutIncident("no_eligible_target", true, ReadString(origin, "kingdomId", ""));
             }
 
             string channel = SelectPoliticalPressureChannel(campaignId, timelineId, day, origin, target, polarity);
@@ -159,9 +211,7 @@ namespace ReignBetaServer
                 campaignId, timelineId, day, origin, target, polarity, channel);
             if (archetype == null)
             {
-                RecordPoliticalPressureDailyRoll(campaignId, timelineId, day, worldDay,
-                    dailyRoll, true, "catalog_cooldown", ReadString(origin, "kingdomId", ""), "");
-                return new Dictionary<string, object> { ["ok"] = true, ["status"] = "catalog_cooldown" };
+                return WithoutIncident("catalog_cooldown", true, ReadString(origin, "kingdomId", ""));
             }
 
             int severityRank = SelectPoliticalPressureSeverity(campaignId, timelineId, day,
@@ -177,9 +227,7 @@ namespace ReignBetaServer
                 campaignId, timelineId, day, clans, ReadString(target, "kingdomId", ""), ReadString(target, "leaderHeroId", ""), severityRank, "target");
             if (originClans.Count == 0 || targetClans.Count == 0)
             {
-                RecordPoliticalPressureDailyRoll(campaignId, timelineId, day, worldDay,
-                    dailyRoll, true, "no_eligible_petitioners", ReadString(origin, "kingdomId", ""), "");
-                return new Dictionary<string, object> { ["ok"] = true, ["status"] = "no_eligible_petitioners" };
+                return WithoutIncident("no_eligible_petitioners", true, ReadString(origin, "kingdomId", ""));
             }
             List<string> originLords = PoliticalPressureLeadLords(originClans);
             List<string> targetLords = PoliticalPressureLeadLords(targetClans);
@@ -195,116 +243,27 @@ namespace ReignBetaServer
             string targetStance = ReadBool(target, "isPlayerKingdom", false) ? "awaiting_player" : ResolvePoliticalPressureStance(campaignId, timelineId, day,
                 incidentId, "target", target, ReadDictionary(routes, "target"), traitRolls);
 
-            int signedAmount = polarity == "hostile" ? pressureAmount : -pressureAmount;
-            PoliticalPressureMovement MeasureDirection(Dictionary<string, object> actor, Dictionary<string, object> counterpart, string stance)
-            {
-                if (stance == "support_lords")
-                    return ApplyMeasuredPoliticalPressureDelta(campaignId, timelineId, worldDay,
-                        actor, counterpart, signedAmount, channel, incidentId);
-                if (stance == "preserve_relations" && ReadBool(counterpart, "isPlayerKingdom", false))
-                    return ApplyMeasuredPoliticalPressureDelta(campaignId, timelineId, worldDay,
-                        actor, counterpart, -pressureAmount, channel, incidentId);
-                int value = ReadPoliticalPressureValue(campaignId, timelineId,
-                    ReadString(actor, "kingdomId", ""), ReadString(counterpart, "kingdomId", ""));
-                return new PoliticalPressureMovement(value, value, false);
-            }
-            var originMovement = MeasureDirection(origin, target, originStance);
-            var targetMovement = MeasureDirection(target, origin, targetStance);
-            int originBefore = originMovement.Before, originAfter = originMovement.After;
-            int targetBefore = targetMovement.Before, targetAfter = targetMovement.After;
-
-            long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-            {
-                EnsurePoliticalPressureSchema(connection);
-                DiplomacyStore.InsertPoliticalPressureIncidents(connection, new Dictionary<string, object>
-                {
-                    ["id"] = incidentId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = day,
-                    ["worldDay"] = worldDay, ["archetype"] = archetype.Id, ["polarity"] = polarity, ["channel"] = channel,
-                    ["severity"] = severity, ["severityRank"] = severityRank, ["pressureAmount"] = pressureAmount,
-                    ["relationshipPenalty"] = relationshipPenalty, ["originKingdom"] = ReadString(origin, "kingdomId", ""),
-                    ["targetKingdom"] = ReadString(target, "kingdomId", ""), ["originKingdomName"] = ReadString(origin, "name", ""),
-                    ["targetKingdomName"] = ReadString(target, "name", ""), ["originRuler"] = ReadString(origin, "leaderHeroId", ""),
-                    ["targetRuler"] = ReadString(target, "leaderHeroId", ""), ["originRulerName"] = ReadString(origin, "leaderName", ""),
-                    ["targetRulerName"] = ReadString(target, "leaderName", ""), ["originWars"] = warCount,
-                    ["targetWars"] = ReadStringList(target, "enemies").Count, ["hostileChance"] = hostileChance,
-                    ["polarityRoll"] = polarityRoll, ["originClans"] = Json.Serialize(originClans.Select(x => ReadString(x, "clanId", "")).ToList()),
-                    ["originLords"] = Json.Serialize(originLords), ["targetClans"] = Json.Serialize(targetClans.Select(x => ReadString(x, "clanId", "")).ToList()),
-                    ["targetLords"] = Json.Serialize(targetLords), ["routes"] = Json.Serialize(routes), ["rolls"] = Json.Serialize(traitRolls),
-                    ["originStance"] = originStance, ["targetStance"] = targetStance, ["originBefore"] = originBefore,
-                    ["originAfter"] = originAfter, ["targetBefore"] = targetBefore, ["targetAfter"] = targetAfter,
-                    ["headline"] = archetype.Headline, ["narrative"] = archetype.Description,
-                    ["correlation"] = correlation, ["payload"] = Json.Serialize(new Dictionary<string, object>
-                    {
-                        ["origin"] = origin, ["target"] = target, ["originClans"] = originClans, ["targetClans"] = targetClans
-                    }), ["ts"] = ts
-                });
-            }
-
-            ApplyPoliticalPressureForeignRulerChoice(campaignId, timelineId, worldDay,
-                incidentId, "origin", origin, target, originStance, relationshipPenalty, correlation);
-            ApplyPoliticalPressureForeignRulerChoice(campaignId, timelineId, worldDay,
-                incidentId, "target", target, origin, targetStance, relationshipPenalty, correlation);
-
-            if (originStance == "preserve_relations")
-                ApplyPoliticalPressureDomesticRefusal(campaignId, timelineId, worldDay,
-                    incidentId, "origin", origin, originClans, settlements, relationshipPenalty, correlation);
-            if (targetStance == "preserve_relations")
-                ApplyPoliticalPressureDomesticRefusal(campaignId, timelineId, worldDay,
-                    incidentId, "target", target, targetClans, settlements, relationshipPenalty, correlation);
-
-#if !REIGN_EXCLUDE_COURT
-            if (originStance == "awaiting_player" || targetStance == "awaiting_player")
-                CourtService.QueueInternationalPoliticalIncident(campaignId, timelineId, worldDay, incidentId,
-                    world, origin, target, originLords, targetLords, severityRank, archetype.Headline,
-                    archetype.Description, channel, originStance, targetStance, polarity);
-#endif
-
             string narrative = GeneratePoliticalPressureNarrative(campaignId, incidentId,
                 archetype, severity, origin, target, originLords, targetLords,
                 originStance, targetStance, out string narrationStatus);
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-            {
-                EnsurePoliticalPressureSchema(connection);
-                DiplomacyStore.UpdatePoliticalPressureIncidents(connection, new Dictionary<string, object> { ["narrative"] = narrative, ["selector"] = selectorStatus,
-                        ["narration"] = narrationStatus, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["id"] = incidentId });
-            }
-            RecordPoliticalPressureDailyRoll(campaignId, timelineId, day, worldDay,
-                dailyRoll, true, "incident_created", ReadString(origin, "kingdomId", ""), incidentId);
-            RecordPoliticalPressureActivity(campaignId, timelineId, worldDay, incidentId,
-                origin, target, "incident_completed", polarity, channel, severity, "completed",
-                originBefore, originAfter, polarityRoll, hostileChance, "", correlation,
-                originStance + " / " + targetStance, new Dictionary<string, object>
-                {
-                    ["originStance"] = originStance, ["targetStance"] = targetStance,
-                    ["pressureAmount"] = pressureAmount, ["selectorStatus"] = selectorStatus,
-                    ["narrationStatus"] = narrationStatus
-                });
-            WorldSimulationService.InvalidateWorldTestOverviewCache(campaignId, timelineId);
-            return new Dictionary<string, object> { ["ok"] = true, ["status"] = "incident_created",
-                ["incidentId"] = incidentId, ["polarity"] = polarity, ["severity"] = severity };
-        }
-
-        private static void RecordPoliticalPressureDailyRoll(string campaignId, string timelineId,
-            int day, double worldDay, int roll, bool passed, string status, string originKingdomId, string incidentId)
-        {
-            long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-            {
-                EnsurePoliticalPressureSchema(connection);
-                DiplomacyStore.UpsertPoliticalPressureDailyRolls(connection, new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId, ["day"] = day, ["worldDay"] = worldDay,
-                    ["chance"] = PoliticalPressureIncidentChance, ["roll"] = roll, ["passed"] = passed ? 1 : 0,
-                    ["status"] = status ?? "", ["origin"] = originKingdomId ?? "", ["incident"] = incidentId ?? "", ["ts"] = ts
-                });
-                WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, day, "political_pressures",
-                    "daily:" + day.ToString(CultureInfo.InvariantCulture), new Dictionary<string, object>
-                    {
-                        ["dailyRolls"] = 1, [passed ? "dailyRollsPassed" : "dailyRollsFailed"] = 1,
-                        ["status:" + (status ?? "unknown")] = 1
-                    });
-            }
+            var prepared = PressurePlan(claim, "incident_created");
+            foreach (var term in TestDict("passed", true, "incident", incidentId,
+                "origin", origin, "target", target, "originClans", originClans, "targetClans", targetClans,
+                "originLords", originLords, "targetLords", targetLords, "settlements", settlements,
+                "archetype", archetype.Id, "headline", archetype.Headline, "narrative", narrative,
+                "polarity", polarity, "channel", channel, "severity", severity, "severityRank", severityRank,
+                "pressureAmount", pressureAmount, "relationshipPenalty", relationshipPenalty,
+                "originWars", warCount, "hostileChance", hostileChance, "polarityRoll", polarityRoll,
+                "routes", routes, "rolls", traitRolls, "selector", selectorStatus, "narration", narrationStatus,
+                "originStance", originStance, "targetStance", targetStance))
+                prepared[term.Key] = term.Value;
+#if !REIGN_EXCLUDE_COURT
+            if (originStance == "awaiting_player" || targetStance == "awaiting_player")
+                prepared["court"] = CourtService.BuildInternationalPoliticalIncidentPayload(incidentId, worldDay,
+                    origin, target, originLords, targetLords, severityRank, archetype.Headline,
+                    archetype.Description, channel, originStance, targetStance, polarity);
+#endif
+            return prepared;
         }
 
         private static bool TryClaimPoliticalPressureDailyRoll(string campaignId,
@@ -523,7 +482,7 @@ namespace ReignBetaServer
                     ["target"] = CompactPoliticalPressureRulerContext(target, origin, targetLords)
                 })
             };
-            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(request);
+            Dictionary<string, object> llm = RequestPoliticalPressurePreparation(request);
             Dictionary<string, object> parsed = ReadBool(llm, "ok", false)
                 ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
             if (ValidatePoliticalPressureTraitRoutes(parsed))
@@ -647,7 +606,8 @@ namespace ReignBetaServer
             return supportVotes >= 2 ? "support_lords" : "preserve_relations";
         }
 
-        private static void ApplyPoliticalPressureDomesticRefusal(string campaignId, string timelineId,
+        private static void ApplyPoliticalPressureDomesticRefusal(ReignDbConnection connection, ReignDbTransaction transaction,
+            string campaignId, string timelineId,
             double worldDay, string incidentId, string side, Dictionary<string, object> kingdom,
             List<Dictionary<string, object>> clans, List<Dictionary<string, object>> settlements,
             int relationshipPenalty, string correlation)
@@ -656,49 +616,43 @@ namespace ReignBetaServer
             string kingdomId = ReadString(kingdom, "kingdomId", "");
             HashSet<string> clanIds = new HashSet<string>((clans ?? new List<Dictionary<string, object>>())
                 .Select(x => ReadString(x, "clanId", "")).Where(x => !string.IsNullOrWhiteSpace(x)), StringComparer.OrdinalIgnoreCase);
-            foreach (Dictionary<string, object> clan in clans ?? new List<Dictionary<string, object>>())
+            var affected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (Dictionary<string, object> clan in clans)
             foreach (string memberId in PoliticalPressureClanMembers(clan))
             {
-                if (memberId.Equals(rulerId, StringComparison.OrdinalIgnoreCase)) continue;
-                ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay,
+                if (memberId.Equals(rulerId, StringComparison.OrdinalIgnoreCase) || !affected.Add(memberId)) continue;
+                ApplyRulerDiplomaticIncidentInTransaction(connection, transaction, campaignId, timelineId, worldDay,
                     "political_pressure_lords_refused", incidentId + ":" + side + ":relation:" + memberId,
                     incidentId, memberId, rulerId, kingdomId, kingdomId, relationshipPenalty,
-                    "", 0, false, correlation, new Dictionary<string, object>
+                    false, correlation, new Dictionary<string, object>
                     {
                         ["incidentId"] = incidentId, ["side"] = side,
                         ["clanId"] = ReadString(clan, "clanId", ""), ["severityPenalty"] = relationshipPenalty
                     });
             }
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            List<string> targets = settlements
+                .Where(x => clanIds.Contains(ReadString(x, "ownerClanId", ""))
+                    && (ReadBool(x, "isTown", false) || ReadBool(x, "isCastle", false)))
+                .Select(x => ReadString(x, "settlementId", "")).Where(x => !string.IsNullOrEmpty(x))
+                .Distinct(StringComparer.Ordinal).ToList();
+            foreach (string settlement in targets)
             {
-                EnsurePoliticalPressureSchema(connection);
-                foreach (Dictionary<string, object> settlement in (settlements ?? new List<Dictionary<string, object>>()).Where(x =>
-                    clanIds.Contains(ReadString(x, "ownerClanId", ""))
-                    && (ReadBool(x, "isTown", false) || ReadBool(x, "isCastle", false))))
-                {
-                    string settlementId = ReadString(settlement, "settlementId", "");
-                    if (string.IsNullOrWhiteSpace(settlementId)) continue;
-                    string effectId = incidentId + ":" + side + ":loyalty:" + settlementId;
-                    DiplomacyStore.InsertOrIgnorePoliticalPressureNativeEffects(connection, new Dictionary<string, object>
-                    {
-                        ["id"] = effectId, ["incident"] = incidentId, ["campaign"] = campaignId,
-                        ["timeline"] = timelineId, ["day"] = worldDay, ["target"] = settlementId, ["ts"] = ts
-                    });
-                }
-                WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
-                    "political_pressures", incidentId + ":domestic:" + side, new Dictionary<string, object>
-                    {
-                        ["rulersRefusingLords"] = 1,
-                        ["relationshipPenalties"] = (clans ?? new List<Dictionary<string, object>>()).SelectMany(PoliticalPressureClanMembers)
-                            .Where(x => !x.Equals(rulerId, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
-                        ["loyaltyEffectsQueued"] = (settlements ?? new List<Dictionary<string, object>>()).Count(x =>
-                            clanIds.Contains(ReadString(x, "ownerClanId", "")) && (ReadBool(x, "isTown", false) || ReadBool(x, "isCastle", false)))
-                    });
+                string effect = incidentId + ":" + side + ":loyalty:" + settlement;
+                var terms = TestDict("id", effect, "incident", incidentId, "campaign", campaignId,
+                    "timeline", timelineId, "day", worldDay, "target", settlement, "ts", ts);
+                DiplomacyStore.InsertOrIgnorePoliticalPressureNativeEffects(connection, terms, transaction);
+                if (!DiplomacyStore.HasExactPoliticalPressureLoyaltyEffect(connection, transaction, terms))
+                    throw new InvalidOperationException("Political pressure loyalty effect conflicts with the sealed incident.");
             }
+            WorldSimulationService.WriteWorldTestCounterSchemaReady(connection, campaignId, timelineId,
+                (int)Math.Floor(worldDay), "political_pressures", incidentId + ":domestic:" + side, TestDict(
+                    "rulersRefusingLords", 1, "relationshipPenalties", affected.Count,
+                    "loyaltyEffectsQueued", targets.Count), transaction);
         }
 
-        private static void ApplyPoliticalPressureForeignRulerChoice(string campaignId, string timelineId,
+        private static void ApplyPoliticalPressureForeignRulerChoice(ReignDbConnection connection, ReignDbTransaction transaction,
+            string campaignId, string timelineId,
             double worldDay, string incidentId, string side, Dictionary<string, object> kingdom,
             Dictionary<string, object> otherKingdom, string stance, int relationshipPenalty, string correlation)
         {
@@ -711,15 +665,27 @@ namespace ReignBetaServer
             string eventKind = affinityDelta > 0
                 ? "political_pressure_foreign_relations_preserved"
                 : "political_pressure_foreign_relations_sacrificed";
-            ApplyRulerDiplomaticIncident(campaignId, timelineId, worldDay,
+            ApplyRulerDiplomaticIncidentInTransaction(connection, transaction, campaignId, timelineId, worldDay,
                 eventKind, incidentId + ":" + side + ":foreign-ruler", incidentId,
                 rulerId, otherRulerId, kingdomId, otherKingdomId, affinityDelta,
-                "", 0, true, correlation, new Dictionary<string, object>
+                true, correlation, new Dictionary<string, object>
                 {
                     ["incidentId"] = incidentId, ["side"] = side, ["stance"] = stance,
                     ["domesticRelationshipPenalty"] = relationshipPenalty,
                     ["foreignRulerDelta"] = affinityDelta
                 });
+        }
+
+        private static Dictionary<string, object> RequestPoliticalPressurePreparation(Dictionary<string, object> request)
+        {
+            // Two optional provider stages must both leave time to seal the five-minute day claim.
+            // Bound a local settings snapshot, then use the ordinary deterministic fallback on timeout.
+            var settings = new Dictionary<string, object>(SettingsService.LoadSettings());
+            settings["providerRequestTimeoutMs"] = Math.Clamp(ReadInt(settings, "providerRequestTimeoutMs", 80000), 15000, 80000);
+            settings["providerQueueTimeoutMs"] = Math.Clamp(ReadInt(settings, "providerQueueTimeoutMs", 15000), 1000, 15000);
+            request["singleProviderAttempt"] = true;
+            return PersistenceService.WithCampaignReadLeaseSuspended(
+                () => LlmProviderService.ChatWithLlm(request, null, null, settings));
         }
 
         private static string GeneratePoliticalPressureNarrative(string campaignId, string incidentId,
@@ -744,7 +710,7 @@ namespace ReignBetaServer
                     ["originDecision"] = originStance, ["targetDecision"] = targetStance
                 })
             };
-            Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(request);
+            Dictionary<string, object> llm = RequestPoliticalPressurePreparation(request);
             Dictionary<string, object> parsed = ReadBool(llm, "ok", false)
                 ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
             string narrative = DialogueService.LimitText(ReadString(parsed, "narrative", ""), 900);
@@ -1114,11 +1080,13 @@ namespace ReignBetaServer
                         ["chance"] = chance, ["action"] = actionId ?? "", ["correlation"] = correlation ?? "",
                         ["reason"] = reason ?? "", ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts
                     }, transaction);
-                WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId, (int)Math.Floor(worldDay),
-                    "political_pressures", activityId, new Dictionary<string, object>
-                    {
-                        ["activity:" + (eventType ?? "unknown")] = 1, ["status:" + (status ?? "unknown")] = 1
-                    });
+                var counters = TestDict("activity:" + (eventType ?? "unknown"), 1, "status:" + (status ?? "unknown"), 1);
+                if (transaction != null)
+                    WorldSimulationService.WriteWorldTestCounterSchemaReady(connection, campaignId, timelineId,
+                        (int)Math.Floor(worldDay), "political_pressures", activityId, counters, transaction);
+                else
+                    WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId,
+                        (int)Math.Floor(worldDay), "political_pressures", activityId, counters);
             }
         }
 
@@ -1398,6 +1366,9 @@ namespace ReignBetaServer
                         "Readiness polling sees current hostile and consumed-zero directions from only the selected campaign timeline, without replaying incident effects.");
                 }
                 CheckMeasuredPoliticalPressure(campaignId, add);
+#if !REIGN_EXCLUDE_VERIFICATION
+                if (ReignPostgreSqlStorage.Options.IsValidation) CheckResumablePressureProduction(campaignId, add);
+#endif
             }
             finally
             {

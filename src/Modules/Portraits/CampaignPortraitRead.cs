@@ -55,9 +55,10 @@ namespace ReignBetaServer
         // Own FileLock through selection, all witness reads and the image copy.
         // Render-only readers may use the retained assets after Save Sync rolls
         // profile.json back. Do not use the current profile as their commit point.
-        private static CampaignPortraitSnapshot ReadCampaignPortraitSnapshot(string root, string campaign, string hero)
+        private static CampaignPortraitSnapshot ReadCampaignPortraitSnapshot(string root, string campaign, string hero,
+            string directory = null)
         {
-            string directory = Path.Combine(OutfitCharacterRoot(root, campaign, hero), "portraits");
+            directory ??= Path.Combine(OutfitCharacterRoot(root, campaign, hero), "portraits");
             if (!RequireOutfitPhysicalPath(root, directory, directory: true)) return null;
 
             byte[] custom = ReadCampaignPortraitFile(root, directory, "custom.png", MaxCampaignPortraitBytes);
@@ -108,6 +109,49 @@ namespace ReignBetaServer
             if (receipt != null && !CampaignPortraitReceiptMatches(receipt, Sha256Hex(master)))
                 throw new InvalidDataException("The campaign portrait bytes do not match the stored receipt.");
             return new CampaignPortraitSnapshot(master, receipt, false);
+        }
+
+        internal static bool RequireCampaignBackupDirectory(string root, string directory) =>
+            RequireOutfitPhysicalPath(root, directory, directory: true);
+
+        internal static void RequireCampaignBackupPortraits(string root, string campaignDirectory, string campaign,
+            ISet<string> archiveFiles = null)
+        {
+            string characters = Path.Combine(campaignDirectory, "characters");
+            if (!RequireOutfitPhysicalPath(root, characters, directory: true)) return;
+
+            foreach (string character in Directory.EnumerateDirectories(characters))
+            {
+                string hero = Path.GetFileName(character);
+                string directory = Path.Combine(character, "portraits");
+                if (!RequireOutfitPhysicalPath(root, directory, directory: true)) continue;
+                if (!IsOutfitStorageId(hero))
+                    throw new InvalidDataException("Invalid character portrait owner.");
+                var metadata = ReadCampaignPortraitMetadata(root, directory, "portrait.json");
+                RequirePortraitBackupOwner(metadata, "campaignId", campaign);
+                RequirePortraitBackupOwner(metadata, "heroStringId", hero);
+                if (archiveFiles != null)
+                {
+                    foreach (string file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+                    {
+                        if (!archiveFiles.Contains(file))
+                            throw new InvalidDataException("The backup manifest omits a campaign portrait file.");
+                    }
+                    string profile = Path.Combine(character, "profile.json");
+                    if (File.Exists(Path.Combine(directory, "outfit.json"))
+                        && !File.Exists(Path.Combine(directory, OutfitConfirmationFileName))
+                        && File.Exists(profile) && !archiveFiles.Contains(profile))
+                        throw new InvalidDataException("The backup manifest omits the legacy outfit profile.");
+                }
+                ReadCampaignPortraitSnapshot(root, campaign, hero, directory);
+            }
+        }
+
+        private static void RequirePortraitBackupOwner(Dictionary<string, object> metadata, string key, string owner)
+        {
+            if (metadata?.TryGetValue(key, out object value) == true
+                && (value is not string identity || identity != owner))
+                throw new InvalidDataException("The backup portrait metadata belongs to another owner.");
         }
 
         private static bool HasCampaignPortraitRefresh(string directory, string root, out object refresh)

@@ -191,7 +191,8 @@ namespace ReignBetaServer
         private static void DetectRulerBreakthroughs(ReignDbConnection connection,
             string campaignId, string timelineId, int season, double worldDay,
             string observer, string target, string observerKingdom, string targetKingdom,
-            int beforeEffective, int afterEffective, string rollCorrelation, long ts)
+            int beforeEffective, int afterEffective, string rollCorrelation, long ts,
+            ReignDbTransaction transaction = null)
         {
             foreach (int threshold in RulerBreakthroughThresholds)
             {
@@ -210,7 +211,7 @@ namespace ReignBetaServer
                     ["campaign"] = campaignId, ["timeline"] = timelineId, ["season"] = season,
                     ["observer"] = observer, ["target"] = target, ["polarity"] = polarity,
                     ["threshold"] = threshold
-                }).FirstOrDefault(), "count", 0) > 0;
+                }, transaction).FirstOrDefault(), "count", 0) > 0;
                 if (alreadyRecorded) continue;
                 DiplomacyStore.InsertOrIgnoreRulerRelationshipCrossings(connection, new Dictionary<string, object>
                 {
@@ -220,19 +221,24 @@ namespace ReignBetaServer
                     ["day"] = worldDay, ["before"] = beforeEffective, ["after"] = afterEffective,
                     ["chance"] = chance, ["roll"] = bonusRoll, ["passed"] = bonusRoll <= chance ? 1 : 0,
                     ["opportunity"] = opportunityId, ["correlation"] = correlation, ["ts"] = ts
-                });
+                }, transaction);
                 RecordRulerActivity(connection, campaignId, timelineId, worldDay, observer, target,
                     "threshold_crossing", polarity, bonusRoll <= chance ? "bonus_passed" : "bonus_failed",
                     threshold, beforeEffective, afterEffective, bonusRoll, chance, "", correlation,
-                    "genuine effective-attitude crossing");
-                WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId,
-                    (int)Math.Floor(worldDay + 0.000001d), "kingdom_leaders",
-                    correlation, new Dictionary<string, object>
-                    {
-                        ["breakthrough:" + polarity + ":" + threshold.ToString(CultureInfo.InvariantCulture)] = 1,
-                        ["bonusAttempts"] = 1,
-                        [bonusRoll <= chance ? "bonusPassed" : "bonusFailed"] = 1
-                    });
+                    "genuine effective-attitude crossing", transaction: transaction);
+                var counters = new Dictionary<string, object>
+                {
+                    ["breakthrough:" + polarity + ":" + threshold.ToString(CultureInfo.InvariantCulture)] = 1,
+                    ["bonusAttempts"] = 1,
+                    [bonusRoll <= chance ? "bonusPassed" : "bonusFailed"] = 1
+                };
+                int day = (int)Math.Floor(worldDay + 0.000001d);
+                if (transaction == null)
+                    WorldSimulationService.RecordWorldTestCounter(connection, campaignId, timelineId,
+                        day, "kingdom_leaders", correlation, counters);
+                else
+                    WorldSimulationService.WriteWorldTestCounterSchemaReady(connection, campaignId, timelineId,
+                        day, "kingdom_leaders", correlation, counters, transaction);
                 if (bonusRoll > chance) continue;
                 DiplomacyStore.InsertOrIgnoreRulerDiplomacyOpportunities(connection, new Dictionary<string, object>
                 {
@@ -242,10 +248,11 @@ namespace ReignBetaServer
                     ["season"] = season, ["day"] = worldDay, ["effective"] = afterEffective,
                     ["chance"] = chance, ["roll"] = bonusRoll, ["expiry"] = (season + 1) * 31.5d,
                     ["correlation"] = correlation, ["ts"] = ts
-                });
+                }, transaction);
                 RecordRulerActivity(connection, campaignId, timelineId, worldDay, observer, target,
                     "opportunity", polarity, "queued", threshold, afterEffective, afterEffective,
-                    bonusRoll, chance, "", correlation, "relationship-generated diplomacy opportunity");
+                    bonusRoll, chance, "", correlation, "relationship-generated diplomacy opportunity",
+                    transaction: transaction);
             }
         }
 
@@ -268,7 +275,8 @@ namespace ReignBetaServer
         internal static void RecordRulerActivity(ReignDbConnection connection, string campaignId,
             string timelineId, double worldDay, string observer, string target, string eventType,
             string polarity, string status, int threshold, int before, int after, int roll, int chance,
-            string actionId, string correlationId, string reason, Dictionary<string, object> payload = null)
+            string actionId, string correlationId, string reason, Dictionary<string, object> payload = null,
+            ReignDbTransaction transaction = null)
         {
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             string id = "ruler-activity:" + campaignId + ":" + timelineId + ":" + eventType + ":"
@@ -281,7 +289,7 @@ namespace ReignBetaServer
                 ["before"] = before, ["after"] = after, ["roll"] = roll, ["chance"] = chance,
                 ["action"] = actionId ?? "", ["correlation"] = correlationId ?? "", ["reason"] = DialogueService.LimitText(reason ?? "", 500),
                 ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts
-            });
+            }, transaction);
         }
 
         private static void CompleteRulerOpportunity(ReignDbConnection connection, string campaignId,
@@ -782,32 +790,10 @@ namespace ReignBetaServer
                         Dictionary<string, object> after = RelationshipsService.ResolveRulerDiplomaticAttitude(connection,
                             campaignId, timelineId, observer, target, eventKind);
                         int afterEffective = ReadInt(after, "effectiveAttitude", beforeEffective + affinityDelta);
-                        long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                        DiplomacyStore.InsertRulerDiplomaticIncidents(connection, new Dictionary<string, object>
-                            {
-                                ["id"] = stableIncidentId, ["campaign"] = campaignId, ["timeline"] = timelineId,
-                                ["day"] = worldDay, ["kind"] = eventKind ?? "", ["source"] = sourceId ?? "",
-                                ["observer"] = observer, ["target"] = target,
-                                ["observerKingdom"] = observerKingdom ?? "", ["targetKingdom"] = targetKingdom ?? "",
-                                ["delta"] = affinityDelta, ["publicSubject"] = publicSubjectId ?? "",
-                                ["publicDelta"] = boundedPublic, ["before"] = beforeEffective, ["after"] = afterEffective,
-                                ["breakthroughs"] = enableBreakthroughs ? 1 : 0, ["correlation"] = correlationId ?? "",
-                                ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts
-                            });
-                        RecordRulerActivity(connection, campaignId, timelineId, worldDay, observer, target,
-                            "relationship_incident", affinityDelta >= 0 ? "positive" : "negative", "applied", 0,
-                            beforeEffective, afterEffective, 0, 0, sourceId, correlationId,
-                            eventKind, new Dictionary<string, object>
-                            {
-                                ["incidentId"] = stableIncidentId, ["affinityDelta"] = affinityDelta,
-                                ["publicSubjectId"] = publicSubjectId ?? "", ["publicDelta"] = boundedPublic,
-                                ["eventKind"] = eventKind ?? "", ["sourceId"] = sourceId ?? ""
-                            });
-                        if (enableBreakthroughs)
-                            DetectRulerBreakthroughs(connection, campaignId, timelineId,
-                                (int)Math.Floor(worldDay / 31.5d), worldDay, observer, target,
-                                observerKingdom ?? "", targetKingdom ?? "", beforeEffective, afterEffective,
-                                correlationId, ts);
+                        WriteRulerDiplomaticIncidentReceipt(connection, null, campaignId, timelineId, worldDay,
+                            eventKind, stableIncidentId, sourceId, observer, target, observerKingdom, targetKingdom,
+                            affinityDelta, publicSubjectId, boundedPublic, beforeEffective, afterEffective,
+                            enableBreakthroughs, correlationId, payload);
                         DiplomacyStore.Commit(connection);
                     }
                     catch
@@ -817,6 +803,93 @@ namespace ReignBetaServer
                     }
                 }
             }
+        }
+
+        // The daily pressure producer owns the campaign/timeline gates, relationship writer lock,
+        // captured relationship file inputs, schema setup, PostgreSQL transaction and post-commit publication.
+        private static bool ApplyRulerDiplomaticIncidentInTransaction(ReignDbConnection connection,
+            ReignDbTransaction transaction, string campaignId, string timelineId, double worldDay,
+            string eventKind, string incidentId, string sourceId, string observer, string target,
+            string observerKingdom, string targetKingdom, int affinityDelta, bool enableBreakthroughs,
+            string correlationId, Dictionary<string, object> payload = null)
+        {
+            if (string.IsNullOrWhiteSpace(incidentId) || string.IsNullOrWhiteSpace(observer)
+                || string.IsNullOrWhiteSpace(target) || observer.Equals(target, StringComparison.OrdinalIgnoreCase)
+                || affinityDelta == 0) return false;
+            if (transaction == null || !ReferenceEquals(transaction.Connection, connection)
+                || !string.Equals(ReignPostgreSqlStorage.CampaignIdForConnection(connection), campaignId, StringComparison.Ordinal)
+                || !System.Threading.Monitor.IsEntered(RelationshipsService.CampaignRelationshipWriteLock(campaignId))
+                || !RelationshipsService.RelationshipStandingContext.DefersPublicationFor(connection)
+                || RelationshipsService.RelationshipStandingContext.FilesFor(connection, campaignId, timelineId) == null)
+                throw new InvalidOperationException("Ruler pressure effects require the registered campaign transaction and captured inputs.");
+
+            string stableIncidentId = campaignId + ":" + timelineId + ":" + incidentId;
+            var prior = DiplomacyStore.SelectRulerDiplomaticIncidentReceipt(connection, stableIncidentId, transaction);
+            if (prior != null)
+            {
+                var priorPayload = TryParseJsonObject(ReadString(prior, "payload_json", ""));
+                if (ReadString(prior, "campaign_id", "") != campaignId || ReadString(prior, "timeline_id", "") != timelineId
+                    || ReadDouble(prior, "world_day", double.NaN) != worldDay
+                    || ReadString(prior, "event_kind", "") != (eventKind ?? "")
+                    || ReadString(prior, "source_id", "") != (sourceId ?? "")
+                    || ReadString(prior, "observer_id", "") != observer || ReadString(prior, "target_id", "") != target
+                    || ReadString(prior, "observer_kingdom_id", "") != (observerKingdom ?? "")
+                    || ReadString(prior, "target_kingdom_id", "") != (targetKingdom ?? "")
+                    || ReadInt(prior, "affinity_delta", int.MinValue) != affinityDelta
+                    || ReadString(prior, "public_subject_id", "") != "" || ReadInt(prior, "public_delta", int.MinValue) != 0
+                    || ReadInt(prior, "breakthroughs_enabled", -1) != (enableBreakthroughs ? 1 : 0)
+                    || ReadString(prior, "correlation_id", "") != (correlationId ?? "")
+                    || priorPayload == null
+                    || CanonicalJson(priorPayload) != CanonicalJson(payload ?? new Dictionary<string, object>()))
+                    throw new InvalidOperationException("The existing ruler pressure receipt records different terms.");
+                return false;
+            }
+
+            int before = ReadInt(RelationshipsService.ResolveRulerDiplomaticAttitude(connection, campaignId,
+                timelineId, observer, target, eventKind), "effectiveAttitude", 0);
+            RelationshipsService.ApplyAuthoritativeRelationshipDeltaInTransaction(connection, transaction,
+                campaignId, timelineId, observer, target, affinityDelta, worldDay, correlationId);
+            int after = ReadInt(RelationshipsService.ResolveRulerDiplomaticAttitude(connection, campaignId,
+                timelineId, observer, target, eventKind), "effectiveAttitude", before + affinityDelta);
+            WriteRulerDiplomaticIncidentReceipt(connection, transaction, campaignId, timelineId, worldDay,
+                eventKind, stableIncidentId, sourceId, observer, target, observerKingdom, targetKingdom,
+                affinityDelta, "", 0, before, after, enableBreakthroughs, correlationId, payload);
+            return true;
+        }
+
+        private static void WriteRulerDiplomaticIncidentReceipt(ReignDbConnection connection,
+            ReignDbTransaction transaction, string campaignId, string timelineId, double worldDay,
+            string eventKind, string stableIncidentId, string sourceId, string observer, string target,
+            string observerKingdom, string targetKingdom, int affinityDelta, string publicSubjectId,
+            int publicDelta, int beforeEffective, int afterEffective, bool enableBreakthroughs,
+            string correlationId, Dictionary<string, object> payload)
+        {
+            long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            DiplomacyStore.InsertRulerDiplomaticIncidents(connection, new Dictionary<string, object>
+            {
+                ["id"] = stableIncidentId, ["campaign"] = campaignId, ["timeline"] = timelineId,
+                ["day"] = worldDay, ["kind"] = eventKind ?? "", ["source"] = sourceId ?? "",
+                ["observer"] = observer, ["target"] = target,
+                ["observerKingdom"] = observerKingdom ?? "", ["targetKingdom"] = targetKingdom ?? "",
+                ["delta"] = affinityDelta, ["publicSubject"] = publicSubjectId ?? "",
+                ["publicDelta"] = publicDelta, ["before"] = beforeEffective, ["after"] = afterEffective,
+                ["breakthroughs"] = enableBreakthroughs ? 1 : 0, ["correlation"] = correlationId ?? "",
+                ["payload"] = Json.Serialize(payload ?? new Dictionary<string, object>()), ["ts"] = ts
+            }, transaction);
+            RecordRulerActivity(connection, campaignId, timelineId, worldDay, observer, target,
+                "relationship_incident", affinityDelta >= 0 ? "positive" : "negative", "applied", 0,
+                beforeEffective, afterEffective, 0, 0, sourceId, correlationId,
+                eventKind, new Dictionary<string, object>
+                {
+                    ["incidentId"] = stableIncidentId, ["affinityDelta"] = affinityDelta,
+                    ["publicSubjectId"] = publicSubjectId ?? "", ["publicDelta"] = publicDelta,
+                    ["eventKind"] = eventKind ?? "", ["sourceId"] = sourceId ?? ""
+                }, transaction);
+            if (enableBreakthroughs)
+                DetectRulerBreakthroughs(connection, campaignId, timelineId,
+                    (int)Math.Floor(worldDay / 31.5d), worldDay, observer, target,
+                    observerKingdom ?? "", targetKingdom ?? "", beforeEffective, afterEffective,
+                    correlationId, ts, transaction);
         }
 
         private static void IngestNativeDiplomacyRelationshipState(Dictionary<string, object> payload)

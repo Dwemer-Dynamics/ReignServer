@@ -613,6 +613,9 @@ FROM STDIN (FORMAT BINARY)"))
         {
             string value = (sql ?? string.Empty).TrimStart();
             RelationshipStandingContext.For(connection)?.Invalidate(value);
+            // The transaction owner invalidates shared state after commit; readers
+            // must keep seeing the previous committed snapshot until then.
+            if (RelationshipStandingContext.DefersPublicationFor(connection)) return;
             if (value.IndexOf("relationship_pair_chemistry",
                     StringComparison.OrdinalIgnoreCase) < 0
                 || !(value.StartsWith("UPDATE ",
@@ -730,7 +733,8 @@ FROM STDIN (FORMAT BINARY)"))
                 .FirstOrDefault() ?? pair;
             // This helper may run inside a caller-owned transaction. Never expose
             // uncommitted rows through RAM; the next read reloads committed state.
-            InvalidateRelationshipPairStateCache(campaignId);
+            if (!RelationshipStandingContext.DefersPublicationFor(connection))
+                InvalidateRelationshipPairStateCache(campaignId);
             return committed;
         }
 
@@ -745,11 +749,38 @@ FROM STDIN (FORMAT BINARY)"))
             string timelineId = "main",
             bool ensurePair = false)
         {
-            if (string.IsNullOrWhiteSpace(observerId) || string.IsNullOrWhiteSpace(targetId)
-                || observerId.Equals(targetId, StringComparison.OrdinalIgnoreCase) || (delta == 0 && !ensurePair))
-                return;
+            if (!HasAuthoritativeRelationshipDelta(observerId, targetId, delta, ensurePair)) return;
             lock (CampaignRelationshipWriteLock(campaignId))
-            {
+                ApplyAuthoritativeRelationshipDeltaCore(connection, campaignId, observerId, targetId,
+                    delta, worldDay, reason, timelineId);
+        }
+
+        internal static void ApplyAuthoritativeRelationshipDeltaInTransaction(ReignDbConnection connection,
+            ReignDbTransaction transaction, string campaignId, string timelineId, string observerId,
+            string targetId, int delta, double worldDay, string reason)
+        {
+            if (!ReignPostgreSqlDialect.IsPostgreSql(connection)
+                || transaction == null || !ReferenceEquals(transaction.Connection, connection)
+                || !string.Equals(ReignPostgreSqlStorage.CampaignIdForConnection(connection), campaignId, StringComparison.Ordinal)
+                || !System.Threading.Monitor.IsEntered(CampaignRelationshipWriteLock(campaignId))
+                || !RelationshipStandingContext.DefersPublicationFor(connection)
+                || RelationshipStandingContext.FilesFor(connection, campaignId, timelineId) == null)
+                throw new InvalidOperationException("Relationship effects require the registered campaign transaction and captured inputs.");
+
+            // Npgsql enlists the core's connection-owned commands in the caller's active transaction.
+            if (HasAuthoritativeRelationshipDelta(observerId, targetId, delta, ensurePair: false))
+                ApplyAuthoritativeRelationshipDeltaCore(connection, campaignId, observerId, targetId,
+                    delta, worldDay, reason, timelineId);
+        }
+
+        private static bool HasAuthoritativeRelationshipDelta(string observerId, string targetId, int delta, bool ensurePair) =>
+            !string.IsNullOrWhiteSpace(observerId) && !string.IsNullOrWhiteSpace(targetId)
+            && !observerId.Equals(targetId, StringComparison.OrdinalIgnoreCase) && (delta != 0 || ensurePair);
+
+        private static void ApplyAuthoritativeRelationshipDeltaCore(ReignDbConnection connection,
+            string campaignId, string observerId, string targetId, int delta, double worldDay, string reason,
+            string timelineId)
+        {
             string pairKey = AmbientPairKey(observerId, targetId);
             bool observerIsA = pairKey.StartsWith(observerId + "|", StringComparison.OrdinalIgnoreCase);
             string heroA = observerIsA ? observerId : targetId;
@@ -815,7 +846,6 @@ FROM STDIN (FORMAT BINARY)"))
                 .FirstOrDefault();
             RefreshEffectivePairProjection(connection, campaignId, timelineId,
                 current, worldDay, reason);
-            }
         }
 
         private static string ResolvePermanentMbtiTypeById(

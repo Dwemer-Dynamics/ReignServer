@@ -7,7 +7,7 @@ namespace ReignBetaServer
 {
     internal static partial class CourtService
     {
-        private static void EnsureInternationalCourtLifeSchema(ReignDbConnection connection)
+        internal static void EnsureInternationalCourtLifeSchema(ReignDbConnection connection)
         {
             CourtSchema.CreateInternationalCourtQueue(connection);
             CourtSchema.CreateInternationalCourtReferrals(connection);
@@ -18,13 +18,23 @@ namespace ReignBetaServer
             Dictionary<string, object> target, List<string> originLords, List<string> targetLords,
             int severityRank, string title, string premise, string channel, string originStance, string targetStance, string polarity)
         {
+            string payload = BuildInternationalPoliticalIncidentPayload(incidentId, day, origin, target, originLords,
+                targetLords, severityRank, title, premise, channel, originStance, targetStance, polarity);
+            StoreInternationalQueueItem(campaignId, timelineId, incidentId, "incident",
+                PoliticalIncidentCourtSeverity(severityRank), day, payload);
+        }
+
+        internal static string BuildInternationalPoliticalIncidentPayload(string incidentId, double day,
+            Dictionary<string, object> origin, Dictionary<string, object> target, List<string> originLords, List<string> targetLords,
+            int severityRank, string title, string premise, string channel, string originStance, string targetStance, string polarity)
+        {
             bool playerOrigin = ReadBool(origin, "isPlayerKingdom", false);
             Dictionary<string, object> foreign = playerOrigin ? target : origin;
             Dictionary<string, object> player = playerOrigin ? origin : target;
             Dictionary<string, object> data = new Dictionary<string, object>
             {
                 ["matterId"] = incidentId, ["kind"] = "incident", ["title"] = title, ["summary"] = premise,
-                ["severityRank"] = Math.Max(0, Math.Min(3, severityRank - 1)), ["createdDay"] = day,
+                ["severityRank"] = PoliticalIncidentCourtSeverity(severityRank), ["createdDay"] = day,
                 ["foreignKingdomId"] = ReadString(foreign, "kingdomId", ""),
                 ["foreignRulerId"] = ReadString(foreign, "leaderHeroId", ""),
                 ["playerKingdomId"] = ReadString(player, "kingdomId", ""),
@@ -36,23 +46,48 @@ namespace ReignBetaServer
                 ["foreign"] = foreign, ["player"] = player,
                 ["playerDecision"] = "awaiting_player"
             };
-            StoreInternationalQueueItem(campaignId, timelineId, incidentId, "incident",
-                Math.Max(0, Math.Min(3, severityRank - 1)), day, data);
+            return Json.Serialize(data);
+        }
+
+        private static int PoliticalIncidentCourtSeverity(int severityRank) => Math.Max(0, Math.Min(3, severityRank - 1));
+
+        internal static void StoreExactInternationalPoliticalIncident(ReignDbConnection connection, ReignDbTransaction transaction,
+            string campaignId, string timelineId, string incidentId, int severityRank, double day, string payloadJson)
+        {
+            if (connection == null || transaction == null || !ReferenceEquals(transaction.Connection, connection)
+                || ReignPostgreSqlStorage.CampaignIdForConnection(connection) != campaignId)
+                throw new InvalidOperationException("The political incident must use its campaign's active transaction.");
+
+            var parameters = InternationalCourtQueueParameters(campaignId, timelineId, incidentId, "incident",
+                PoliticalIncidentCourtSeverity(severityRank), day, payloadJson);
+            CourtStore.InsertOrIgnoreInternationalCourtQueue(connection, parameters, transaction);
+            // A retry must prove the immutable material before treating an existing row as its own.
+            // The mutable status is left intact, including when the original item was resolved.
+            if (!CourtStore.HasExactInternationalCourtQueueMaterial(connection, parameters, transaction))
+                throw new InvalidOperationException("The international court queue has conflicting political incident material.");
         }
 
         internal static void StoreInternationalQueueItem(string campaignId, string timelineId, string matterId,
             string kind, int severity, double day, Dictionary<string, object> data)
+            => StoreInternationalQueueItem(campaignId, timelineId, matterId, kind, severity, day, Json.Serialize(data));
+
+        private static void StoreInternationalQueueItem(string campaignId, string timelineId, string matterId,
+            string kind, int severity, double day, string payloadJson)
         {
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 EnsureInternationalCourtLifeSchema(connection);
-                CourtStore.InsertOrIgnoreInternationalCourtQueue(connection, new Dictionary<string, object>
-                {
-                    ["campaign"] = campaignId, ["timeline"] = timelineId, ["matter"] = matterId,
-                    ["kind"] = kind, ["severity"] = severity, ["day"] = day, ["payload"] = Json.Serialize(data)
-                });
+                CourtStore.InsertOrIgnoreInternationalCourtQueue(connection,
+                    InternationalCourtQueueParameters(campaignId, timelineId, matterId, kind, severity, day, payloadJson));
             }
         }
+
+        private static Dictionary<string, object> InternationalCourtQueueParameters(string campaignId, string timelineId,
+            string matterId, string kind, int severity, double day, string payloadJson) => new Dictionary<string, object>
+            {
+                ["campaign"] = campaignId, ["timeline"] = timelineId, ["matter"] = matterId,
+                ["kind"] = kind, ["severity"] = severity, ["day"] = day, ["payload"] = payloadJson
+            };
 
         internal static Dictionary<string, object> InternationalCourtPendingApi(Dictionary<string, object> payload)
         {

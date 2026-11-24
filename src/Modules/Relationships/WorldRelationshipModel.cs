@@ -33,18 +33,20 @@ namespace ReignBetaServer
             // relationship inputs strictly from its snapshot; its database reads
             // pass through unchanged (For skips it), so standing/roster stay transactional.
             private readonly RelationshipFileSnapshot files;
+            private readonly bool deferPublication;
             public int StandingReads;
             public int RosterReads;
             public int PlayerReads;
 
             public RelationshipStandingContext(ReignDbConnection connection,
                 string campaignId, string timelineId, RelationshipFileSnapshot files = null,
-                StringComparer idComparer = null)
+                StringComparer idComparer = null, bool deferPublication = false)
             {
                 this.connection = connection;
                 this.campaignId = campaignId;
                 this.timelineId = timelineId;
                 this.files = files;
+                this.deferPublication = deferPublication;
                 standing = new Dictionary<string, Dictionary<string, object>>(idComparer ?? StringComparer.OrdinalIgnoreCase);
                 roster = new Dictionary<string, Dictionary<string, object>>(standing.Comparer);
                 previous = CurrentRelationshipStandingContext;
@@ -77,6 +79,14 @@ namespace ReignBetaServer
                     return context.files;
                 }
                 return null;
+            }
+
+            internal static bool DefersPublicationFor(ReignDbConnection connection)
+            {
+                for (RelationshipStandingContext context = CurrentRelationshipStandingContext;
+                    context != null; context = context.previous)
+                    if (context.deferPublication && ReferenceEquals(context.connection, connection)) return true;
+                return false;
             }
 
             public void Prefetch(IEnumerable<string> heroIds)

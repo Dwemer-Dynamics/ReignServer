@@ -362,6 +362,16 @@ WHERE opportunity_id=$id AND status<>'waiting_cooldown';", parameters, transacti
             return ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM ruler_diplomatic_incidents WHERE incident_id=$id;", parameters, transaction);
         }
 
+        internal static Dictionary<string, object> SelectRulerDiplomaticIncidentReceipt(
+            ReignDbConnection connection, string incidentId, ReignDbTransaction transaction)
+        {
+            var rows = ReignDatabase.QuerySql(connection, @"SELECT campaign_id,timeline_id,world_day,event_kind,source_id,
+observer_id,target_id,observer_kingdom_id,target_kingdom_id,affinity_delta,public_subject_id,public_delta,
+breakthroughs_enabled,correlation_id,payload_json FROM ruler_diplomatic_incidents WHERE incident_id=$id;",
+                new Dictionary<string, object> { ["id"] = incidentId }, transaction);
+            return rows.Count == 0 ? null : rows[0];
+        }
+
         internal static void InsertRulerDiplomaticIncidents(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             ReignDatabase.ExecuteSql(connection, @"INSERT INTO ruler_diplomatic_incidents(

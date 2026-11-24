@@ -700,16 +700,6 @@ namespace ReignBetaServer
 
         private static Dictionary<string, object> CreateCampaignBackupArchive(string campaignId)
         {
-            string campaignDir = CampaignFileService.CampaignDirectory(campaignId);
-            bool databaseExists = ReignPostgreSqlStorage.ListCampaignMetadata().Any(
-                row => ReadString(row, "campaignId", "")
-                    .Equals(campaignId, StringComparison.OrdinalIgnoreCase));
-            if (!databaseExists)
-                return new Dictionary<string, object>
-                {
-                    ["ok"] = false,
-                    ["error"] = "Campaign was not found in PostgreSQL."
-                };
             string operationId = Guid.NewGuid().ToString("N");
             string backupRoot = Path.Combine(Program.DataDir, "backups");
             // Recovery folders already contain long campaign-relative paths. Staging
@@ -720,20 +710,33 @@ namespace ReignBetaServer
             string stagedSaveSync = Path.Combine(stagingRoot, "save_sync");
             string stagedNativeSaves = Path.Combine(stagingRoot, "native_saves");
             string generatedRoot = Path.Combine(backupRoot, "generated");
-            Directory.CreateDirectory(stagedCampaign);
-            Directory.CreateDirectory(generatedRoot);
             try
             {
-                if (Directory.Exists(campaignDir))
-                    CopyDirectoryTree(
-                        campaignDir, stagedCampaign,
-                        path => !IsLiveSqliteSidecar(path));
+                string campaignDir = StrictCampaignDirectory(campaignId);
+                string portraitCache = CampaignPortraitCacheDirectory(campaignId);
+                string[] registered = ReignPostgreSqlStorage.ListCampaignMetadata()
+                    .Select(row => ReadString(row, "campaignId", "")).ToArray();
+                if (!registered.Contains(campaignId, StringComparer.Ordinal))
+                    throw new InvalidDataException("Campaign was not found in PostgreSQL with its exact identity.");
+                string[] otherSpellings = registered.Where(id => id != campaignId
+                    && id.Equals(campaignId, StringComparison.OrdinalIgnoreCase)).ToArray();
+                CheckImportDirectorySpelling(campaignDir, otherSpellings, Path.Exists);
+                CheckImportDirectorySpelling(portraitCache, otherSpellings, Path.Exists);
+                ValidateCampaignOwnedDirectory(portraitCache, CampaignPortraitCacheRoot(), true);
+                // The download route owns the campaign write gate through this staging step.
+                bool hasCampaign = PortraitsService.RequireCampaignBackupDirectory(
+                    CampaignFileService.CampaignsRoot(), campaignDir);
+                bool hasCache = PortraitsService.RequireCampaignBackupDirectory(Program.DataDir, portraitCache);
+                Directory.CreateDirectory(stagedCampaign);
+                if (hasCampaign)
+                    CopyBackupOwnedTree(campaignDir, stagedCampaign, path => !IsLiveSqliteSidecar(path));
+                if (hasCache)
+                    CopyBackupOwnedTree(portraitCache, stagedPortraits);
+                PortraitsService.RequireCampaignBackupPortraits(stagingRoot, stagedCampaign, campaignId);
                 string databaseArchive =
                     Path.Combine(stagingRoot, "postgresql.dump");
                 ReignPostgreSqlStorage.ExportCampaignArchive(
                     campaignId, databaseArchive);
-                string portraitCache = CampaignPortraitCacheDirectory(campaignId);
-                if (Directory.Exists(portraitCache)) CopyDirectoryTree(portraitCache, stagedPortraits, null);
                 string saveSyncRoot = SaveSyncCampaignRoot(campaignId);
                 if (Directory.Exists(saveSyncRoot)) CopyDirectoryTree(saveSyncRoot, stagedSaveSync, null);
                 Dictionary<string, object> storageAudit =
@@ -749,7 +752,7 @@ namespace ReignBetaServer
                         .Where(row => ReadString(row,
                             "matchingCampaignId", "").Equals(
                                 campaignId,
-                                StringComparison.OrdinalIgnoreCase))
+                                StringComparison.Ordinal))
                         .ToList();
                 if (matchingNativeSaves.Count == 0)
                     throw new InvalidOperationException(
@@ -809,6 +812,7 @@ namespace ReignBetaServer
                 if (safeLabel.Length > 70) safeLabel = safeLabel.Substring(0, 70);
                 string fileName = "Bannerlord-Reign-" + safeLabel + "-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".reignbackup";
                 string archivePath = Path.Combine(generatedRoot, operationId + ".reignbackup");
+                Directory.CreateDirectory(generatedRoot);
                 ZipFile.CreateFromDirectory(stagingRoot, archivePath, CompressionLevel.Optimal, false, Encoding.UTF8);
                 Dictionary<string, object> result = new Dictionary<string, object>
                 {
@@ -824,6 +828,10 @@ namespace ReignBetaServer
                 OperationsService.LogOperational("campaign.backup_exported", result);
                 return result;
             }
+            catch (SaveSyncCampaignFencedException ex)
+            {
+                return ex.Status;
+            }
             catch (Exception ex)
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = ex.Message, ["campaignId"] = campaignId };
@@ -831,6 +839,22 @@ namespace ReignBetaServer
             finally
             {
                 TryDeleteDirectory(stagingRoot);
+            }
+        }
+
+        private static void CopyBackupOwnedTree(string source, string destination, Func<string, bool> include = null)
+        {
+            Directory.CreateDirectory(destination);
+            foreach (string entry in Directory.EnumerateFileSystemEntries(source))
+            {
+                FileAttributes attributes = File.GetAttributes(entry);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidDataException("A campaign backup cannot copy a linked storage entry.");
+                string target = Path.Combine(destination, Path.GetFileName(entry));
+                if ((attributes & FileAttributes.Directory) != 0)
+                    CopyBackupOwnedTree(entry, target, include);
+                else if (include == null || include(entry))
+                    File.Copy(entry, target);
             }
         }
 
@@ -900,6 +924,8 @@ namespace ReignBetaServer
                     CheckImportDirectorySpelling(destinationJournals, otherSpellings, entryExists);
                 }
                 CheckDirectoryOwnership();
+                PortraitsService.RequireCampaignBackupDirectory(CampaignFileService.CampaignsRoot(), destinationCampaign);
+                PortraitsService.RequireCampaignBackupDirectory(Program.DataDir, destinationPortraits);
                 bool databaseExists = originalMetadata != null;
                 if (databaseExists && !replace)
                     return new Dictionary<string, object> { ["ok"] = false, ["conflict"] = true, ["campaignId"] = campaignId, ["error"] = "This campaign already exists. Enable Replace existing campaign to restore over it." };
@@ -947,6 +973,13 @@ namespace ReignBetaServer
                     return new Dictionary<string, object> { ["ok"] = false, ["conflict"] = true, ["campaignId"] = campaignId,
                         ["error"] = "A destination directory already exists. Enable Replace existing campaign to restore over it." };
 
+                var archiveFiles = ReadDictionaryList(manifest, "files")
+                    .Select(file => SafeBackupPath(extractRoot, ReadString(file, "path", "").Replace('/', Path.DirectorySeparatorChar)))
+                    .ToHashSet(StringComparer.Ordinal);
+                PortraitsService.RequireCampaignBackupPortraits(extractRoot, sourceCampaign, campaignId, archiveFiles);
+                if (PortraitsService.RequireCampaignBackupDirectory(extractRoot, sourcePortraits)
+                    && Directory.EnumerateFiles(sourcePortraits, "*", SearchOption.AllDirectories).Any(file => !archiveFiles.Contains(file)))
+                    throw new InvalidDataException("The backup manifest omits a campaign portrait cache file.");
                 var snapshots = ReadDictionaryList(manifest, "saveSyncSnapshots");
                 ReignPostgreSqlStorage.VerifyCampaignArchive(campaignId, sourceDatabase, snapshots);
                 if (replace && PrepareSaveSyncJournalsForCampaignRemoval(campaignId) is string journalDirectory)
@@ -1103,6 +1136,10 @@ namespace ReignBetaServer
             catch (ImportDirectoryAliasException ex)
             {
                 return new Dictionary<string, object> { ["ok"] = false, ["conflict"] = true, ["campaignId"] = ex.CampaignId, ["error"] = ex.Message };
+            }
+            catch (SaveSyncCampaignFencedException ex)
+            {
+                return ex.Status;
             }
             catch (Exception ex)
             {
