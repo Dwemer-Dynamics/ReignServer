@@ -11,6 +11,95 @@ namespace ReignBetaServer
     internal static partial class WorldSimulationService
     {
 #if !REIGN_EXCLUDE_VERIFICATION
+        private static void AddLiveTestExecutionObservationChecks(Action<string, bool, string> add)
+        {
+            var scope = TestDict("campaignId", "execution-fixture", "gameInstanceId", "native-game",
+                "runId", "execution-run", "commandId", "observe");
+            var start = CloneDictionary(scope);
+            start.Remove("commandId");
+            var run = new Dictionary<string, object>(start)
+            {
+                ["mode"] = "party_agency",
+                ["enrollment"] = TestDict("campaignId", "execution-fixture", "campaignTestRunId", "owned-run",
+                    "certificationRunId", "certification"),
+                ["executionObservationVersion"] = LiveTestExecutionObservationVersion,
+                ["executionStartIdentity"] = start
+            };
+            const string process = "f0c845c1a0134b49baa0218998fa6998";
+            var issued = new Dictionary<string, object>(scope)
+            {
+                ["leaseId"] = "execution-lease",
+                ["clientProcessInstanceId"] = process,
+                ["clientModuleIds"] = TestDict("ReignBeta", "103843aa-4a34-41fb-a155-6fd7188293db"),
+                ["executionRetryGeneration"] = 0
+            };
+            var command = TestDict("commandId", "observe", "leaseId", "execution-lease",
+                "issuedExecutionObservations", new List<Dictionary<string, object>> { issued });
+            var observation = new Dictionary<string, object>(scope)
+            {
+                ["schemaVersion"] = LiveTestExecutionObservationVersion,
+                ["executionLeaseId"] = "execution-lease",
+                ["clientProcessInstanceId"] = process
+            };
+            var report = new Dictionary<string, object>(scope)
+            {
+                ["leaseId"] = "execution-lease", ["executionObservation"] = observation
+            };
+
+            var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var storedRun = serializer.Deserialize<Dictionary<string, object>>(serializer.Serialize(run));
+            var storedCommand = serializer.Deserialize<Dictionary<string, object>>(serializer.Serialize(command));
+            var decodedReport = serializer.Deserialize<Dictionary<string, object>>(serializer.Serialize(report));
+            var evidence = BindLiveTestExecutionObservation(storedRun, storedCommand, decodedReport);
+            var issuedEvidence = ReadDictionary(evidence, "executionObservation");
+            add("execution_observation_json_binding",
+                IsLiveTestExecutionEvidenceRun(storedRun) && MatchesLiveTestCommandTransport(storedRun, storedCommand, decodedReport)
+                && ReadString(evidence, "status", "") == "pending_artifact_review"
+                && ReadString(ReadDictionary(issuedEvidence, "clientModuleIds"), "ReignBeta", "")
+                    == "103843aa-4a34-41fb-a155-6fd7188293db",
+                "Persisted native observations preserve the exact issued module and scope for later artifact review.");
+
+            command["leaseId"] = "replacement-lease";
+            bool oldTransportRejected = !MatchesLiveTestCommandTransport(run, command, report)
+                && ReadString(BindLiveTestExecutionObservation(run, command, report), "status", "") == "stale_transport";
+            report["leaseId"] = "replacement-lease";
+            var resumed = BindLiveTestExecutionObservation(run, command, report);
+            add("execution_observation_transport_replacement",
+                oldTransportRejected && MatchesLiveTestCommandTransport(run, command, report)
+                && ReadString(resumed, "status", "") == "pending_artifact_review"
+                && ReadString(ReadDictionary(resumed, "executionObservation"), "leaseId", "") == "execution-lease"
+                && ReadString(resumed, "transportLeaseId", "") == "replacement-lease",
+                "An expired transport lease cannot report, and its same-generation replacement retains the original execution lease.");
+
+            var wrongScope = new Dictionary<string, object>(observation) { ["gameInstanceId"] = "previous-game" };
+            var wrongProcess = new Dictionary<string, object>(observation) { ["clientProcessInstanceId"] = "previous-process" };
+            var unknownLease = new Dictionary<string, object>(observation) { ["executionLeaseId"] = "unknown-lease" };
+            string StatusWith(Dictionary<string, object> candidate) =>
+                ReadString(BindLiveTestExecutionObservation(run, command,
+                    new Dictionary<string, object>(report) { ["executionObservation"] = candidate }), "status", "");
+            add("execution_observation_rejects_wrong_identity",
+                StatusWith(wrongScope) == "scope_mismatch" && StatusWith(wrongProcess) == "process_mismatch"
+                && StatusWith(unknownLease) == "unknown_original_lease" && StatusWith(null) == "missing",
+                "An unrelated game, process, unknown lease or missing observation cannot establish an execution identity.");
+
+            AdvanceLiveTestExecutionRetry(command);
+            add("execution_observation_explicit_retry_excludes_prior_result",
+                MatchesLiveTestCommandTransport(run, command, report)
+                && ReadString(BindLiveTestExecutionObservation(run, command, report), "status", "") == "stale_execution_retry",
+                "An explicit infrastructure retry supersedes earlier observations even on the current transport lease.");
+
+            var full = LiveTestRunSummary(storedRun, true);
+            var poll = LiveTestRunSummary(storedRun, false);
+            run.Remove("executionObservationVersion");
+            var legacy = LiveTestRunSummary(run, true);
+            add("execution_observation_report_scope",
+                ReadInt(full, "executionObservationVersion", 0) == LiveTestExecutionObservationVersion
+                && ReadString(ReadDictionary(full, "executionStartIdentity"), "gameInstanceId", "") == "native-game"
+                && !poll.ContainsKey("executionStartIdentity") && !poll.ContainsKey("executionObservationVersion")
+                && !legacy.ContainsKey("executionStartIdentity") && !legacy.ContainsKey("executionObservationVersion"),
+                "Only a full report for a guarded enrollment exposes the server-recorded start identity.");
+        }
+
         internal static List<Dictionary<string, object>> RunLiveInteractionTestSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -26,6 +115,7 @@ namespace ReignBetaServer
             Dictionary<string, object> invalid = NormalizeLiveTestCommand(fakeRun, new Dictionary<string, object> { ["operation"] = "send", ["text"] = "" });
             Dictionary<string, object> wrongVersion = NormalizeLiveTestCommand(fakeRun, new Dictionary<string, object> { ["schemaVersion"] = 999, ["operation"] = "open" });
             add("command_schema", first != null && ReadString(first, "status", "") == "queued" && invalid == null && wrongVersion == null, "Command normalization requires the supported schema, valid operations, and non-empty dialogue text.");
+            AddLiveTestExecutionObservationChecks(add);
             var economyRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "passive_world" };
             foreach (string profile in new[] { "civilian_crew_probe", "production_probe", "relief_probe", "market_food_probe", "household_probe" })
             {

@@ -19,6 +19,14 @@ namespace ReignBetaServer
         internal const int LiveTestHeartbeatFreshSeconds = 90;
         internal const int LiveTestLeaseSeconds = 45;
         private static readonly object LiveTestLock = new object();
+        private static readonly string LiveTestServerProcessInstanceId = Guid.NewGuid().ToString("N");
+        private const int LiveTestExecutionObservationVersion = 1;
+        private const int LiveTestRetainedObservationLeases = 16;
+        private static readonly string[] LiveTestObservedClientModules =
+        {
+            "ReignBeta", "TaleWorlds.CampaignSystem", "TaleWorlds.Core", "TaleWorlds.MountAndBlade",
+            "TaleWorlds.CampaignSystem.ViewModelCollection"
+        };
         private static readonly HashSet<string> LiveTestModes = new HashSet<string>(
             new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions", "npc_lives", "personal_gossip" },
             StringComparer.OrdinalIgnoreCase);
@@ -322,6 +330,26 @@ namespace ReignBetaServer
                     ["ok"] = false, ["error"] = "A live interaction run is already active for this campaign.", ["activeRunId"] = ReadString(active, "runId", "")
                 };
 
+                string effects = NormalizeLiveTestEffects(ReadString(payload, "effects", "guarded"));
+                var enrollment = ReadDictionary(payload, "enrollment");
+                Dictionary<string, object> executionStart = null;
+                if (IsLiveTestExecutionEnrollment(mode, campaignId, enrollment))
+                {
+                    // Heartbeat writers share this lock. Observe the same heartbeat that
+                    // authorizes starting the run for the already selected game instance.
+                    var currentRuntime = LoadLiveTestRuntime(campaignId);
+                    if (!IsFreshLiveTestRuntime(currentRuntime)
+                        || ReadString(currentRuntime, "campaignId", "") != campaignId
+                        || ReadString(currentRuntime, "gameInstanceId", "") != liveInstance
+                        || ReadBool(ReadDictionary(currentRuntime, "saveSync"), "alignmentPending", false)
+                        || (!ReadBool(ReadDictionary(currentRuntime, "characterInitialization"), "notableBackgroundReady", false)
+                            && !IsInitializationControlRun(payload)))
+                        return LiveTestError("The loaded-game heartbeat changed while starting this run. Refresh the loaded campaign and retry.");
+
+                    executionStart = ReadLiveTestExecutionIdentity(currentRuntime);
+                    if (executionStart != null)
+                        executionStart["heartbeatReceivedUtc"] = ReadString(currentRuntime, "receivedUtc", "");
+                }
                 string runId = FirstNonEmpty(requestedRunId, "live-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N").Substring(0, 8));
                 Dictionary<string, object> run = new Dictionary<string, object>
                 {
@@ -339,8 +367,8 @@ namespace ReignBetaServer
                     ["buildVersion"] = DialogueService.CurrentConversationBuildVersion(),
                     ["seed"] = ReadLong(payload, "seed", 0),
                     ["presentation"] = NormalizeLiveTestPresentation(ReadString(payload, "presentation", "headless")),
-                    ["effects"] = NormalizeLiveTestEffects(ReadString(payload, "effects", "guarded")),
-                    ["enrollment"] = ReadDictionary(payload, "enrollment"),
+                    ["effects"] = effects,
+                    ["enrollment"] = enrollment,
                     ["status"] = "running",
                     ["autoCompleteWhenIdle"] = payload.ContainsKey("autoCompleteWhenIdle")
                         ? ReadBool(payload, "autoCompleteWhenIdle", false)
@@ -351,6 +379,14 @@ namespace ReignBetaServer
                     ["assertions"] = new List<Dictionary<string, object>>(),
                     ["failures"] = new List<Dictionary<string, object>>()
                 };
+                if (executionStart != null)
+                {
+                    executionStart["campaignId"] = campaignId;
+                    executionStart["gameInstanceId"] = liveInstance;
+                    executionStart["runId"] = runId;
+                    run["executionStartIdentity"] = executionStart;
+                    run["executionObservationVersion"] = LiveTestExecutionObservationVersion;
+                }
                 run["commands"] = NormalizeLiveTestScenarioCommands(run, payload);
                 if (ReadDictionaryList(payload, "steps").Any(step =>
                         string.Equals(ReadString(step, "operation", ReadString(step, "op", "")).Trim(),
@@ -441,6 +477,8 @@ namespace ReignBetaServer
                         infrastructureCommand.Remove("leaseId");
                         infrastructureCommand.Remove("leaseExpiresUtc");
                         infrastructureCommand.Remove("completedUtc");
+                        if (IsLiveTestExecutionEvidenceRun(run))
+                            AdvanceLiveTestExecutionRetry(infrastructureCommand);
                     }
                     Dictionary<string, object> checkpoint = ReadDictionaryList(run, "commands").FirstOrDefault(x =>
                         ReadString(x, "operation", "").Equals("checkpoint", StringComparison.OrdinalIgnoreCase)
@@ -540,11 +578,186 @@ namespace ReignBetaServer
                 command["leaseStartedUtc"] = now.ToString("o");
                 command["leaseExpiresUtc"] = now.AddSeconds(LiveTestLeaseSeconds).ToString("o");
                 command["attempt"] = ReadInt(command, "attempt", 0) + 1;
+                RecordLiveTestExecutionLease(run, command, now);
                 command["updatedUtc"] = now.ToString("o");
                 run["updatedUtc"] = now.ToString("o");
                 SaveLiveTestRun(run);
-                return new Dictionary<string, object> { ["ok"] = true, ["found"] = true, ["run"] = LiveTestRunSummary(run, false), ["command"] = command };
+                var delivery = new Dictionary<string, object>(command);
+                delivery.Remove("issuedExecutionObservations");
+                if (IsLiveTestExecutionEvidenceRun(run))
+                    delivery["gameInstanceId"] = ReadString(run, "gameInstanceId", "");
+                return new Dictionary<string, object> { ["ok"] = true, ["found"] = true, ["run"] = LiveTestRunSummary(run, false), ["command"] = delivery };
             }
+        }
+
+        private static bool IsLiveTestExecutionEnrollment(string mode, string campaign,
+            Dictionary<string, object> enrollment) =>
+            mode == "party_agency" && !string.IsNullOrWhiteSpace(campaign)
+            && ReadString(enrollment, "campaignId", "") == campaign
+            && !string.IsNullOrWhiteSpace(ReadString(enrollment, "campaignTestRunId", ""))
+            && !string.IsNullOrWhiteSpace(ReadString(enrollment, "certificationRunId", ""));
+
+        private static bool IsLiveTestExecutionEvidenceRun(Dictionary<string, object> run) =>
+            IsLiveTestExecutionEnrollment(ReadString(run, "mode", ""), ReadString(run, "campaignId", ""),
+                ReadDictionary(run, "enrollment"))
+            && run.TryGetValue("executionObservationVersion", out object version)
+            && version is int schema && schema == LiveTestExecutionObservationVersion;
+
+        private static bool HasLiveTestExecutionVersion(Dictionary<string, object> observation) =>
+            observation != null && observation.TryGetValue("schemaVersion", out object version)
+            && version is int schema && schema == LiveTestExecutionObservationVersion;
+
+        private static Dictionary<string, object> ReadLiveTestExecutionIdentity(Dictionary<string, object> runtime)
+        {
+            var observation = ReadDictionary(runtime, "executionIdentity");
+            string processId = ReadString(observation, "clientProcessInstanceId", "");
+            if (!HasLiveTestExecutionVersion(observation)
+                || !Guid.TryParseExact(processId, "N", out _)) return null;
+
+            var reported = ReadDictionary(observation, "moduleIds");
+            var modules = new Dictionary<string, object>(StringComparer.Ordinal);
+            foreach (string name in LiveTestObservedClientModules)
+            {
+                if (Guid.TryParse(ReadString(reported, name, ""), out Guid id) && id != Guid.Empty)
+                    modules[name] = id.ToString("D");
+            }
+            if (!modules.ContainsKey("ReignBeta")) return null;
+
+            return new Dictionary<string, object>
+            {
+                ["clientProcessInstanceId"] = processId,
+                ["clientModuleIds"] = modules,
+                ["serverProcessInstanceId"] = LiveTestServerProcessInstanceId,
+                ["serverModuleId"] = typeof(WorldSimulationService).Module.ModuleVersionId.ToString("D")
+            };
+        }
+
+        // Called under LiveTestLock before the run/lease is saved and handed to the game.
+        private static void AdvanceLiveTestExecutionRetry(Dictionary<string, object> command)
+        {
+            // Ordinary expiry/re-lease is the same attempt. Explicit infrastructure
+            // recovery starts a new attempt without relabeling the old issued evidence.
+            command["executionRetryGeneration"] = checked(ReadInt(command, "executionRetryGeneration", 0) + 1);
+        }
+
+        private static bool HasCurrentLiveTestExecutionRetry(Dictionary<string, object> command,
+            Dictionary<string, object> issuedObservation)
+        {
+            return ReadInt(command, "executionRetryGeneration", 0)
+                == ReadInt(issuedObservation, "executionRetryGeneration", 0);
+        }
+
+        private static void RecordLiveTestExecutionLease(Dictionary<string, object> run,
+            Dictionary<string, object> command, DateTimeOffset now)
+        {
+            if (!IsLiveTestExecutionEvidenceRun(run)) return;
+
+            string campaign = ReadString(run, "campaignId", "");
+            string instance = ReadString(run, "gameInstanceId", "");
+            var heartbeat = LoadLiveTestRuntime(campaign);
+            var issued = ReadDictionaryList(command, "issuedExecutionObservations");
+            if (IsFreshLiveTestRuntime(heartbeat)
+                && ReadString(heartbeat, "campaignId", "") == campaign
+                && ReadString(heartbeat, "gameInstanceId", "") == instance)
+            {
+                var evidence = ReadLiveTestExecutionIdentity(heartbeat);
+                if (evidence != null)
+                {
+                    evidence["leaseId"] = ReadString(command, "leaseId", "");
+                    evidence["campaignId"] = campaign;
+                    evidence["gameInstanceId"] = instance;
+                    evidence["runId"] = ReadString(run, "runId", "");
+                    evidence["commandId"] = ReadString(command, "commandId", "");
+                    evidence["observedUtc"] = now.ToString("o");
+                    evidence["executionRetryGeneration"] = ReadInt(command, "executionRetryGeneration", 0);
+                    issued.Add(evidence);
+                    int excess = issued.Count - LiveTestRetainedObservationLeases;
+                    if (excess > 0) issued.RemoveRange(0, excess);
+                    command["issuedExecutionObservations"] = issued;
+                }
+            }
+            command["executionObservationVersion"] = LiveTestExecutionObservationVersion;
+        }
+
+        private static bool MatchesLiveTestCommandTransport(Dictionary<string, object> run,
+            Dictionary<string, object> command, Dictionary<string, object> report)
+        {
+            string lease = ReadString(command, "leaseId", "");
+            string campaign = ReadString(run, "campaignId", "");
+            string instance = ReadString(run, "gameInstanceId", "");
+            string runId = ReadString(run, "runId", "");
+            string commandId = ReadString(command, "commandId", "");
+            return !string.IsNullOrWhiteSpace(lease)
+                && !string.IsNullOrWhiteSpace(campaign) && !string.IsNullOrWhiteSpace(instance)
+                && !string.IsNullOrWhiteSpace(runId) && !string.IsNullOrWhiteSpace(commandId)
+                && ReadString(report, "leaseId", "") == lease
+                && ReadString(report, "campaignId", "") == campaign
+                && ReadString(report, "gameInstanceId", "") == instance
+                && ReadString(report, "runId", "") == runId
+                && ReadString(report, "commandId", "") == commandId;
+        }
+
+        private static Dictionary<string, object> BindLiveTestExecutionObservation(Dictionary<string, object> run,
+            Dictionary<string, object> command, Dictionary<string, object> report)
+        {
+            var evidence = new Dictionary<string, object> { ["status"] = "missing" };
+            var observed = ReadDictionary(report, "executionObservation");
+            if (observed == null) return evidence;
+            if (!HasLiveTestExecutionVersion(observed))
+            {
+                evidence["status"] = "unsupported_version";
+                return evidence;
+            }
+            string activeLease = ReadString(command, "leaseId", "");
+            if (activeLease.Length == 0 || ReadString(report, "leaseId", "") != activeLease)
+            {
+                evidence["status"] = "stale_transport";
+                return evidence;
+            }
+
+            string campaign = ReadString(run, "campaignId", "");
+            string instance = ReadString(run, "gameInstanceId", "");
+            string runId = ReadString(run, "runId", "");
+            string commandId = ReadString(command, "commandId", "");
+            bool ScopeMatches(Dictionary<string, object> source) =>
+                ReadString(source, "campaignId", "") == campaign
+                && ReadString(source, "gameInstanceId", "") == instance
+                && ReadString(source, "runId", "") == runId
+                && ReadString(source, "commandId", "") == commandId;
+
+            if (new[] { campaign, instance, runId, commandId }.Any(string.IsNullOrWhiteSpace)
+                || !ScopeMatches(report) || !ScopeMatches(observed))
+            {
+                evidence["status"] = "scope_mismatch";
+                return evidence;
+            }
+
+            string executionLease = ReadString(observed, "executionLeaseId", "");
+            var original = ReadDictionaryList(command, "issuedExecutionObservations").Where(entry =>
+                ScopeMatches(entry) && ReadString(entry, "leaseId", "") == executionLease).Take(2).ToList();
+            if (executionLease.Length == 0 || original.Count != 1)
+            {
+                evidence["status"] = "unknown_original_lease";
+                return evidence;
+            }
+            if (!HasCurrentLiveTestExecutionRetry(command, original[0]))
+            {
+                evidence["status"] = "stale_execution_retry";
+                return evidence;
+            }
+            string observedProcess = ReadString(observed, "clientProcessInstanceId", "");
+            if (observedProcess.Length == 0 || observedProcess != ReadString(original[0], "clientProcessInstanceId", ""))
+            {
+                evidence["status"] = "process_mismatch";
+                return evidence;
+            }
+
+            // Compare these retained observations with reviewed artifacts before granting certification.
+            // A newer heartbeat or transport lease does not establish an older result's origin.
+            evidence["status"] = "pending_artifact_review";
+            evidence["executionObservation"] = original[0];
+            evidence["transportLeaseId"] = activeLease;
+            return evidence;
         }
 
         private static bool IsLiveTestCommandLeaseEligible(
@@ -646,6 +859,29 @@ namespace ReignBetaServer
                 if (run.Count == 0) return LiveTestError("Live interaction run was not found.");
                 Dictionary<string, object> command = ReadDictionaryList(run, "commands").FirstOrDefault(x => string.Equals(ReadString(x, "commandId", ""), commandId, StringComparison.OrdinalIgnoreCase));
                 if (command == null) return LiveTestError("Live interaction command was not found.");
+                bool observesExecution = IsLiveTestExecutionEvidenceRun(run);
+                Dictionary<string, object> observation = null;
+                if (observesExecution)
+                {
+                    // An old request must not mutate the active assignment or reopen a terminal result.
+                    if (!MatchesLiveTestCommandTransport(run, command, payload))
+                        return LiveTestError("The live interaction command transport lease or game scope changed.");
+                    string currentStatus = ReadString(command, "status", "");
+                    if (LiveTestTerminalCommandStates.Contains(currentStatus)
+                        || (currentStatus.Equals("needs_input", StringComparison.OrdinalIgnoreCase)
+                            && ReadString(command, "pauseReason", "").Equals("fatal_infrastructure_failure", StringComparison.OrdinalIgnoreCase)))
+                        return new Dictionary<string, object> { ["ok"] = true, ["idempotent"] = true, ["command"] = command };
+                    observation = BindLiveTestExecutionObservation(run, command, payload);
+                    if (ReadString(observation, "status", "") == "stale_execution_retry")
+                        return LiveTestError("The original execution belongs to a superseded provider retry.");
+                    if (!result)
+                    {
+                        var stamp = ReadDictionary(payload, "executionObservation");
+                        if (ReadString(observation, "status", "") != "pending_artifact_review"
+                            || ReadString(stamp, "executionLeaseId", "") != ReadString(command, "leaseId", ""))
+                            return LiveTestError("The current execution lease could not be observed. Refresh the heartbeat and retry.");
+                    }
+                }
                 if (result && LiveTestTerminalCommandStates.Contains(ReadString(command, "status", "")))
                     return new Dictionary<string, object> { ["ok"] = true, ["idempotent"] = true, ["command"] = command };
                 if (result && ReadString(command, "status", "").Equals("needs_input", StringComparison.OrdinalIgnoreCase)
@@ -665,6 +901,9 @@ namespace ReignBetaServer
                 command["updatedUtc"] = DateTimeOffset.UtcNow.ToString("o");
                 if (result)
                 {
+                    if (observesExecution)
+                        command["executionEvidence"] = observation;
+
                     command["result"] = fatalInfrastructureFailure
                         ? new Dictionary<string, object> { ["fatalInfrastructureFailure"] = true, ["error"] = DialogueService.LimitText(reportedError, 2000) }
                         : ReadDictionary(payload, "result") ?? new Dictionary<string, object>();
