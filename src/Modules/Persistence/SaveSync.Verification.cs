@@ -2054,6 +2054,174 @@ namespace ReignBetaServer
                     && recoveredState.Affinity == -13 && recoveredState.Cases == 1 && recoveredState.Reputations == 1
                     && CommittedCase(rollbackCase, rollbackTag, -3) && HistoryHead() == previousHead,
                     "The same typed request commits once when the constraint is removed. Repeating it does not duplicate the affinity movement or case.");
+
+                const string receiptCase = "versioned_case", receiptTag = "versioned_tag";
+                string preReceiptPoint = "arrest_pre_receipt_" + Guid.NewGuid().ToString("N");
+                string committedReceiptPoint = "arrest_committed_receipt_" + Guid.NewGuid().ToString("N");
+                Dictionary<string, object> Versioned(long revision, int delta, string caseId = receiptCase, string tag = receiptTag)
+                {
+                    var request = Request(caseId, tag, delta);
+                    request["arrestEffectVersion"] = 2;
+                    request["expectedMaterialRevision"] = revision;
+                    request["effectIntentId"] = revision.ToString(CultureInfo.InvariantCulture) + "_" + Guid.NewGuid().ToString("N");
+                    request["sharedActivityGeneration"] = Generation();
+                    request["chargeCategory"] = "espionage";
+                    request["severity"] = "serious";
+                    request["causeEstablished"] = true;
+                    request["evidenceStatus"] = "established_after_arrest";
+                    request["evidenceIds"] = "fixture_disclosed_evidence";
+                    return request;
+                }
+
+                Dictionary<string, object> ReceiptState(string caseId = receiptCase, string tag = receiptTag)
+                {
+                    using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                    return WorldSimulationStore.SelectArrestCaseEffects(connection, CaseKey(caseId, tag), includeReceipt: true).SingleOrDefault();
+                }
+
+                byte[] CleanBytes()
+                {
+                    MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", pointId));
+                    return File.ReadAllBytes(sidecar);
+                }
+
+                bool StillCleanBytes(byte[] bytes)
+                {
+                    lock (SaveSyncActiveStateLock)
+                    {
+                        var cached = ReadSaveSyncActiveStateLocked(campaign);
+                        return !cached.Dirty && cached.SavePointId == pointId && bytes.SequenceEqual(File.ReadAllBytes(sidecar));
+                    }
+                }
+
+                ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, preReceiptPoint);
+                var firstIntent = Versioned(0, -7);
+                var firstReceipt = Apply(Json.Deserialize<Dictionary<string, object>>(Json.Serialize(firstIntent)));
+                string committed = Json.Serialize(firstReceipt);
+                var firstState = State(receiptCase, receiptTag);
+                var firstStored = ReceiptState();
+                add("arrest_effect_v2_commit_has_exact_measured_receipt",
+                    ReadBool(firstReceipt, "ok", false) && ReadString(firstReceipt, "status", "") == "committed"
+                    && ReadInt(firstReceipt, "arrestEffectVersion", 0) == 2
+                    && ReadString(firstReceipt, "effectIntentId", "") == ReadString(firstIntent, "effectIntentId", "-")
+                    && ReadLong(firstReceipt, "materialRevision", -1) == 1
+                    && ReadLong(firstStored, "material_revision", -1) == 1 && ReadString(firstStored, "effect_receipt_json", "") == committed
+                    && ReadInt(firstReceipt, "appliedRelationshipDelta", int.MinValue) == -7
+                    && firstState.Affinity == -20 && CommittedCase(receiptCase, receiptTag, -7)
+                    && ReadBool(CampaignFileService.ReadAtomicallyReplacedJsonObject(sidecar), "dirty", false),
+                    "The exact successful measured response, revision, affinity and reputation commit together and dirty the active checkpoint.");
+                ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, committedReceiptPoint);
+
+                var cleanReplay = CleanBytes();
+                var changedMaterial = new Dictionary<string, object>(firstIntent) { ["worldDay"] = 18d };
+                var malformedVersion = new Dictionary<string, object>(firstIntent);
+                malformedVersion.Remove("arrestEffectVersion");
+                malformedVersion["ArrestEffectVersion"] = 2;
+                var changedRevision = new Dictionary<string, object>(firstIntent) { ["expectedMaterialRevision"] = 1 };
+                bool replayIsReadOnly = Json.Serialize(Apply(firstIntent)) == committed
+                    && ReadString(Apply(changedMaterial), "status", "") == "intent_conflict"
+                    && ReadString(Apply(Json.Deserialize<Dictionary<string, object>>(Json.Serialize(malformedVersion))), "status", "") == "invalid_effect_intent"
+                    && ReadString(Apply(changedRevision), "status", "") == "invalid_effect_intent";
+                add("arrest_effect_v2_replay_and_conflicts_are_read_only",
+                    replayIsReadOnly && State(receiptCase, receiptTag) == firstState
+                    && Json.Serialize(ReceiptState()) == Json.Serialize(firstStored) && StillCleanBytes(cleanReplay),
+                    "An exact replay returns the same committed object without rewriting the reputation or sidecar. Malformed or altered intents do not mutate.");
+
+                var secondIntent = Versioned(1, -9);
+                var secondReceipt = Apply(secondIntent);
+                var secondState = State(receiptCase, receiptTag);
+                var cleanTyped = CleanBytes();
+                var older = Apply(firstIntent);
+                add("arrest_effect_v2_newer_typed_effect_fences_older",
+                    ReadString(secondReceipt, "status", "") == "committed" && ReadLong(secondReceipt, "materialRevision", -1) == 2
+                    && ReadString(older, "status", "") == "stale_material" && ReadLong(older, "materialRevision", -1) == 2
+                    && secondState.Affinity == -22 && State(receiptCase, receiptTag) == secondState && StillCleanBytes(cleanTyped),
+                    "A previous committed intent cannot replay success or overwrite a later typed material revision.");
+
+                var legacyReplacement = Apply(Request(receiptCase, receiptTag, -4));
+                var legacyState = State(receiptCase, receiptTag);
+                var cleanLegacy = CleanBytes();
+                var beforeLegacyIntent = Apply(secondIntent);
+                var legacyReceiptRow = ReceiptState();
+                add("arrest_effect_v2_ordinary_and_generation_only_writes_fence_older",
+                    ReadBool(legacyReplacement, "ok", false) && !legacyReplacement.ContainsKey("arrestEffectVersion")
+                    && ReadString(beforeLegacyIntent, "status", "") == "stale_material" && ReadLong(beforeLegacyIntent, "materialRevision", -1) == 3
+                    && ReadString(legacyReceiptRow, "effect_intent_id", "<missing>") == ""
+                    && legacyState.Affinity == -17 && State(receiptCase, receiptTag) == legacyState && StillCleanBytes(cleanLegacy),
+                    "An ordinary writer updates the revision and clears the old receipt without exposing v2 fields on the legacy response.");
+
+                var ownedRescind = Request(receiptCase, receiptTag, 0);
+                ownedRescind["operation"] = "rescind";
+                ownedRescind["sharedActivityGeneration"] = Generation();
+                var revoked = Apply(ownedRescind);
+                var terminalState = State(receiptCase, receiptTag);
+                var cleanTerminal = CleanBytes();
+                var lateApply = Apply(secondIntent);
+                add("arrest_effect_v2_late_apply_cannot_revive_rescission",
+                    ReadBool(revoked, "ok", false) && !revoked.ContainsKey("arrestEffectVersion")
+                    && ReadString(lateApply, "status", "") == "terminal_rescinded" && ReadString(lateApply, "operation", "") == "apply"
+                    && ReadLong(lateApply, "materialRevision", -1) == 4 && terminalState.Affinity == -13
+                    && State(receiptCase, receiptTag) == terminalState && StillCleanBytes(cleanTerminal),
+                    "The generation-only rescission keeps its original shape and defeats a stale typed apply with an explicit terminal result.");
+
+                const string rejectedIntentCase = "failed_receipt_case", rejectedIntentTag = "failed_receipt_tag";
+                var rejectedIntent = Versioned(0, -12, rejectedIntentCase, rejectedIntentTag);
+                var beforeRejectedReceipt = State(rejectedIntentCase, rejectedIntentTag);
+                using (var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    ReignDatabase.ExecuteSql(connection, "ALTER TABLE arrest_case_effect_state ADD CONSTRAINT d23_reject_receipt CHECK (case_id <> 'failed_receipt_case' OR effect_intent_id = '') NOT VALID;");
+                    try
+                    {
+                        var denied = Apply(rejectedIntent);
+                        add("arrest_effect_v2_failed_receipt_rolls_back_effect",
+                            !ReadBool(denied, "ok", true) && ReadString(denied, "error", "").Contains("d23_reject_receipt", StringComparison.Ordinal)
+                            && State(rejectedIntentCase, rejectedIntentTag) == beforeRejectedReceipt
+                            && ReceiptState(rejectedIntentCase, rejectedIntentTag) == null,
+                            "Rejecting the versioned case-row receipt rolls back both prior effect writes and leaves no receipt.");
+                    }
+                    finally { ReignDatabase.ExecuteSql(connection, "ALTER TABLE arrest_case_effect_state DROP CONSTRAINT d23_reject_receipt;"); }
+                }
+
+                ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, committedReceiptPoint);
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign);
+                var postRestoreClean = CleanBytes();
+                var pendingAfterRestore = new Dictionary<string, object>(firstIntent) { ["sharedActivityGeneration"] = Generation() };
+                bool restoredReceipt = ReadString(Apply(firstIntent), "status", "") == "ownership_mismatch"
+                    && Json.Serialize(Apply(pendingAfterRestore)) == committed
+                    && State(receiptCase, receiptTag) == firstState && StillCleanBytes(postRestoreClean);
+                ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, preReceiptPoint);
+                DialogueService.AdvanceMemoryRestoreGeneration(campaign);
+                var pendingBeforeCommit = State(receiptCase, receiptTag);
+                var activeIntent = new Dictionary<string, object>(firstIntent) { ["sharedActivityGeneration"] = Generation() };
+                add("arrest_effect_v2_checkpoint_replays_only_under_current_owner",
+                    restoredReceipt && pendingBeforeCommit.Cases == 0 && pendingBeforeCommit.Reputations == 0 && pendingBeforeCommit.Affinity == -13
+                    && Json.Serialize(Apply(activeIntent)) == committed && State(receiptCase, receiptTag).Affinity == -20,
+                    "A restored committed schema replays the exact receipt only for its current owner. A restored pre-commit schema accepts the still-matching pending intent once.");
+
+                using (var olderSchema = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    ReignDatabase.ExecuteSql(olderSchema, @"ALTER TABLE arrest_case_effect_state
+DROP COLUMN effect_receipt_json,DROP COLUMN effect_intent_material,DROP COLUMN effect_intent_id,DROP COLUMN material_revision;");
+                    ReignDatabase.ExecuteSql(olderSchema, "UPDATE schema_meta SET value='5' WHERE key=$key;",
+                        TestDict("key", CampaignMigrationVersionKey));
+                }
+                var beforeMigration = State(receiptCase, receiptTag);
+                var cleanOld = CleanBytes();
+                var unavailable = Apply(activeIntent);
+                bool heldWithoutDdl;
+                using (var olderSchema = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                    heldWithoutDdl = !WorldSimulationStore.ArrestEffectReceiptSchemaReady(olderSchema);
+                bool versionedDidNotUpgrade = ReadString(unavailable, "status", "") == "arrest_effect_schema_unavailable"
+                    && beforeMigration == State(receiptCase, receiptTag) && StillCleanBytes(cleanOld) && heldWithoutDdl;
+                var oldOwner = Request(receiptCase, receiptTag, -7);
+                oldOwner["sharedActivityGeneration"] = Generation();
+                var stillLegacy = Apply(oldOwner);
+                using var migrated = ReignDatabase.OpenCampaignConnection(campaign);
+                add("arrest_effect_v2_registered_old_schema_requires_normal_migration",
+                    versionedDidNotUpgrade && ReadBool(stillLegacy, "ok", false) && !stillLegacy.ContainsKey("arrestEffectVersion")
+                    && WorldSimulationStore.ArrestEffectReceiptSchemaReady(migrated)
+                    && ReadLong(ReceiptState(), "material_revision", -1) == 0 && CommittedCase(receiptCase, receiptTag, -7),
+                    "A registered v5 schema keeps its owner-only compatibility and stays unmodified by v2 admission. The normal campaign open migrates without losing existing material.");
             }
             finally
             {

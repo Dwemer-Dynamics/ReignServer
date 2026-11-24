@@ -16,6 +16,7 @@ namespace ReignBetaServer
         internal const int CorrespondenceArrivalHistoryMigrationVersion = 3;
         private const int ForeignAgentOccurrenceMigrationVersion = 4;
         private const int ForeignAgentDisruptionReceiptMigrationVersion = 5;
+        internal const int ArrestEffectReceiptMigrationVersion = 6;
 
         private sealed class CampaignSchemaMigration
         {
@@ -47,6 +48,8 @@ namespace ReignBetaServer
                 "foreign_agent_occurrence", ApplyForeignAgentOccurrenceDdl),
             new CampaignSchemaMigration(ForeignAgentDisruptionReceiptMigrationVersion,
                 "foreign_agent_disruption_receipts", ApplyForeignAgentDisruptionReceiptDdl),
+            new CampaignSchemaMigration(ArrestEffectReceiptMigrationVersion,
+                "arrest_effect_receipts", WorldSimulationStore.ApplyArrestEffectReceiptSchemaDdl),
         };
 
         internal static int LatestCampaignMigrationVersion =>

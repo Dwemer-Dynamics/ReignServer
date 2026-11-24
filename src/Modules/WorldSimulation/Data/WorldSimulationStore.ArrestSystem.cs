@@ -22,6 +22,12 @@ AND agent_hero_id=$accused AND status='exposed';", parameters);
 
         internal static void EnsureArrestCaseEffects(ReignDbConnection connection)
         {
+            if (PersistenceService.IsCampaignMigrationReady(connection, PersistenceService.ArrestEffectReceiptMigrationVersion)) return;
+            CreateArrestCaseEffectState(connection);
+        }
+
+        private static void CreateArrestCaseEffectState(ReignDbConnection connection)
+        {
             ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS arrest_case_effect_state (
 campaign_id TEXT NOT NULL, timeline_id TEXT NOT NULL, case_id TEXT NOT NULL,
 accused_id TEXT NOT NULL, player_id TEXT NOT NULL, tag_id TEXT NOT NULL, rescinded BOOLEAN NOT NULL,
@@ -29,10 +35,29 @@ PRIMARY KEY (campaign_id, timeline_id, case_id),
 UNIQUE (campaign_id, timeline_id, accused_id, tag_id));");
         }
 
-        internal static List<Dictionary<string, object>> SelectArrestCaseEffects(ReignDbConnection connection,
-            Dictionary<string, object> parameters)
+        internal static void ApplyArrestEffectReceiptSchemaDdl(ReignDbConnection connection)
         {
-            return ReignDatabase.QuerySql(connection, @"SELECT case_id,accused_id,player_id,tag_id,rescinded
+            CreateArrestCaseEffectState(connection);
+            ReignDatabase.ExecuteSql(connection, @"ALTER TABLE arrest_case_effect_state
+ADD COLUMN IF NOT EXISTS material_revision BIGINT NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS effect_intent_id TEXT NOT NULL DEFAULT '',
+ADD COLUMN IF NOT EXISTS effect_intent_material TEXT NOT NULL DEFAULT '',
+ADD COLUMN IF NOT EXISTS effect_receipt_json TEXT NOT NULL DEFAULT '{}';");
+        }
+
+        internal static bool ArrestEffectReceiptSchemaReady(ReignDbConnection connection)
+        {
+            var columns = ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count FROM information_schema.columns
+WHERE table_schema=current_schema() AND table_name='arrest_case_effect_state'
+AND column_name IN ('material_revision','effect_intent_id','effect_intent_material','effect_receipt_json');");
+            return ReadInt(columns[0], "count", 0) == 4;
+        }
+
+        internal static List<Dictionary<string, object>> SelectArrestCaseEffects(ReignDbConnection connection,
+            Dictionary<string, object> parameters, bool includeReceipt = false)
+        {
+            string receiptColumns = includeReceipt ? ",material_revision,effect_intent_id,effect_intent_material,effect_receipt_json" : "";
+            return ReignDatabase.QuerySql(connection, @"SELECT case_id,accused_id,player_id,tag_id,rescinded" + receiptColumns + @"
 FROM arrest_case_effect_state WHERE campaign_id=$campaign AND timeline_id=$timeline
 AND (case_id=$case OR (accused_id=$subject AND tag_id=$tag));", parameters);
         }
@@ -44,6 +69,18 @@ AND (case_id=$case OR (accused_id=$subject AND tag_id=$tag));", parameters);
 VALUES($campaign,$timeline,$case,$subject,$player,$tag,$rescinded)
 ON CONFLICT (campaign_id,timeline_id,case_id) DO UPDATE
 SET rescinded=arrest_case_effect_state.rescinded OR excluded.rescinded;", parameters);
+        }
+
+        internal static void UpsertVersionedArrestCaseEffect(ReignDbConnection connection, Dictionary<string, object> parameters)
+        {
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO arrest_case_effect_state
+(campaign_id,timeline_id,case_id,accused_id,player_id,tag_id,rescinded,material_revision,
+ effect_intent_id,effect_intent_material,effect_receipt_json)
+VALUES($campaign,$timeline,$case,$subject,$player,$tag,$rescinded,$revision,$intent,$material,$receipt)
+ON CONFLICT (campaign_id,timeline_id,case_id) DO UPDATE
+SET rescinded=arrest_case_effect_state.rescinded OR excluded.rescinded,
+material_revision=excluded.material_revision,effect_intent_id=excluded.effect_intent_id,
+effect_intent_material=excluded.effect_intent_material,effect_receipt_json=excluded.effect_receipt_json;", parameters);
         }
 
         internal static List<Dictionary<string, object>> SelectCharacterReputations(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
