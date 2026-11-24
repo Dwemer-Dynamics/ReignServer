@@ -2323,11 +2323,11 @@ FROM world_history_ingest_state WHERE client_id='bannerlord' AND timeline_id=$ti
                     UploadStoresEvent(nextEventId, 4L) && CursorsAt(4L, nextEventId),
                     "A higher sequence advances the sequence and event ID together in both cursors.");
 
-                using (var legacy = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                using (var legacyCursorConnection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
                 {
-                    ReignDatabase.ExecuteSql(legacy, "UPDATE world_history_timelines SET head_event_id='' WHERE timeline_id=$timeline;",
+                    ReignDatabase.ExecuteSql(legacyCursorConnection, "UPDATE world_history_timelines SET head_event_id='' WHERE timeline_id=$timeline;",
                         TestDict("timeline", timeline));
-                    ReignDatabase.ExecuteSql(legacy, @"UPDATE world_history_ingest_state SET last_event_id=''
+                    ReignDatabase.ExecuteSql(legacyCursorConnection, @"UPDATE world_history_ingest_state SET last_event_id=''
 WHERE client_id='bannerlord' AND timeline_id=$timeline;", TestDict("timeline", timeline));
                 }
                 const string legacyEventId = "history_proof_legacy_fill";
