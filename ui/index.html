@@ -2118,13 +2118,14 @@
       document.getElementById('characterRosterList').innerHTML=rows.map(x=>`<button class='characterRosterItem ${x.heroStringId===characterEditorState.heroId?'active':''}' onclick='loadCharacterEditor("${editorEscape(x.heroStringId)}")'><span class='characterRosterName'>${editorEscape(x.name)}</span><span class='characterRosterMeta'>${editorEscape(x.title||x.occupation||'')}</span><span class='characterRosterMeta'>${editorEscape(x.clanId||'No clan')} | ${editorEscape(x.kingdomId||'No kingdom')}</span>${x.pendingNativeChanges?`<span class='characterRosterMeta'>${x.pendingNativeChanges} pending change(s)</span>`:''}</button>`).join('')||'<div class="hint">No matching characters.</div>';
     }
 
+    function characterEditorResultKind(result){return !result.ok||result.reconciliationStatus==='failed'||result.historyProjectionIssues?.length||result.recordEditIssues?.length?'error':'good';}
     async function loadCharacterEditor(heroId, force=false, saveResult=null) {
       if(characterEditorState.dirty.size&&!force&&!confirm('Discard unsaved character changes?'))return;
       editorStatus('Loading complete character record...'); const campaignId=editorCampaign();
       const j=await (await fetch('/character-editor/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId,heroStringId:heroId})})).json();
       if(!j.ok){editorStatus(j.error||'Character load failed.','error');return;}characterEditorState.heroId=heroId;characterEditorState.data=j;characterEditorState.original=editorClone(j);characterEditorState.dirty.clear();
       document.getElementById('characterEditorEmpty').style.display='none';document.getElementById('characterEditorWorkspace').style.display='block';renderCharacterRoster();renderCharacterEditor();
-      if(saveResult)editorStatus(saveResult.message,saveResult.historyProjectionIssues?.length?'error':'good');
+      if(saveResult)editorStatus(saveResult.message,characterEditorResultKind(saveResult));
       else editorStatus('Character loaded.');
     }
 
@@ -2256,23 +2257,62 @@
       }
       return edits;
     }
+    function editorRecordChanges(original,draft){
+      const keys={worldEvents:'event_id',knowledgeReceipts:'receipt_id',conversationSessions:'session_id',
+        conversationTurns:'turn_id',beliefs:'belief_id',comprehension:'comprehension_id',obligations:'obligation_id',
+        summaries:'summary_id',memories:'memory_id',letters:'letter_id',conceptions:'conception_id',parentage:'child_id'};
+      const records=Object.create(null),letterStatusEdits=[];
+      const statusBasis=original?.letterStatusEditBasis;
+      function uniqueById(rows,key){
+        const index=new Map();
+        for(const row of rows){
+          const id=row[key];
+          index.set(id,index.has(id)?null:row);
+        }
+        return index;
+      }
+      for(const [group,key] of Object.entries(keys)){
+        const previous=uniqueById(original?.records?.[group]||[],key);
+        const latest=uniqueById(draft?.records?.[group]||[],key);
+        for(const [id,row] of latest){
+          const before=previous.get(id);
+          if(!row||!before||id==null||id==='')continue;
+          const changes=Object.create(null);
+          changes[key]=id;
+          for(const column of Object.keys(row)){
+            if(column===key||!Object.prototype.hasOwnProperty.call(before,column)
+                ||JSON.stringify(row[column])===JSON.stringify(before[column]))continue;
+            if(group==='letters'&&column==='status'&&statusBasis){
+              if(!Object.prototype.hasOwnProperty.call(statusBasis,id)||typeof before.status!=='string'||typeof row.status!=='string')
+                throw new Error('This letter status cannot be edited safely. Reload the Character Editor.');
+              letterStatusEdits.push({id,expected:before.status,value:row.status,basis:statusBasis[id]});
+            }else changes[column]=row[column];
+          }
+          if(Object.keys(changes).length>1)(records[group]??=[]).push(changes);
+        }
+      }
+      return {records,letterStatusEdits};
+    }
     async function saveCharacterSection(all=false){if(!characterEditorState.data)return;const section=all?'all':characterEditorState.section,profileChanges=editorProfileChanges(),nativeChanges=nativeProfileChanges(profileChanges),dangerKeys=['isalive','ispregnant','spouseid','fatherid','motherid','clanid','kingdomid'];const dangerous=Object.keys(nativeChanges).some(k=>dangerKeys.includes(k.toLowerCase()));let confirmation='';if(dangerous){const name=characterEditorState.data.documents.profile?.name||characterEditorState.heroId;if(!confirm('These changes affect family, political, pregnancy, or life-state data. Review dependencies before continuing.'))return;confirmation=prompt(`Type ${name} to confirm dangerous native changes.`)||'';if(confirmation!==name){editorStatus('Confirmation did not match. Nothing was saved.','error');return;}}
       const {data,original,dirty,heroId}=characterEditorState;
-      const payload={campaignId:editorCampaign(),heroStringId:heroId,revisionToken:data.revisionToken,section,description:`Character Editor ${section} save`,documents:data.documents,records:data.records,nativeChanges,dangerous,confirmation};
+      const payload={campaignId:editorCampaign(),heroStringId:heroId,revisionToken:data.revisionToken,section,description:`Character Editor ${section} save`,documents:data.documents,nativeChanges,dangerous,confirmation};
       const basis=original?.profileEditBasis;
       if(basis)payload.profileEdit={basis,fields:profileChanges};
       try{
+        const recordChanges=editorRecordChanges(original,data);
+        if(Object.keys(recordChanges.records).length)payload.records=recordChanges.records;
+        if(recordChanges.letterStatusEdits.length)payload.letterStatusEdits=recordChanges.letterStatusEdits;
         if(original?.historyEditBasis)payload.historyEdits=dirty.has('history')?editorHistoryEdits(original,data):[];
         else if(dirty.has('history'))payload.history=data.history;
       }catch(error){editorStatus(error.message,'error');return;}
       editorStatus('Saving and rebuilding character projections...');
       const j=await (await fetch('/character-editor/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
       if(j.conflict||!j.ok){editorStatus(j.error||'Save failed.','error');return;}
-      editorStatus(j.message,j.historyProjectionIssues?.length?'error':'good');
+      editorStatus(j.message,characterEditorResultKind(j));
       data.revisionToken=j.revisionToken;dirty.clear();await loadCharacterEditor(heroId,true,j);}
     function saveAllCharacterSections(){return saveCharacterSection(true);}
     function revertCharacterDraft(){if(!characterEditorState.original)return;characterEditorState.data=editorClone(characterEditorState.original);characterEditorState.dirty.clear();renderCharacterEditor();editorStatus('Unsaved changes reverted.');}
-    async function rollbackCharacterRevision(revisionId){if(!confirm('Restore this revision? A new rollback revision will preserve the current state.'))return;const j=await (await fetch('/character-editor/rollback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionId})})).json();editorStatus(j.message||j.error,j.ok?'good':'error');if(j.ok)await loadCharacterEditor(characterEditorState.heroId,true,j);}
+    async function rollbackCharacterRevision(revisionId){if(!confirm('Restore this revision? A new rollback revision will preserve the current state.'))return;const j=await (await fetch('/character-editor/rollback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionId})})).json();editorStatus(j.message||j.error,characterEditorResultKind(j));if(j.ok)await loadCharacterEditor(characterEditorState.heroId,true,j);}
 
     async function uploadCharacterPortrait(file){if(!file)return;const reader=new FileReader();reader.onload=async()=>{editorStatus('Uploading portrait...');const j=await (await fetch('/character-editor/portrait/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,fileName:file.name,dataUrl:reader.result})})).json();if(j.ok){characterEditorState.data.portraits=j.portraits;renderCharacterEditorPanel();editorStatus('Portrait uploaded. Select it to make it active.','good');}else editorStatus(j.error,'error');};reader.readAsDataURL(file);}
     async function selectCharacterPortrait(variant){const j=await (await fetch('/character-editor/portrait/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,variant})})).json();if(j.ok){editorStatus('Active portrait updated. The game cache will refresh on the next savegame load.','good');await loadCharacterEditor(characterEditorState.heroId,true);}else editorStatus(j.error,'error');}

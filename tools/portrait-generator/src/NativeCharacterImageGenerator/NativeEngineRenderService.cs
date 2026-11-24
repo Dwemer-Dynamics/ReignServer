@@ -210,8 +210,10 @@ internal sealed class NativeEngineRenderService(string gameRoot)
         IProgress<NativeEngineBatchProgress>? progress,
         CancellationToken cancellationToken,
         IReadOnlyList<NativeCharacterDefinition>? courtAppearanceCatalog = null,
-        NativeEngineFrameContract? frameContract = null)
+        NativeEngineFrameContract? frameContract = null,
+        OwnedPortraitRenderJob? ownedJob = null)
     {
+        ownedJob?.ThrowIfExpired();
         if (characters.Count == 0)
         {
             throw new ArgumentException("At least one character is required for a native source batch.", nameof(characters));
@@ -320,7 +322,7 @@ internal sealed class NativeEngineRenderService(string gameRoot)
             characters.Count,
             string.Empty,
             "Starting one persistent TaleWorlds engine session for the full source build…"));
-        using var process = Process.Start(startInfo)
+        using var process = (ownedJob is null ? Process.Start(startInfo) : ownedJob.Start(startInfo))
             ?? throw new InvalidOperationException("The native portrait batch worker could not be started.");
         var lastProgressKey = string.Empty;
         var stopwatch = Stopwatch.StartNew();
@@ -328,6 +330,7 @@ internal sealed class NativeEngineRenderService(string gameRoot)
         {
             while (stopwatch.Elapsed < TimeSpan.FromHours(12))
             {
+                ownedJob?.ThrowIfExpired();
                 cancellationToken.ThrowIfCancellationRequested();
                 var status = await TryReadBatchStatus(batchStatusPath, cancellationToken).ConfigureAwait(false);
                 if (status is not null)
@@ -404,7 +407,12 @@ internal sealed class NativeEngineRenderService(string gameRoot)
         }
         catch (OperationCanceledException)
         {
-            if (!process.HasExited)
+            if (ownedJob is not null)
+            {
+                if (!ownedJob.CloseAndConfirm())
+                    throw new InvalidOperationException("Native portrait job closure could not be verified.");
+            }
+            else if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -421,7 +429,12 @@ internal sealed class NativeEngineRenderService(string gameRoot)
         }
         finally
         {
-            if (!process.HasExited)
+            if (ownedJob is not null)
+            {
+                if (!ownedJob.CloseAndConfirm())
+                    throw new InvalidOperationException("Native portrait job closure could not be verified.");
+            }
+            else if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);

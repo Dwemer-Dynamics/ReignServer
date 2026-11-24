@@ -204,6 +204,7 @@ namespace ReignBetaServer
                             ["campaign"] = activationCampaign, ["timeline"] = activationTimeline, ["agent"] = activationAgent
                         });
                     // Recreate a pre-v4 fixture schema around the existing assignment.
+                    ReignDatabase.ExecuteSql(connection, "DROP TABLE foreign_agent_disruption_receipts;");
                     ReignDatabase.ExecuteSql(connection, "ALTER TABLE foreign_agent_assignments DROP COLUMN assignment_id;");
                     ReignDatabase.ExecuteSql(connection, "UPDATE schema_meta SET value=$value WHERE key=$key;",
                         new Dictionary<string, object>
@@ -324,10 +325,14 @@ namespace ReignBetaServer
                             ["timeline"] = activationTimeline, ["agent"] = activationAgent
                         });
                 }
-                Dictionary<string, object> controlledTick = SpymasterAgentsTickApi(new Dictionary<string, object>
+                string generation;
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
+                    generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
+                var controlledPayload = new Dictionary<string, object>
                 {
                     ["campaignId"] = activationCampaign, ["timelineId"] = activationTimeline,
                     ["worldDay"] = 14d, ["playerKingdomId"] = "player_kingdom", ["playerRulerId"] = "player_ruler",
+                    ["restoreGeneration"] = generation,
                     ["candidates"] = new List<object>(),
                     ["enemyKingdoms"] = new List<object>
                     {
@@ -338,7 +343,38 @@ namespace ReignBetaServer
                         ["confirmation"] = "force one Reign Spymaster foreign-agent action on disposable save",
                         ["runId"] = "self-test", ["agentHeroId"] = activationAgent, ["unitRoll"] = 0d
                     }
-                });
+                };
+                var disruptionScope = new Dictionary<string, object>
+                {
+                    ["campaign"] = activationCampaign, ["timeline"] = activationTimeline
+                };
+                bool schedulingRejected = false;
+                List<Dictionary<string, object>> cancelledReceipts;
+                Dictionary<string, object> cancelledAssignment;
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
+                    SpymasterSelfTestStore.SetDisruptionScheduleFailure(connection, true);
+                try
+                {
+                    SpymasterAgentsTickForClientApi(controlledPayload);
+                }
+                catch (Npgsql.PostgresException ex) when (ex.SqlState == Npgsql.PostgresErrorCodes.CheckViolation
+                    && ex.ConstraintName == "foreign_agent_disruption_fixture_schedule")
+                {
+                    schedulingRejected = true;
+                }
+                finally
+                {
+                    using ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign);
+                    SpymasterSelfTestStore.SetDisruptionScheduleFailure(connection, false);
+                    cancelledReceipts = SpymasterSelfTestStore.ReadDisruptionReceipts(connection, disruptionScope);
+                    cancelledAssignment = SpymasterStore.SelectForeignAgentAssignments5(connection, disruptionScope).Single();
+                }
+                add("agent_disruption_receipt_rolls_back_with_schedule",
+                    schedulingRejected && cancelledReceipts.Count == 0
+                    && ReadDouble(cancelledAssignment, "next_action_day", -1d) == 13.75d,
+                    "If the production scheduling write fails, the preceding issuance insert rolls back and the action stays due.", null);
+
+                Dictionary<string, object> controlledTick = SpymasterAgentsTickForClientApi(controlledPayload);
                 Dictionary<string, object> controlledReceipt = ReadDictionary(controlledTick, "controlledAgentAction");
                 add("agent_action_exact_one_shot_control",
                     ReadBool(controlledReceipt, "consumed", false)
@@ -351,9 +387,36 @@ namespace ReignBetaServer
 
                 var initiallyActive = ReadDictionaryList(controlledTick, "agents").Single();
                 string occurrence = ReadString(initiallyActive, "assignmentId", "");
-                string generation;
+                var issuedAction = ReadDictionaryList(controlledTick, "actions").Single();
+                // Model losing the first reply by issuing the same tick with a fresh body.
+                var retryPayload = new Dictionary<string, object>(controlledPayload);
+                retryPayload.Remove("_controlledAgentActionReceipt");
+                var retried = SpymasterAgentsTickForClientApi(retryPayload);
+                var stale = SpymasterAgentsTickForClientApi(new Dictionary<string, object>(retryPayload)
+                    { ["restoreGeneration"] = generation + "_stale" });
+                List<Dictionary<string, object>> issuedReceipts;
+                Dictionary<string, object> advancedAssignment;
                 using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
-                    generation = ReadString(DialogueService.ReadMemoryPrecisionState(connection), "restore_generation", "");
+                {
+                    issuedReceipts = SpymasterSelfTestStore.ReadDisruptionReceipts(connection, disruptionScope);
+                    advancedAssignment = SpymasterStore.SelectForeignAgentAssignments5(connection, disruptionScope).Single();
+                }
+                var issuance = issuedReceipts.SingleOrDefault();
+                add("agent_disruption_receipt_binds_original_window_and_payload",
+                    ReadString(issuance, "timeline_id", "") == activationTimeline
+                    && ReadString(issuance, "restore_generation", "<missing>") == generation
+                    && ReadString(issuance, "action_id", "") == ReadString(issuedAction, "actionId", "")
+                    && ReadString(issuance, "assignment_id", "") == occurrence
+                    && ReadDouble(issuance, "scheduled_due_day", -1d) == 13.75d
+                    && ReadDouble(issuance, "issued_day", -1d) == 14d
+                    && ReadDouble(issuance, "expires_day", -1d) == 14f + (float)ReadDouble(issuedAction, "durationDays", -1d)
+                    && ReadString(issuance, "action_json", "") == Json.Serialize(issuedAction)
+                    && ReadDouble(advancedAssignment, "next_action_day", -1d) > 14d,
+                    "One immutable receipt stores the typed action, assignment, generation and native expiry before advancing the schedule.", issuance);
+                add("agent_disruption_retry_keeps_receipt_without_redelivery",
+                    ReadBool(retried, "ok", false) && ReadDictionaryList(retried, "actions").Count == 0
+                    && ReadString(stale, "error", "") == "assignment_scope_changed" && issuedReceipts.Count == 1,
+                    "Losing a reply leaves durable issuance evidence but does not redeliver on retry or accept a stale generation.", null);
                 var exposure = new Dictionary<string, object>
                 {
                     ["campaignId"] = activationCampaign, ["timelineId"] = activationTimeline,

@@ -29,53 +29,40 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "default");
-            string timelineId = ReadString(payload, "timelineId", "main");
+            string campaignId = ReadString(payload, "campaignId", "");
+            string timelineId = ReadString(payload, "timelineId", "");
+            string chargeCategory = ReadString(payload, "chargeCategory", "");
             string accusedId = ReadString(payload, "accusedHeroId", "").Trim();
             if (accusedId.Length == 0)
                 return new Dictionary<string, object>
                 {
                     ["ok"] = false, ["error"] = "accusedHeroId is required."
                 };
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            List<string> evidenceIds = new List<string>();
+            // A documented exposure establishes espionage. World History participates in
+            // other game systems, but its generic roles and flags do not establish a charge.
+            if (chargeCategory == "espionage" && !string.IsNullOrWhiteSpace(campaignId)
+                && !string.IsNullOrWhiteSpace(timelineId))
             {
-                EnsureWorldHistorySchema(connection);
-                List<string> evidenceIds = new List<string>();
+                using var connection = ReignDatabase.OpenCampaignConnection(campaignId);
                 if (TableExists(connection, "foreign_agent_assignments"))
                 {
-                    evidenceIds.AddRange(WorldSimulationStore.SelectForeignAgentAssignments(connection, new Dictionary<string, object>
+                    evidenceIds = WorldSimulationStore.SelectExposedForeignAgentArrestEvidence(connection,
+                        new Dictionary<string, object>
                         {
-                            ["campaign"] = campaignId, ["timeline"] = timelineId,
-                            ["accused"] = accusedId
-                        }).Select(row => "foreign_agent:" + accusedId + ":"
-                            + ReadString(row, "sponsor_kingdom_id", "unknown")));
+                            ["campaign"] = campaignId, ["timeline"] = timelineId, ["accused"] = accusedId
+                        }).Select(row => ArrestExposedAgentEvidenceId(row, accusedId))
+                        .Where(id => id != null).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 }
-                List<Dictionary<string, object>> rows = WorldSimulationStore.SelectWorldHistoryEvents(connection, new Dictionary<string, object>
-                {
-                    ["timeline"] = timelineId, ["accused"] = accusedId
-                });
-                foreach (Dictionary<string, object> row in rows)
-                {
-                    string eventType = ReadString(row, "event_type", "").ToLowerInvariant();
-                    Dictionary<string, object> evidence = TryParseJsonObject(
-                        ReadString(row, "payload_json", "{}"));
-                    // Rumors, allegations, and ordinary social outcomes can never
-                    // bootstrap legal cause. A history record must carry an exact
-                    // authoritative type or an explicit witnessed/attributed flag.
-                    if (ArrestHistoryEvidenceQualifies(eventType, evidence, accusedId))
-                        evidenceIds.Add("world_history:" + ReadString(row, "event_id", ""));
-                }
-                evidenceIds = evidenceIds.Where(id => !string.IsNullOrWhiteSpace(id))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                return new Dictionary<string, object>
-                {
-                    ["ok"] = true, ["accusedHeroId"] = accusedId,
-                    ["causeEstablished"] = evidenceIds.Count > 0,
-                    ["evidenceStatus"] = evidenceIds.Count > 0 ? "established" : "unsupported",
-                    ["evidenceIds"] = evidenceIds,
-                    ["hiddenAgentInformationRevealed"] = false
-                };
             }
+            return new Dictionary<string, object>
+            {
+                ["ok"] = true, ["accusedHeroId"] = accusedId,
+                ["causeEstablished"] = evidenceIds.Count > 0,
+                ["evidenceStatus"] = evidenceIds.Count > 0 ? "established" : "unsupported",
+                ["evidenceIds"] = evidenceIds,
+                ["hiddenAgentInformationRevealed"] = false
+            };
         }
 
         internal static Dictionary<string, object> ArrestCaseApplyApi(
@@ -108,47 +95,120 @@ namespace ReignBetaServer
             int reputationValue = Clamp(ReadInt(payload, "reputationValue", 0), -100, 100);
             string description = DialogueService.LimitText(ReadString(payload, "description", ""), 1000);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            using (EnterWorldHistoryTimelineScope(campaignId))
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 ReputationService.EnsureSocialReputationSchema(connection);
                 RelationshipsService.EnsureMbtiRelationshipSchema(connection);
                 RelationshipsService.EnsureRelationshipDirectorSchema(connection);
+                WorldSimulationStore.EnsureArrestCaseEffects(connection);
+                // ReignDatabase's PostgreSQL BEGIN takes the campaign-schema mutation lock.
                 WorldSimulationStore.Begin(connection);
                 try
                 {
-                    Dictionary<string, object> existing = WorldSimulationStore.SelectCharacterReputations(connection, new Dictionary<string, object>
-                        {
-                            ["campaign"] = campaignId, ["timeline"] = timelineId,
-                            ["subject"] = accusedId, ["tag"] = tagId
-                        }).FirstOrDefault();
+                    string activeTimeline = TableExists(connection, "world_history_timelines")
+                        ? ActiveWorldHistoryTimeline(connection) : "main";
+                    if (!string.Equals(activeTimeline, timelineId, StringComparison.Ordinal))
+                        throw new InvalidOperationException("The arrest effect does not belong to the active timeline.");
+
+                    Dictionary<string, object> key = new Dictionary<string, object>
+                    {
+                        ["campaign"] = campaignId, ["timeline"] = timelineId, ["case"] = caseId,
+                        ["subject"] = accusedId, ["player"] = playerId, ["tag"] = tagId
+                    };
+                    var states = WorldSimulationStore.SelectArrestCaseEffects(connection, key);
+                    Dictionary<string, object> existing =
+                        WorldSimulationStore.SelectCharacterReputations(connection, key).FirstOrDefault();
                     Dictionary<string, object> priorSnapshot = TryParseJsonObject(
                         ReadString(existing, "snapshot_json", "{}"));
-                    int priorDelta = ReadInt(priorSnapshot,
-                        "arrestAppliedRelationshipDelta", 0);
-                    int appliedDelta = priorDelta;
-                    if (operation == "apply")
+                    if (states.Any(state => ReadString(state, "case_id", "") != caseId
+                            || ReadString(state, "accused_id", "") != accusedId
+                            || ReadString(state, "player_id", "") != playerId
+                            || ReadString(state, "tag_id", "") != tagId)
+                        || existing != null && (ReadString(existing, "archetype_id", "") != "arrest_accusation"
+                            || ReadString(priorSnapshot, "arrestCaseId", "") != caseId
+                            || ReadString(priorSnapshot, "accusedHeroId", "") != accusedId
+                            || ReadString(priorSnapshot, "accuserHeroId", "") != playerId)
+                        || states.Count == 0 && WorldSimulationStore.SelectOtherArrestCaseReputations(connection, key).Any(row =>
+                            ReadString(TryParseJsonObject(ReadString(row, "snapshot_json", "")), "arrestCaseId", "") == caseId))
                     {
-                        int correction = ArrestRelationshipCorrection(operation,
-                            desiredDelta, priorDelta);
-                        if (correction != 0)
+                        WorldSimulationStore.Rollback(connection);
+                        return new Dictionary<string, object>
                         {
-                            string pairKey = RelationshipsService.AmbientPairKey(accusedId, playerId);
-                            string heroA = pairKey.StartsWith(accusedId + "|",
-                                StringComparison.OrdinalIgnoreCase) ? accusedId : playerId;
-                            string heroB = string.Equals(heroA, accusedId,
-                                StringComparison.OrdinalIgnoreCase) ? playerId : accusedId;
-                            RelationshipsService.EnsurePoliticalRelationshipPair(connection, campaignId,
-                                timelineId, pairKey, heroA, heroB, worldDay);
-                            Dictionary<string, object> pair =
-                                RelationshipsService.ApplyAtomicDirectionalRelationshipDelta(connection,
-                                    campaignId, accusedId, playerId, correction,
-                                    worldDay, "arrest_case:" + caseId, timelineId);
-                            if (pair == null)
-                                throw new InvalidOperationException(
-                                    "The accused-to-player directional relationship could not be updated.");
-                            appliedDelta = desiredDelta;
-                        }
+                            ["ok"] = false, ["caseId"] = caseId,
+                            ["error"] = "The arrest case and reputation identities do not match."
+                        };
+                    }
 
+                    bool recordedRescission = ReadBool(states.FirstOrDefault(), "rescinded", false);
+                    bool legacyRescission = ReadString(existing, "status", "") == "rescinded_by_accuser";
+                    bool terminal = recordedRescission || legacyRescission;
+                    bool rescind = operation == "rescind";
+                    if (terminal && !rescind)
+                    {
+                        WorldSimulationStore.Rollback(connection);
+                        return new Dictionary<string, object>
+                        {
+                            ["ok"] = false, ["caseId"] = caseId, ["reputationTagId"] = tagId,
+                            ["error"] = "The arrest accusation has already been rescinded."
+                        };
+                    }
+                    // Older rows retained the nominal policy cell, even when the affinity clamp
+                    // applied a different amount. Never treat that cell as a measured effect.
+                    bool measured = ReadString(priorSnapshot, "arrestRelationshipMeasurement", "") == "directional-affinity-v1";
+                    int requested = measured ? ReadInt(priorSnapshot, "arrestRequestedRelationshipDelta", int.MinValue) : 0;
+                    int applied = measured ? ReadInt(priorSnapshot, "arrestAppliedRelationshipDelta", int.MinValue) : 0;
+                    if (requested < -100 || requested > 100 || applied < -100 || applied > 100)
+                        throw new InvalidOperationException("The measured arrest relationship effect is invalid.");
+                    bool legacyUnverified = existing != null && !measured;
+                    if ((recordedRescission && existing != null && !legacyRescission)
+                        || (!recordedRescission && states.Count != 0 && existing == null))
+                    {
+                        WorldSimulationStore.Rollback(connection);
+                        return new Dictionary<string, object>
+                        {
+                            ["ok"] = false, ["caseId"] = caseId,
+                            ["error"] = "The recorded arrest case has an inconsistent reputation state."
+                        };
+                    }
+                    if (recordedRescission)
+                    {
+                        WorldSimulationStore.Commit(connection);
+                        return ArrestEffectAcknowledgement(operation, caseId, tagId,
+                            legacyUnverified ? null : applied, true);
+                    }
+                    if (legacyUnverified && !rescind)
+                        throw new InvalidOperationException("The prior arrest relationship effect predates exact affinity measurement.");
+
+                    bool sameRequest = !rescind && measured && requested == desiredDelta;
+                    int correction = legacyUnverified || terminal || sameRequest ? 0
+                        : ArrestRelationshipCorrection(operation, desiredDelta, applied);
+                    if (correction != 0)
+                    {
+                        string pairKey = RelationshipsService.AmbientPairKey(accusedId, playerId);
+                        string heroA = pairKey.StartsWith(accusedId + "|",
+                            StringComparison.OrdinalIgnoreCase) ? accusedId : playerId;
+                        string heroB = string.Equals(heroA, accusedId,
+                            StringComparison.OrdinalIgnoreCase) ? playerId : accusedId;
+                        RelationshipsService.EnsurePoliticalRelationshipPair(connection, campaignId,
+                            timelineId, pairKey, heroA, heroB, worldDay);
+                        Dictionary<string, object> lockedPair = WorldSimulationStore.LockArrestRelationshipPair(connection,
+                            new Dictionary<string, object> { ["pair"] = pairKey }).FirstOrDefault();
+                        string affinityColumn = heroA == accusedId ? "affinity_a_to_b" : "affinity_b_to_a";
+                        int before = ArrestDirectionalAffinity(lockedPair, heroA, heroB, affinityColumn);
+                        string reason = rescind ? "arrest_rescinded:" : "arrest_case:";
+                        Dictionary<string, object> pair =
+                            RelationshipsService.ApplyAtomicDirectionalRelationshipDelta(connection,
+                                campaignId, accusedId, playerId, correction, worldDay, reason + caseId, timelineId);
+                        int after = ArrestDirectionalAffinity(pair, heroA, heroB, affinityColumn);
+                        int movement = after - before;
+                        if (movement != Clamp(before + correction, -100, 100) - before)
+                            throw new InvalidOperationException("The arrest relationship change could not be measured exactly.");
+                        applied += movement;
+                    }
+
+                    if (!rescind)
+                    {
                         Dictionary<string, object> snapshot = new Dictionary<string, object>
                         {
                             ["label"] = "Arrest accusation",
@@ -161,7 +221,9 @@ namespace ReignBetaServer
                             ["causeEstablished"] = ReadBool(payload, "causeEstablished", false),
                             ["evidenceStatus"] = ReadString(payload, "evidenceStatus", "unsupported"),
                             ["evidenceIds"] = ReadString(payload, "evidenceIds", ""),
-                            ["arrestAppliedRelationshipDelta"] = appliedDelta,
+                            ["arrestRelationshipMeasurement"] = "directional-affinity-v1",
+                            ["arrestRequestedRelationshipDelta"] = desiredDelta,
+                            ["arrestAppliedRelationshipDelta"] = applied,
                             ["playerOriginated"] = true
                         };
                         WorldSimulationStore.UpsertCharacterReputations(connection, new Dictionary<string, object>
@@ -174,43 +236,29 @@ namespace ReignBetaServer
                                 ["ts"] = ts
                             });
                     }
-                    else
+                    else if (existing != null && !legacyRescission)
                     {
-                        int correction = ArrestRelationshipCorrection(operation,
-                            desiredDelta, priorDelta);
-                        if (correction != 0)
+                        if (measured)
                         {
-                            string pairKey = RelationshipsService.AmbientPairKey(accusedId, playerId);
-                            string heroA = pairKey.StartsWith(accusedId + "|",
-                                StringComparison.OrdinalIgnoreCase) ? accusedId : playerId;
-                            string heroB = string.Equals(heroA, accusedId,
-                                StringComparison.OrdinalIgnoreCase) ? playerId : accusedId;
-                            RelationshipsService.EnsurePoliticalRelationshipPair(connection, campaignId,
-                                timelineId, pairKey, heroA, heroB, worldDay);
-                            Dictionary<string, object> pair =
-                                RelationshipsService.ApplyAtomicDirectionalRelationshipDelta(connection,
-                                    campaignId, accusedId, playerId, correction,
-                                    worldDay, "arrest_rescinded:" + caseId, timelineId);
-                            if (pair == null)
-                                throw new InvalidOperationException(
-                                    "The rescinded arrest relationship effect could not be removed.");
-                            appliedDelta = 0;
+                            priorSnapshot["arrestRequestedRelationshipDelta"] = 0;
+                            priorSnapshot["arrestAppliedRelationshipDelta"] = applied;
                         }
                         WorldSimulationStore.UpdateCharacterReputations(connection, new Dictionary<string, object>
                             {
                                 ["campaign"] = campaignId, ["timeline"] = timelineId,
-                                ["subject"] = accusedId, ["tag"] = tagId, ["ts"] = ts
+                                ["subject"] = accusedId, ["tag"] = tagId,
+                                ["snapshot"] = Json.Serialize(priorSnapshot), ["ts"] = ts
                             });
+                    }
+                    if (states.Count == 0 || rescind)
+                    {
+                        key["rescinded"] = rescind;
+                        WorldSimulationStore.UpsertArrestCaseEffect(connection, key);
                     }
                     WorldSimulationStore.Commit(connection);
                     RelationshipsService.InvalidateRelationshipPairStateCache(campaignId);
-                    return new Dictionary<string, object>
-                    {
-                        ["ok"] = true, ["operation"] = operation,
-                        ["caseId"] = caseId, ["reputationTagId"] = tagId,
-                        ["appliedRelationshipDelta"] = appliedDelta,
-                        ["idempotent"] = operation == "apply" && priorDelta == desiredDelta
-                    };
+                    return ArrestEffectAcknowledgement(operation, caseId, tagId,
+                        legacyUnverified ? null : applied, rescind ? terminal : sameRequest || correction == 0);
                 }
                 catch (Exception ex)
                 {
@@ -221,6 +269,32 @@ namespace ReignBetaServer
                     };
                 }
             }
+        }
+
+        private static int ArrestDirectionalAffinity(Dictionary<string, object> pair, string heroA, string heroB,
+            string affinityColumn)
+        {
+            int affinity = ReadInt(pair, affinityColumn, int.MinValue);
+            if (ReadString(pair, "hero_a_id", "") != heroA || ReadString(pair, "hero_b_id", "") != heroB
+                || affinity < -100 || affinity > 100)
+                throw new InvalidOperationException("The arrest relationship pair has no matching directional affinity.");
+            return affinity;
+        }
+
+        private static Dictionary<string, object> ArrestEffectAcknowledgement(string operation, string caseId,
+            string tagId, int? appliedDelta, bool idempotent)
+        {
+            bool unresolved = operation == "rescind" && appliedDelta != 0;
+            return new Dictionary<string, object>
+            {
+                ["ok"] = !unresolved, ["operation"] = operation,
+                ["caseId"] = caseId, ["reputationTagId"] = tagId,
+                ["appliedRelationshipDelta"] = appliedDelta, ["idempotent"] = idempotent,
+                ["relationshipEffectResolved"] = !unresolved,
+                ["error"] = !unresolved ? null : appliedDelta.HasValue
+                    ? "The accusation was rescinded, but the affinity limit prevented full relationship compensation."
+                    : "The accusation was rescinded, but its historical relationship effect cannot be measured."
+            };
         }
 
         internal static List<Dictionary<string, object>> BuildArrestDialogueCandidates(
@@ -511,27 +585,12 @@ namespace ReignBetaServer
             return "other";
         }
 
-        private static bool ArrestHistoryEvidenceQualifies(string eventType,
-            Dictionary<string, object> evidence, string accusedId)
+        private static string ArrestExposedAgentEvidenceId(Dictionary<string, object> assignment, string accusedId)
         {
-            eventType = (eventType ?? string.Empty).Trim().ToLowerInvariant();
-            if (eventType == "social_outcome"
-                || eventType.IndexOf("rumor", StringComparison.Ordinal) >= 0
-                || eventType.IndexOf("accus", StringComparison.Ordinal) >= 0)
-                return false;
-            bool explicitProof = ReadBool(evidence, "attributed", false)
-                || ReadBool(evidence, "witnessed", false)
-                || ReadBool(evidence, "officialFinding", false)
-                || string.Equals(ReadFirstString(evidence, "attributedActorHeroId",
-                    "perpetratorHeroId", "witnessedActorHeroId", "detectedAgentHeroId"),
-                    accusedId, StringComparison.OrdinalIgnoreCase);
-            bool authoritativeType = eventType == "crime_witnessed"
-                || eventType == "hostile_operation_attributed"
-                || eventType == "spymaster_operation_attributed"
-                || eventType == "foreign_agent_exposed"
-                || eventType == "treason_established"
-                || eventType == "official_criminal_finding";
-            return authoritativeType || explicitProof;
+            if (ReadString(assignment, "agent_hero_id", "") != accusedId
+                || ReadString(assignment, "status", "") != "exposed")
+                return null;
+            return "foreign_agent:" + accusedId + ":" + ReadString(assignment, "sponsor_kingdom_id", "unknown");
         }
 
         private static int ArrestRelationshipCorrection(string operation,
@@ -651,18 +710,32 @@ namespace ReignBetaServer
                 "Later evidence changes only the difference between policy cells.");
             add("relationship_rescission", ArrestRelationshipCorrection("rescind", 0, -30) == 30,
                 "Rescission removes the arrest case's prior relationship effect.");
-            add("evidence_rumor_rejected", !ArrestHistoryEvidenceQualifies("court_rumor",
-                new Dictionary<string, object> { ["attributed"] = true }, "npc"),
-                "Rumors cannot establish legal cause even when their payload claims attribution.");
-            add("evidence_accusation_rejected", !ArrestHistoryEvidenceQualifies("arrest_accusation",
-                new Dictionary<string, object> { ["officialFinding"] = true }, "npc"),
-                "An accusation cannot bootstrap its own legal cause.");
-            add("evidence_exposed_agent_accepted", ArrestHistoryEvidenceQualifies("foreign_agent_exposed",
-                new Dictionary<string, object>(), "npc"),
-                "An exposed foreign-agent event is authoritative evidence.");
-            add("evidence_witnessed_actor_accepted", ArrestHistoryEvidenceQualifies("crime_report",
-                new Dictionary<string, object> { ["witnessedActorHeroId"] = "npc" }, "npc"),
-                "Exact witnessed-actor evidence establishes cause.");
+            var exposure = new Dictionary<string, object>
+            {
+                ["agent_hero_id"] = "npc", ["sponsor_kingdom_id"] = "enemy", ["status"] = "exposed"
+            };
+            add("evidence_exact_exposed_agent_accepted",
+                ArrestExposedAgentEvidenceId(exposure, "npc") == "foreign_agent:npc:enemy",
+                "A retained exposure for the exact agent supplies a public espionage evidence ID.");
+            add("evidence_wrong_actor_or_unexposed_rejected",
+                ArrestExposedAgentEvidenceId(exposure, "victim") == null
+                && ArrestExposedAgentEvidenceId(exposure, "NPC") == null
+                && ArrestExposedAgentEvidenceId(new Dictionary<string, object>(exposure) { ["status"] = "active" }, "npc") == null,
+                "Another hero, a case alias or an active hidden assignment cannot establish cause.");
+            var unsupportedEvidence = new Dictionary<string, object>
+            {
+                ["campaignId"] = "fixture", ["timelineId"] = "main", ["accusedHeroId"] = "npc",
+                ["chargeCategory"] = "murder", ["officialFinding"] = true, ["witnessedActorHeroId"] = "npc"
+            };
+            add("evidence_wrong_or_legacy_charge_unsupported",
+                !ReadBool(ArrestEvidenceEvaluateApi(unsupportedEvidence), "causeEstablished", true)
+                && ReadString(ArrestEvidenceEvaluateApi(new Dictionary<string, object>(unsupportedEvidence)
+                    { ["chargeCategory"] = "" }), "evidenceStatus", "") == "unsupported",
+                "Generic history flags cannot supply a charge. Missing categories retain the unsupported result.");
+            add("evidence_espionage_requires_explicit_scope",
+                ReadString(ArrestEvidenceEvaluateApi(new Dictionary<string, object>(unsupportedEvidence)
+                    { ["chargeCategory"] = "espionage", ["timelineId"] = "" }), "evidenceStatus", "") == "unsupported",
+                "An espionage request without its timeline cannot read a fallback campaign scope.");
             return results;
         }
     }

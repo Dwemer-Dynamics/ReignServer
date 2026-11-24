@@ -24,6 +24,55 @@ namespace ReignBetaServer
             string key = string.IsNullOrWhiteSpace(campaignId) ? "default" : campaignId.Trim();
             return PersistenceService.EnterCampaignWorkLock(WorldHistoryTimelineLocks.GetOrAdd(key, _ => new object()));
         }
+
+        // Callers hold the timeline scope and use an exact registered campaign connection.
+        internal static bool NoticeAcknowledgementOwnerMatches(ReignDbConnection connection,
+            ReignDbTransaction transaction, Dictionary<string, object> payload, string campaignId, string timelineId)
+        {
+            if (payload?.TryGetValue("sharedActivityGeneration", out object expected) != true)
+                return true; // Legacy wire still requires the exact incident row in the caller.
+            if (!payload.TryGetValue("campaignId", out object campaign) || campaign is not string explicitCampaign
+                || explicitCampaign != campaignId || !payload.TryGetValue("timelineId", out object requestedTimeline)
+                || requestedTimeline is not string explicitTimeline || explicitTimeline != timelineId
+                || !DialogueService.ExactSharedActivityGenerationMatches(connection, expected)
+                || !TableExists(connection, "world_history_timelines"))
+                return false;
+
+            var timeline = WorldSimulationStore.SelectWorldHistoryTimelines(connection,
+                new Dictionary<string, object> { ["id"] = timelineId }, transaction).SingleOrDefault();
+            return ReadString(timeline, "campaign_id", "") == campaignId
+                && ReadInt(timeline, "is_active", 0) == 1
+                && string.Equals(ActiveWorldHistoryTimeline(connection), timelineId, StringComparison.Ordinal);
+        }
+
+        internal static Dictionary<string, object> ReadOwnedNoticeSnapshot(Dictionary<string, string> query,
+            Func<ReignDbConnection, ReignDbTransaction, string, string, Dictionary<string, object>> read)
+        {
+            Dictionary<string, object> OutOfScope() => new Dictionary<string, object>
+            {
+                ["ok"] = false, ["error"] = "The requested notice scope is no longer current."
+            };
+            if (!query.TryGetValue("campaignId", out string campaignId) || string.IsNullOrWhiteSpace(campaignId)
+                || !query.TryGetValue("timelineId", out string timelineId) || string.IsNullOrWhiteSpace(timelineId)
+                || !query.TryGetValue("sharedActivityGeneration", out string generation) || generation == null)
+                return OutOfScope();
+            var ownership = new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId, ["sharedActivityGeneration"] = generation
+            };
+            using var timelineScope = EnterWorldHistoryTimelineScope(campaignId);
+            using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaignId, trackCampaignMutations: true);
+            if (connection == null) return OutOfScope();
+            using var transaction = connection.BeginTransaction();
+            AcquirePostgreSqlTransactionMutationLock(connection, transaction);
+            if (!NoticeAcknowledgementOwnerMatches(connection, transaction, ownership, campaignId, timelineId))
+                return OutOfScope();
+            var result = read(connection, transaction, campaignId, timelineId);
+            if (result == null) return OutOfScope();
+            result["ownership"] = ownership;
+            transaction.Commit();
+            return result;
+        }
         internal static readonly Dictionary<string, Dictionary<string, object>> WorldHistoryClaimCache =
             new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
 

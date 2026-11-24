@@ -408,7 +408,8 @@ WHERE table_schema=current_schema()
             ReignDbConnection connection,
             string sql,
             Dictionary<string, object> parameters = null,
-            ReignDbTransaction transaction = null)
+            ReignDbTransaction transaction = null,
+            bool skipSaveSyncDirtyIfNoRowsAffected = false)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
             PersistenceService.RequireSaveSyncConnectionAvailable(connection);
@@ -448,6 +449,7 @@ WHERE table_schema=current_schema()
                     }
                     string normalizedSql =
                         ReignPostgreSqlDialect.Normalize(connection, sql);
+                    int affectedRows;
                     using (ReignDbCommand command = connection.CreateCommand())
                     {
                         command.CommandText = normalizedSql;
@@ -459,7 +461,7 @@ WHERE table_schema=current_schema()
                         if (commandTransaction != null)
                             command.Transaction = commandTransaction;
                         AddSqlParameters(command, parameters);
-                        command.ExecuteNonQuery();
+                        affectedRows = command.ExecuteNonQuery();
                     }
                     RelationshipsService.InvalidateRelationshipPairCacheForMutation(
                         connection, sql, parameters);
@@ -471,7 +473,10 @@ WHERE table_schema=current_schema()
                     {
                         AcquirePostgreSqlTransactionMutationLock(connection);
                     }
-                    if (ReignPostgreSqlDialect.IsPostgreSql(connection))
+                    // Only opted-in DML can treat a known zero as a no-op. Negative or
+                    // unknown counts retain the conservative marking used by all other SQL.
+                    if (ReignPostgreSqlDialect.IsPostgreSql(connection)
+                        && (!skipSaveSyncDirtyIfNoRowsAffected || affectedRows != 0))
                     {
                         string campaignId =
                             ReignPostgreSqlStorage.CampaignIdForConnection(connection);

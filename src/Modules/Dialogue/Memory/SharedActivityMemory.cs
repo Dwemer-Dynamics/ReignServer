@@ -293,6 +293,19 @@ namespace ReignBetaServer
             return expected.Length == 0 || expected == SharedActivityGeneration(connection);
         }
 
+        internal static bool ExactSharedActivityGenerationMatches(ReignDbConnection connection, object expected)
+        {
+            if (expected is not string generation
+                || !WorldSimulationService.TableExists(connection, "memory_precision_state"))
+                return false;
+            // This admission read runs before campaign initialization. An incomplete
+            // singleton cannot establish the same owner as a recorded empty generation.
+            var states = DialogueStore.SelectMemoryPrecisionState4(connection);
+            return states.Count == 1
+                && states[0].TryGetValue("restore_generation", out object value) && value is string stored
+                && string.Equals(generation, stored, StringComparison.Ordinal);
+        }
+
         private static bool SharedActivitySyncComplete(ReignDbConnection connection, string timeline, Dictionary<string, object> sync)
         {
             if (sync == null) return true; // Older clients have no watermark.

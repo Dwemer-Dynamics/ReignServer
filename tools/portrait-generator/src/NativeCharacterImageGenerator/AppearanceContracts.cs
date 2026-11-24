@@ -48,7 +48,7 @@ public sealed record AppearanceIntentV1
     public IReadOnlyList<string> DistinguishingMarks { get; init; } = [];
     public IReadOnlyDictionary<string, float> Confidence { get; init; } =
         new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
-    public float OverallConfidence { get; init; }
+    public float? OverallConfidence { get; init; }
     public string SourceSummary { get; init; } = string.Empty;
 }
 

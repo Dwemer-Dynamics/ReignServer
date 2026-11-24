@@ -586,6 +586,22 @@ FROM political_pressure_native_effects WHERE incident_id=$incident ORDER BY effe
             ReignDatabase.ExecuteSql(connection, "UPDATE political_pressure_incidents SET notice_status='fetched',updated_ts=$ts WHERE incident_id=$id;", parameters, transaction);
         }
 
+        internal static List<Dictionary<string, object>> ReadOwnedPoliticalPressureEffects(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT effect_id,effect_type,target_id,amount,status
+FROM political_pressure_native_effects WHERE incident_id=$incident AND campaign_id=$campaign
+AND timeline_id=$timeline AND status='pending' ORDER BY effect_id;", parameters, transaction);
+        }
+
+        internal static void MarkOwnedPoliticalPressureNoticeFetched(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            ReignDatabase.ExecuteSql(connection, @"UPDATE political_pressure_incidents SET notice_status='fetched',updated_ts=$ts
+WHERE incident_id=$incident AND campaign_id=$campaign AND timeline_id=$timeline
+AND notice_status IN ('ready','fetched');", parameters, transaction);
+        }
+
         internal static List<Dictionary<string, object>> SelectPoliticalPressureState3(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, @"SELECT actor_kingdom_id,target_kingdom_id,pressure_value,dominant_channel
@@ -593,20 +609,34 @@ FROM political_pressure_state WHERE campaign_id=$campaign AND timeline_id=$timel
 ORDER BY actor_kingdom_id,target_kingdom_id LIMIT 1025;", parameters, transaction);
         }
 
-        internal static List<Dictionary<string, object>> CountPoliticalPressureIncidents(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static bool LockPoliticalPressureAcknowledgement(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
         {
-            return ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM political_pressure_incidents WHERE incident_id=$id;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"SELECT incident_id FROM political_pressure_incidents
+WHERE incident_id=$incident AND campaign_id=$campaign AND timeline_id=$timeline FOR UPDATE;",
+                parameters, transaction).Count == 1;
+        }
+
+        internal static List<Dictionary<string, object>> LockPoliticalPressureAcknowledgementEffects(
+            ReignDbConnection connection, Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT effect_id FROM political_pressure_native_effects
+WHERE incident_id=$incident AND campaign_id=$campaign AND timeline_id=$timeline ORDER BY effect_id FOR UPDATE;",
+                parameters, transaction);
         }
 
         internal static void UpdatePoliticalPressureNativeEffects(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             ReignDatabase.ExecuteSql(connection, @"UPDATE political_pressure_native_effects SET status=$status,before_value=$before,
-after_value=$after,receipt_day=$day,error=$error,updated_ts=$ts WHERE effect_id=$id AND status='pending';", parameters, transaction);
+after_value=$after,receipt_day=$day,error=$error,updated_ts=$ts
+WHERE effect_id=$id AND incident_id=$incident AND campaign_id=$campaign
+AND timeline_id=$timeline AND status='pending';", parameters, transaction);
         }
 
         internal static void UpdatePoliticalPressureIncidents3(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            ReignDatabase.ExecuteSql(connection, "UPDATE political_pressure_incidents SET notice_status='acknowledged',updated_ts=$ts WHERE incident_id=$id;", parameters, transaction);
+            ReignDatabase.ExecuteSql(connection, @"UPDATE political_pressure_incidents SET notice_status='acknowledged',updated_ts=$ts
+WHERE incident_id=$incident AND campaign_id=$campaign AND timeline_id=$timeline;", parameters, transaction);
         }
 
         internal static void InsertOrIgnorePoliticalPressureActivity(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

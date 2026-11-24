@@ -290,9 +290,8 @@ namespace ReignBetaServer
             int canonicalTranscriptLimit = Math.Max(2, Math.Min(100, ReadInt(settings, "recentRawConversationTurns", 30)));
             List<Dictionary<string, object>> eventLines = partyChatRequest
                 ? BuildPartyChatPromptTranscript(payload, playerText)
-                : BuildSocialEventPromptTranscript(
-                    Program.ReadJsonLinesFromPath(SocialEventTranscriptFile(campaignId, eventId)),
-                    canonicalTranscriptLimit);
+                : Program.ReadIndexedSocialEventPromptTranscript(
+                    SocialEventTranscriptFile(campaignId, eventId), canonicalTranscriptLimit);
             eventLines = CanonicalizePromptTranscript(eventLines, canonicalTranscriptLimit);
             Dictionary<string, object> identityView = CharactersService.ResolvePromptIdentity(payload, heroId, auditMode, eventId, eventLines);
             string promptPlayerName = ReadString(identityView, "usableName", "the stranger");

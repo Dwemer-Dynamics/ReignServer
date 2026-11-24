@@ -1,9 +1,36 @@
 using Xunit;
+using System.Diagnostics;
 
 namespace Bannerlord.NativeCharacterImageGenerator.Tests;
 
 public class NativeRenderFailureTests
 {
+    [Fact]
+    public void ExpiredOwnedPortraitAttemptCannotCreateAJob()
+    {
+        Assert.Throws<TimeoutException>(() => new OwnedPortraitRenderJob(DateTimeOffset.UtcNow.AddSeconds(-1)));
+    }
+
+    [Fact]
+    public void OwnedPortraitLaunchUsesOneJobAndConfirmsEmptyClosure()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var job = new OwnedPortraitRenderJob(DateTimeOffset.UtcNow.AddSeconds(20));
+        var inert = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "whoami.exe"))
+        {
+            WorkingDirectory = Environment.SystemDirectory
+        };
+        inert.ArgumentList.Add("/?");
+
+        using var child = job.Start(inert);
+        Assert.Throws<InvalidOperationException>(() => job.Start(inert));
+        Assert.True(child.WaitForExit(5000));
+        Assert.Equal(0, child.ExitCode);
+        Assert.True(job.CloseAndConfirm());
+        Assert.True(job.CloseAndConfirm());
+    }
+
     [Fact]
     public void NativeCrashIsNotReportedAsSuccessfulProgress()
     {

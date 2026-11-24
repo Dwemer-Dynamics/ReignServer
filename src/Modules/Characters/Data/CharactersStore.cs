@@ -94,6 +94,13 @@ WHERE rst.subject_id=$id ORDER BY ro.world_day DESC LIMIT 500;", parameters, tra
             return ReignDatabase.QuerySql(connection, "SELECT * FROM letters WHERE sender_id=$id OR recipient_id=$id ORDER BY updated_ts DESC LIMIT 500;", parameters, transaction);
         }
 
+        internal static List<Dictionary<string, object>> UpdateEditorLetterStatus(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"UPDATE letters SET status=$value
+WHERE letter_id=$id AND (sender_id=$hero OR recipient_id=$hero) AND status=$expected RETURNING status;", parameters, transaction);
+        }
+
         internal static List<Dictionary<string, object>> SelectConceptions(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, "SELECT * FROM conceptions WHERE mother_id=$id OR biological_father_id=$id OR legal_father_id=$id ORDER BY updated_ts DESC LIMIT 500;", parameters, transaction);
@@ -157,7 +164,13 @@ WHERE hero_a_id=$id OR hero_b_id=$id ORDER BY last_day DESC,updated_ts DESC LIMI
 
         internal static void InsertCharacterEditorRevisions2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            ReignDatabase.ExecuteSql(connection, @"INSERT INTO character_editor_revisions(revision_id,hero_id,section,description,before_json,after_json,native_changes_json,reconciliation_json,rollback_of,created_ts) VALUES($id,$hero,'rollback',$description,$before,$after,$native,'{}',$rollback,$ts);", parameters, transaction);
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO character_editor_revisions(revision_id,hero_id,section,description,before_json,after_json,native_changes_json,reconciliation_json,rollback_of,created_ts) VALUES($id,$hero,'rollback',$description,$before,$after,$native,$reconcile,$rollback,$ts);", parameters, transaction);
+        }
+
+        internal static void UpdateCharacterEditorRevisionReconciliation(ReignDbConnection connection, Dictionary<string, object> parameters,
+            ReignDbTransaction transaction = null)
+        {
+            ReignDatabase.ExecuteSql(connection, "UPDATE character_editor_revisions SET reconciliation_json=$reconcile WHERE revision_id=$id;", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectCharacterEditorNativeCommands4(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
@@ -284,7 +297,7 @@ compatibility_status,source_event_id,world_day,known_by_json,first_ts,last_ts,pa
 VALUES($id,$owner,'life_transition',$topic,$text,$id,'active',1,1,'source_backed_life_transition',
 'verified_source_projection',$source,$day,$known,$ts,$ts,$payload)
 ON CONFLICT(owner_id,normalized_key) DO UPDATE SET text=$text,payload_json=$payload,last_ts=$ts
-WHERE dynamic_characteristics.payload_json<>excluded.payload_json;", parameters, transaction);
+WHERE dynamic_characteristics.payload_json<>excluded.payload_json;", parameters, transaction, skipSaveSyncDirtyIfNoRowsAffected: true);
         }
 
         internal static List<Dictionary<string, object>> SelectConversationNegotiationTurns(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
@@ -323,12 +336,12 @@ OR (k.audience_type='kingdom' AND k.audience_id=$kingdom))) ORDER BY e.world_day
         {
             ReignDatabase.ExecuteSql(connection, @"UPDATE dynamic_characteristics SET status='source_unavailable'
 WHERE owner_id=$owner AND category='life_transition' AND status IS DISTINCT FROM 'source_unavailable'
-AND characteristic_id NOT IN (SELECT jsonb_array_elements_text(CAST($observed AS jsonb)));", parameters, transaction);
+AND characteristic_id NOT IN (SELECT jsonb_array_elements_text(CAST($observed AS jsonb)));", parameters, transaction, skipSaveSyncDirtyIfNoRowsAffected: true);
         }
 
         internal static void UpdateDynamicCharacteristics2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            ReignDatabase.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status=$status WHERE characteristic_id=$id AND status IS DISTINCT FROM $status;", parameters, transaction);
+            ReignDatabase.ExecuteSql(connection, "UPDATE dynamic_characteristics SET status=$status WHERE characteristic_id=$id AND status IS DISTINCT FROM $status;", parameters, transaction, skipSaveSyncDirtyIfNoRowsAffected: true);
         }
 
         internal static List<Dictionary<string, object>> SelectDynamicCharacteristics2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

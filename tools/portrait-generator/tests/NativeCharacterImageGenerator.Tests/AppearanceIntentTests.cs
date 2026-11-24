@@ -23,7 +23,60 @@ public sealed class AppearanceIntentTests
         Assert.Equal("long", result.HairLength);
         Assert.Equal("green", result.EyeColor);
         Assert.True(result.CheekboneProminence > 0.5f);
-        Assert.True(result.OverallConfidence > 0.5f);
+        Assert.Empty(result.Confidence);
+        Assert.Null(result.OverallConfidence);
+    }
+
+    [Theory]
+    [InlineData("A portrait with 35 mm framing, 12 freckles and green eyes.", null)]
+    [InlineData("A person with age-related wrinkles in a 24 mm lens portrait.", null)]
+    [InlineData("The subject is not a 45-year-old.", null)]
+    [InlineData("The subject isn’t 45 years old.", null)]
+    [InlineData("Not really a young adult.", null)]
+    [InlineData("A woman of age 32, rather than a 46-year-old.", 32)]
+    [InlineData("Not a 40-year-old. The subject is 34 years old.", 34)]
+    [InlineData("Age: 36, with green eyes and 14 freckles.", 36)]
+    [InlineData("Her age is 34, with green eyes.", 34)]
+    [InlineData("Her age is not 34 years old.", null)]
+    [InlineData("Her age is at least 34 years old.", null)]
+    [InlineData("Her age is 34 or 36.", null)]
+    [InlineData("Aged 36; described again as 36 years old.", 36)]
+    [InlineData("Age 30–40, with green eyes.", null)]
+    [InlineData("A person 30 to 40 years old.", null)]
+    [InlineData("A person age 30 years old or 40.", null)]
+    [InlineData("Not a 30-year-old or a 40-year-old.", null)]
+    [InlineData("A person under 40 years old.", null)]
+    [InlineData("A person no more than 40 years old.", null)]
+    [InlineData("Age 30, alternatively 42 years old.", null)]
+    [InlineData("A person aged 30.5 years old.", null)]
+    [InlineData("A woman of age 30?", null)]
+    [InlineData("A young adult with green eyes.", 22)]
+    [InlineData("A young adult or middle-aged subject.", null)]
+    [InlineData("A 32-year-old, or an elderly man.", null)]
+    public async Task BuiltInAnalyzerSuggestsAgeOnlyFromEligibleUnambiguousWording(string description, int? expected)
+    {
+        var result = await new RuleBasedAppearanceIntentAnalyzer().AnalyzeAsync(
+            new AppearanceAnalysisRequest(description, string.Empty), CancellationToken.None);
+
+        Assert.Equal((float?)expected, result.Age);
+        Assert.Equal(description, result.SourceSummary);
+    }
+
+    [Theory]
+    [InlineData("A human from a subnordic suburb.", "unspecified", "unspecified")]
+    [InlineData("A Vlandian woman or an Aserai man.", "unspecified", "unspecified")]
+    [InlineData("A Vlandian woman with female facial features.", "female", "vlandia")]
+    [InlineData("A Sturgian man with short hair.", "male", "sturgia")]
+    [InlineData("Not a woman, and never an Aserai.", "unspecified", "unspecified")]
+    [InlineData("Not a woman but a man. Sturgian rather than Vlandian.", "male", "sturgia")]
+    public async Task BuiltInAnalyzerRecognizesOnlyUnambiguousIdentityWords(
+        string description, string sex, string culture)
+    {
+        var result = await new RuleBasedAppearanceIntentAnalyzer().AnalyzeAsync(
+            new AppearanceAnalysisRequest(description, string.Empty), CancellationToken.None);
+
+        Assert.Equal(sex, result.Sex);
+        Assert.Equal(culture, result.Culture);
     }
 
     [Fact]
@@ -98,6 +151,7 @@ public sealed class AppearanceIntentTests
         Assert.Equal(44f, result.Age);
         Assert.Equal(1f, result.EyeSize);
         Assert.Equal(0f, result.Confidence["eyeSize"]);
+        Assert.Null(result.OverallConfidence);
         Assert.Equal(["scar"], result.DistinguishingMarks);
         Assert.Equal("unspecified", result.Culture);
     }
@@ -125,10 +179,35 @@ public sealed class AppearanceIntentTests
         Assert.True(fallback.UsedDescription);
         Assert.False(fallback.UsedReferenceImage);
         Assert.Contains("description only", fallback.Notice, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("editable appearance suggestions", fallback.Notice, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(fallback.Intent.OverallConfidence);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExtractAsync(
             new AppearanceAnalysisRequest(string.Empty, "portrait.png"),
             CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UnconfiguredVisionKeepsEditableTextAndRejectsImageOnlyInput()
+    {
+        var service = new AppearanceIntentExtractionService(new RuleBasedAppearanceIntentAnalyzer(), null);
+        var result = await service.ExtractAsync(
+            new AppearanceAnalysisRequest("Age 30. Green eyes.", "fixture-not-read.png"),
+            CancellationToken.None);
+
+        Assert.True(result.UsedDescription);
+        Assert.False(result.UsedReferenceImage);
+        Assert.Contains("reference image was not analyzed", result.Notice, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("editable appearance suggestions", result.Notice, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(30f, result.Intent.Age);
+        Assert.Equal("green", result.Intent.EyeColor);
+        Assert.Empty(result.Intent.Confidence);
+        Assert.Null(result.Intent.OverallConfidence);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(result.Intent, AppearanceLabContract.JsonOptions);
+        Assert.DoesNotContain("\"overallConfidence\"", json, StringComparison.Ordinal);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExtractAsync(
+            new AppearanceAnalysisRequest(string.Empty, "fixture-not-read.png"), CancellationToken.None));
     }
 
     [Fact]

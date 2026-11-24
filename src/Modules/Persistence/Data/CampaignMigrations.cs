@@ -15,6 +15,7 @@ namespace ReignBetaServer
         internal const int PlayerApproachSchemaMigrationVersion = 2;
         internal const int CorrespondenceArrivalHistoryMigrationVersion = 3;
         private const int ForeignAgentOccurrenceMigrationVersion = 4;
+        private const int ForeignAgentDisruptionReceiptMigrationVersion = 5;
 
         private sealed class CampaignSchemaMigration
         {
@@ -44,6 +45,8 @@ namespace ReignBetaServer
                 "correspondence_arrival_history", RelationshipsSchema.ApplyCorrespondenceArrivalHistoryDdl),
             new CampaignSchemaMigration(ForeignAgentOccurrenceMigrationVersion,
                 "foreign_agent_occurrence", ApplyForeignAgentOccurrenceDdl),
+            new CampaignSchemaMigration(ForeignAgentDisruptionReceiptMigrationVersion,
+                "foreign_agent_disruption_receipts", ApplyForeignAgentDisruptionReceiptDdl),
         };
 
         internal static int LatestCampaignMigrationVersion =>
@@ -81,6 +84,16 @@ PRIMARY KEY(campaign_id,timeline_id,agent_hero_id));");
             // rollback preserves the column and old inserts take the same default.
             ReignDatabase.ExecuteSql(connection, "ALTER TABLE foreign_agent_assignments ADD COLUMN IF NOT EXISTS assignment_id TEXT NOT NULL DEFAULT '';");
             ReignDatabase.ExecuteSql(connection, "CREATE INDEX IF NOT EXISTS idx_foreign_agents_sponsor ON foreign_agent_assignments(campaign_id,timeline_id,sponsor_kingdom_id,status);");
+        }
+
+        private static void ApplyForeignAgentDisruptionReceiptDdl(ReignDbConnection connection)
+        {
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS foreign_agent_disruption_receipts (
+campaign_id TEXT NOT NULL,timeline_id TEXT NOT NULL,restore_generation TEXT NOT NULL,action_id TEXT NOT NULL,
+assignment_id TEXT NOT NULL,scheduled_due_day DOUBLE PRECISION NOT NULL,issued_day DOUBLE PRECISION NOT NULL,
+expires_day DOUBLE PRECISION NOT NULL,action_json TEXT NOT NULL,
+CHECK(scheduled_due_day<=issued_day AND issued_day<=expires_day),
+PRIMARY KEY(campaign_id,timeline_id,restore_generation,action_id));");
         }
 
         // Applies every numbered migration above the schema's recorded version.

@@ -35,7 +35,9 @@ The first startup indexes the relevant native asset packages and may take a few 
 
 ### Appearance Lab analysis providers
 
-Written descriptions always work through the Studio's built-in deterministic analyzer and require no network or Reign server. Optional model-assisted text and portrait analysis uses a provider-neutral OpenAI-compatible adapter. Configure it through process or user environment variables:
+Written descriptions work through the Studio's built-in deterministic analyzer and require no network or Reign server. The analyzer suggests editable traits from words and phrases in the description. A single explicit age or a clear age category can inform a preview. Negated ages, ranges, and unresolved alternatives leave the age hint unspecified. Built-in suggestions carry no confidence scores. Provider or pasted intent scores are supplied by that source and represent its assessment.
+
+Optional model-assisted text and portrait analysis uses a provider-neutral OpenAI-compatible adapter. Configure it through process or user environment variables:
 
 ```text
 NATIVE_CHARACTER_AI_API_KEY=...
@@ -70,6 +72,8 @@ All Reign character portrait requests now use this background pipeline without f
 Reign persists an offline portrait roster during its normal campaign identity synchronization. Each row contains the live hero ID, character-object ID, body key, weight/build, current civilian equipment, native character code, faction colors, and portrait cache key. The Studio reads that file later, so Bannerlord can be closed.
 
 The shipped Reign server package includes the self-contained Studio runtime under `server\app\native-portrait-generator`. For Portrait Images requests, Reign calls its `--reign-render-portrait-source` background command with the exact campaign and character identity. The command opens no Studio or Bannerlord window, starts no campaign, and writes a fresh opaque 768x1024 `ai_source_wan_portrait_v5` source for that one request. Reign defaults to required mode and fails closed if this bundled runtime or its native render host is unavailable; an optional development path override does not replace the packaged default. TaleWorlds assemblies are not redistributed: the host resolves the matching assemblies from the user's installed game.
+
+Server-triggered rendering also uses a unique owned output request and a Windows deadline. The managed helper creates the renderer in a dedicated Windows Job, with its private-desktop descendants in the same job. It confirms the job has no active processes before writing the matching closure receipt as its last attempt-file write. The server requires that receipt for success or temporary-file cleanup. An unconfirmed attempt remains available for diagnosis. Deploy the matching Windows portrait helper with the server. The server sends each argument separately and rejects embedded NUL and reserved option values. Older helpers reject an owned request before rendering.
 
 After any configured image provider returns, Reign applies the same provider-independent product gate: one centered face, original full-body framing, and an approved 2:3 through 3:4 portrait canvas. Supported extra-tall provider canvases are face-anchored and normalized before storage. Rejected output never replaces the existing portrait. Scenery requests stay on their separate source, prompt, size, and model profile and do not invoke this portrait-only pipeline.
 

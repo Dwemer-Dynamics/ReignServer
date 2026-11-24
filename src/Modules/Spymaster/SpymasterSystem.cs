@@ -364,6 +364,8 @@ namespace ReignBetaServer
             string playerKingdom = ReadString(payload, "playerKingdomId", "");
             string playerRuler = ReadString(payload, "playerRulerId", "");
             double day = ReadDouble(payload, "worldDay", 0d);
+            if (!double.IsFinite(day) || !float.IsFinite((float)day))
+                return ForeignAgentAssignmentError("invalid_world_day");
             List<Dictionary<string, object>> candidates = ReadDictionaryList(payload, "candidates");
             List<Dictionary<string, object>> enemies = ReadDictionaryList(payload, "enemyKingdoms");
             List<Dictionary<string, object>> actions = new List<Dictionary<string, object>>();
@@ -440,7 +442,8 @@ namespace ReignBetaServer
                         { ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), ["campaign"] = campaignId, ["timeline"] = timelineId, ["agent"] = ReadString(agent, "agent_hero_id", "") }, transaction);
                         agent["status"] = "dormant";
                     }
-                    if (ReadString(agent, "status", "") != "active" || ReadDouble(agent, "next_action_day", day + 1d) > day) continue;
+                    double scheduledDueDay = ReadDouble(agent, "next_action_day", day + 1d);
+                    if (ReadString(agent, "status", "") != "active" || !(scheduledDueDay <= day)) continue;
                     string agentId = ReadString(agent, "agent_hero_id", "");
                     double productionActionRoll = RelationshipsService.StableUnit(string.Join("|", campaignId, agentId, Math.Floor(day), "action"));
                     Dictionary<string, object> controlledAction = payload.TryGetValue("controlledAgentAction", out object controlledValue)
@@ -464,21 +467,33 @@ namespace ReignBetaServer
                         double detectRoll = RelationshipsService.StableUnit(actionKey + "|detect");
                         bool detected = detectRoll < 0.25d;
                         bool attributed = detected && RelationshipsService.StableUnit(actionKey + "|attribute") < 0.35d;
-                        actions.Add(new Dictionary<string, object>
+                        string assignmentId = ForeignAgentOccurrenceId(campaignId, timelineId, agent);
+                        double duration = effect == "construction" ? 14d : 10d;
+                        var action = new Dictionary<string, object>
                         {
                             ["actionId"] = actionId,
-                            ["assignmentId"] = ForeignAgentOccurrenceId(campaignId, timelineId, agent),
+                            ["assignmentId"] = assignmentId,
                             ["exposureRevision"] = 0,
                             ["agentHeroStringId"] = agentId, ["sponsorKingdomStringId"] = sponsor,
                             ["settlementStringId"] = ReadString(agent, "settlement_id", ""), ["effectType"] = effect,
-                            ["durationDays"] = effect == "construction" ? 14d : 10d,
+                            ["durationDays"] = duration,
                             ["magnitude"] = effect == "food" ? -0.20d : effect == "construction" ? -0.30d : -1d,
                             ["detected"] = detected, ["sponsorAttributed"] = attributed,
                             ["summary"] = detected
                                 ? attributed ? "The settlement detected a foreign disruption and identified its sponsoring kingdom."
                                 : "The settlement detected covert disruption, but the sponsor remained unknown."
                                 : "A hidden foreign agent disrupted the settlement without detection."
-                        });
+                        };
+                        // A committed receipt records issuance. The client can still lose the reply
+                        // or load a save that never persisted the native effect.
+                        SpymasterStore.InsertForeignAgentDisruptionReceipt(connection, new Dictionary<string, object>
+                        {
+                            ["campaign"] = campaignId, ["timeline"] = timelineId, ["generation"] = generation,
+                            ["action"] = actionId, ["assignment"] = assignmentId, ["due"] = scheduledDueDay,
+                            ["issued"] = day, ["expires"] = (double)((float)day + (float)duration),
+                            ["payload"] = Json.Serialize(action)
+                        }, transaction);
+                        actions.Add(action);
                     }
                     double next = day + 1d + Math.Floor(RelationshipsService.StableUnit(agentId + "|" + day.ToString(CultureInfo.InvariantCulture) + "|next") * 20d);
                     SpymasterStore.UpdateForeignAgentAssignments3(connection, new Dictionary<string, object>

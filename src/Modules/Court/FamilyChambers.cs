@@ -215,13 +215,9 @@ namespace ReignBetaServer
             List<Dictionary<string, object>> profiles = ReadDictionaryList(payload, "participantProfiles").Take(4).ToList();
             if (string.IsNullOrWhiteSpace(cacheKey) || !FamilySceneParticipantCountValid(profiles.Count)) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "A cache key and one to four participants are required." };
             string folder = Path.Combine(CampaignFileService.CampaignDirectory(campaignId), "family_chambers", CampaignFileService.SafePathSegment(timelineId, "main"));
-            string refsFolder = Path.Combine(folder, "child_references"); Directory.CreateDirectory(refsFolder);
             string imagePath = Path.Combine(folder, CampaignFileService.SafePathSegment(cacheKey, "scene") + ".png");
             if (File.Exists(imagePath)) return new Dictionary<string, object> { ["ok"] = true, ["cached"] = true, ["imageBase64"] = Convert.ToBase64String(File.ReadAllBytes(imagePath)) };
-            Dictionary<string, string> suppliedReferences = ReadDictionaryList(payload, "participantReferences")
-                .Where(item => !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(item)) && !string.IsNullOrWhiteSpace(ReadString(item, "imageBase64", "")))
-                .GroupBy(CampaignFileService.CharacterIdFrom, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(group => group.Key, group => ReadString(group.First(), "imageBase64", ""), StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string> suppliedReferences = FamilySceneAdultReferences(profiles, payload);
             List<byte[]> references = new List<byte[]>();
             List<string> referenceMappings = new List<string>();
             string timeBlock = ReadString(payload, "timeBlock", "daytime");
@@ -242,19 +238,6 @@ namespace ReignBetaServer
                     references.Add(Convert.FromBase64String(supplied));
                     referenceMappings.Add("the " + FamilyOrdinalWords(references.Count - 1) + " reference cell depicts the person in the " + FamilyPositionWords(i, profiles.Count) + " zone");
                 }
-                if (isChild)
-                {
-                    string refPath = Path.Combine(refsFolder, CampaignFileService.SafePathSegment(id, "child") + ".png");
-                    string manifestPath = refPath + ".json";
-                    if (File.Exists(refPath))
-                    {
-                        references.Add(File.ReadAllBytes(refPath));
-                        referenceMappings.Add("the " + FamilyOrdinalWords(references.Count - 1) + " reference cell depicts the person in the " + FamilyPositionWords(i, profiles.Count) + " zone");
-                    }
-                    Dictionary<string, object> manifest = CampaignFileService.ReadJsonObject(manifestPath) ?? new Dictionary<string, object>();
-                    double oldAge = ReadDouble(manifest, "age", age);
-                    if (age - oldAge >= 2d) prompt.AppendLine("Advance the person in the " + FamilyPositionWords(i, profiles.Count) + " zone from " + FamilyAgeWords(oldAge) + " to " + FamilyAgeWords(age) + " in this single image-to-image pass while preserving identity.");
-                }
             }
             if (referenceMappings.Count > 0)
                 prompt.AppendLine("The supplied reference contact sheet is identity guidance only: " + string.Join("; ", referenceMappings) + ". Preserve those identities without copying backgrounds, adding figures, or duplicating anyone.");
@@ -265,15 +248,41 @@ namespace ReignBetaServer
                 ["promptPurpose"] = "family_chambers_scene", ["prompt"] = prompt.ToString(), ["outputSize"] = "1536x864",
                 ["sharedCacheOutput"] = false, ["cacheKey"] = "family_chambers_" + CampaignFileService.SafePathSegment(cacheKey, "scene"), ["heroStringId"] = "family_chambers"
             };
+            // Only the contact sheet assembled for this scene can provide an image reference.
+            foreach (string key in new[] { "sourceImageBase64", "imageBase64", "sourceImageDataUrl", "imageDataUrl" })
+                imagePayload.Remove(key);
             if (sheet != null) imagePayload["sourceImageBase64"] = Convert.ToBase64String(sheet);
             Dictionary<string, object> generated = PortraitsService.PortraitGenerate(imagePayload);
             if (!ReadBool(generated, "ok", false)) return generated;
             byte[] scene = NormalizeCastleScene16By9(Convert.FromBase64String(ReadString(generated, "imageBase64", "")), out _, out _);
             if (scene == null) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Generated scene could not be normalized." };
+            // A generated scene is illustration, and face detection alone cannot verify who is in a slot.
+            // Keep legacy crops on disk for recovery, but never read or refresh them as identity references.
+            Directory.CreateDirectory(folder);
             PortraitsService.WriteSharedPortraitAtomic(imagePath, scene);
-            SaveFamilyChildReferences(scene, profiles, refsFolder, ReadDouble(payload, "worldDay", 0d));
             generated["imageBase64"] = Convert.ToBase64String(scene); generated["cached"] = false;
             return generated;
+        }
+
+        internal static Dictionary<string, string> FamilySceneAdultReferences(
+            List<Dictionary<string, object>> profiles, Dictionary<string, object> payload)
+        {
+            var adultIds = profiles.Where(profile => !ReadBool(profile, "isChild", true))
+                .Select(CampaignFileService.CharacterIdFrom)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .ToHashSet(StringComparer.Ordinal);
+            var childIds = profiles.Where(profile => ReadBool(profile, "isChild", true))
+                .Select(CampaignFileService.CharacterIdFrom);
+            adultIds.ExceptWith(childIds);
+            var references = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (Dictionary<string, object> item in ReadDictionaryList(payload, "participantReferences"))
+            {
+                string id = CampaignFileService.CharacterIdFrom(item);
+                string encoded = ReadString(item, "imageBase64", "");
+                if (adultIds.Contains(id) && !string.IsNullOrWhiteSpace(encoded))
+                    references.TryAdd(id, encoded);
+            }
+            return references;
         }
 
         private static byte[] FamilyReferenceSheet(List<byte[]> images)
@@ -291,33 +300,5 @@ namespace ReignBetaServer
             return PngEncoder.EncodeRgba(canvas, width, height);
         }
 
-        private static void SaveFamilyChildReferences(byte[] scene, List<Dictionary<string, object>> profiles, string folder, double worldDay)
-        {
-            byte[] rgba = PngReencode.DecodeToRgba(scene, out int width, out int height); if (rgba == null) return;
-            int slotWidth = width / profiles.Count;
-            for (int i = 0; i < profiles.Count; i++)
-            {
-                Dictionary<string, object> profile = profiles[i]; if (!ReadBool(profile, "isChild", false)) continue;
-                int x0 = i * slotWidth; int actualWidth = i == profiles.Count - 1 ? width - x0 : slotWidth;
-                byte[] slot = new byte[actualWidth * height * 4];
-                for (int y = 0; y < height; y++) Buffer.BlockCopy(rgba, (y * width + x0) * 4, slot, y * actualWidth * 4, actualWidth * 4);
-                try
-                {
-                    PortraitFaceFocus face = PortraitsService.DetectPortraitFaceFocus(slot, actualWidth, height);
-                    if (face.Confidence < 0.70d || face.CandidateCount != 1) continue;
-                    int fw = Math.Max(1, (int)(face.Width * actualWidth)), fh = Math.Max(1, (int)(face.Height * height));
-                    int cx = (int)((face.X + face.Width / 2d) * actualWidth), cy = (int)((face.Y + face.Height / 2d) * height);
-                    int crop = Math.Max(fw, fh) * 3; crop = Math.Min(crop, Math.Min(actualWidth, height));
-                    int sx = Math.Max(0, Math.Min(actualWidth - crop, cx - crop / 2)); int sy = Math.Max(0, Math.Min(height - crop, cy - crop / 2));
-                    byte[] cut = new byte[crop * crop * 4]; for (int y = 0; y < crop; y++) Buffer.BlockCopy(slot, ((sy + y) * actualWidth + sx) * 4, cut, y * crop * 4, crop * 4);
-                    byte[] resized = PortraitDerivativeCore.ResizeBilinear(cut, crop, crop, 512, 512);
-                    string id = CampaignFileService.CharacterIdFrom(profile); string path = Path.Combine(folder, CampaignFileService.SafePathSegment(id, "child") + ".png");
-                    PortraitsService.WriteSharedPortraitAtomic(path, PngEncoder.EncodeRgba(resized, 512, 512));
-                    PortraitsService.WriteSharedPortraitAtomic(path + ".json", Encoding.UTF8.GetBytes(Json.Serialize(new Dictionary<string, object>
-                    { ["heroId"] = id, ["age"] = ReadDouble(profile, "age", 0d), ["worldDay"] = worldDay, ["confidence"] = face.Confidence, ["method"] = "ultraface_fixed_participant_slot", ["updatedUtc"] = DateTime.UtcNow.ToString("O") })));
-                }
-                catch (Exception ex) { OperationsService.LogOperational("family_chambers.child_reference_skipped", new Dictionary<string, object> { ["heroId"] = CampaignFileService.CharacterIdFrom(profile), ["error"] = DialogueService.LimitText(ex.Message, 300) }); }
-            }
-        }
     }
 }

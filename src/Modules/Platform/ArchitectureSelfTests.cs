@@ -332,12 +332,16 @@ namespace ReignBetaServer
                     string eventHistoryPath = DialogueService.SocialEventTranscriptFile(campaignId, "history_roundtrip");
                     foreach (var eventLine in eventHistoryFixture) CampaignFileService.AppendJsonLineToPath(eventHistoryPath, eventLine);
                     CampaignFileService.AppendJsonLineToPath(eventHistoryPath, duplicateNpcLine);
-                    var recoveredEventHistory = DialogueService.BuildSocialEventPromptTranscript(Program.ReadJsonLinesFromPath(eventHistoryPath), 30);
+                    var recoveredEventHistory = Program.ReadIndexedSocialEventPromptTranscript(eventHistoryPath, 30);
                     string[] expectedHistory = eventHistoryFixture.Select(row => ReadString(row, "text", "")).ToArray();
                     add("social_event_history_keeps_each_speaker_and_deduplicates_retries",
                         recoveredEventHistory.Select(row => ReadString(row, "text", "")).SequenceEqual(expectedHistory),
                         "Persisted player and two NPC contributions survive both shared event turn IDs; replaying one NPC row adds no duplicate.", recoveredEventHistory);
-                    var boundedEventHistory = DialogueService.BuildSocialEventPromptTranscript(Program.ReadJsonLinesFromPath(eventHistoryPath), 2);
+                    var boundedEventHistory = Program.ReadIndexedSocialEventPromptTranscript(eventHistoryPath, 2);
+                    var originalEventHistory = DialogueService.BuildSocialEventPromptTranscript(Program.ReadJsonLinesFromPath(eventHistoryPath), 2);
+                    add("social_event_indexed_file_view_matches_canonical_rows",
+                        Json.Serialize(boundedEventHistory) == Json.Serialize(originalEventHistory),
+                        "The indexed path retains the canonical ordering, complete exchange and original linkage of the strict event reader.", boundedEventHistory.Count);
                     add("social_event_history_same_second_order_and_complete_boundary",
                         boundedEventHistory.Select(row => ReadString(row, "text", "")).SequenceEqual(expectedHistory.Skip(3)),
                         "Same-second lines retain append order and the window includes the whole latest player/NPC exchange.", boundedEventHistory);

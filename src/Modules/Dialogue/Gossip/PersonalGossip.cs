@@ -175,6 +175,17 @@ namespace ReignBetaServer
             return result.OrderBy(x => x, StringComparer.Ordinal).ToList();
         }
 
+        private static List<string> ParticipantGossipMentionedIds(IEnumerable<Dictionary<string, object>> sources,
+            Dictionary<string, object> npc, Dictionary<string, object> player, List<Dictionary<string, object>> people)
+        {
+            return sources.SelectMany(source =>
+            {
+                bool playerAuthored = ReadString(source, "role", "") == "player";
+                return ReadStringList(source, "speechSpans").SelectMany(span =>
+                    GossipMentionedIds(span, playerAuthored ? player : npc, playerAuthored ? npc : player, people));
+            }).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
         private static double GossipConversationDelta(ReignDbConnection c, string timeline, string session, string speaker, string player)
         {
             if (!WorldSimulationService.TableExists(c, "conversation_relationship_receipts")) return 0;
@@ -202,28 +213,37 @@ namespace ReignBetaServer
                     var self = people.FirstOrDefault(p => GossipSameId(GossipHeroId(p), speaker));
                     var main = people.FirstOrDefault(p => GossipSameId(GossipHeroId(p), player));
                     if (self == null || session.Length == 0) return;
-                    var mentioned = GossipMentionedIds(playerText, main, self, people)
-                        .Concat(GossipMentionedIds(reply, self, main, people)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    var sourceIds = ReadStringList(exchange, "turnIds");
+                    var sources = ParticipantGossipSources(sourceIds, ReadParticipantGossipTurns(c, sourceIds), speaker, player,
+                        ReadString(exchange, "sessionId", ""), ReadString(exchange, "exchangeId", ""))
+                        ?? new List<Dictionary<string, object>>();
+                    var speech = sources.SelectMany(source => ReadStringList(source, "speechSpans")).ToList();
+                    var mentioned = ParticipantGossipMentionedIds(sources, self, main, people);
                     mentioned.RemoveAll(id => GossipSameId(id, speaker) || GossipSameId(id, player));
                     var signals = ReadDictionaryList(parsed, "gossipSignals").Take(8)
                         .Where(s => ReadDouble(s, "confidence", 0) >= .80
-                            && GossipQuoteSupported(ReadString(s, "evidenceQuote", ""), playerText + "\n" + reply)
+                            && ParticipantGossipQuoteAuthor(ReadString(s, "evidenceQuote", ""), sources).Length > 0
                             && GossipSourcePrivacyClassified(s)).ToList();
                     // A relationship receipt proves a feeling, not permission to reveal
                     // that an encounter occurred. Retain the decision without disclosure
                     // until accepted source-linked metadata classifies its privacy.
                     if (signals.Count == 0) signals.Add(GossipFields("topic", "impression", "evidenceQuote", "", "confidence", 1d,
                         "privacyUnclassified", true));
-                    foreach (var signal in signals)
+                    foreach (var proposedSignal in signals)
                     {
-                        signal["confidenceOwnerIds"] = GossipResolveConfidenceOwners(signal, speaker, player, mentioned, playerText);
+                        var signal = new Dictionary<string, object>(proposedSignal, StringComparer.OrdinalIgnoreCase);
+                        string quote = ReadString(signal, "evidenceQuote", "");
+                        string quoteAuthor = ParticipantGossipQuoteAuthor(quote, sources);
+                        signal["confidenceOwnerIds"] = GossipResolveConfidenceOwners(signal, speaker, player, mentioned,
+                            GossipSameId(quoteAuthor, player) ? quote : "");
+                        signal["targets"] = ReadDictionaryList(signal, "targets").Where(target =>
+                            ParticipantGossipTargetQuoteSupported(ReadString(target, "evidenceQuote", ""), sources, speaker)).ToList();
                         // Identities are resolved from the accepted words, never model-proposed
                         // names in background context. Keep the accepted source references.
                         signal["resolvedMentionedIds"] = mentioned;
-                        signal["sourceTurnIds"] = ReadStringList(exchange, "turnIds");
+                        signal["sourceTurnIds"] = sourceIds;
                         string category = GossipTopicCategory(ReadString(signal, "topic", "conversation"));
-                        if (category != "impression" && (ReadDouble(signal, "confidence", 0) < .80
-                            || !GossipQuoteSupported(ReadString(signal, "evidenceQuote", ""), playerText + "\n" + reply))) continue;
+
                         string subject = ReadString(signal, "subjectId", "");
                         if (!mentioned.Contains(subject, StringComparer.OrdinalIgnoreCase)) subject = "";
                         string id = GossipTopicId(timeline, speaker, player, day, category, subject);
@@ -233,10 +253,11 @@ namespace ReignBetaServer
                             "sessionId", session, "createdDay", prior == null ? day : ReadDouble(prior, "created_day", day),
                             "worldDay", day, "category", category, "subjectId", subject, "signal", signal,
                             "playerReference", GossipPlayerReference(c, speaker, player, main, payload),
-                            "mentionedIds", mentioned, "sourceTurnIds", ReadStringList(exchange, "turnIds"),
-                            "sourceExchangeId", ReadString(episode, "exchangeId", ""), "sourceText", playerText + "\n" + reply,
+                            "mentionedIds", mentioned, "sourceTurnIds", sourceIds,
+                            "sourceExchangeId", ReadString(episode, "exchangeId", ""), "sourceText", string.Join("\n", speech),
                             "sourceSessionId", ReadString(exchange, "sessionId", ""), "sourceEvidenceExchangeId", ReadString(exchange, "exchangeId", ""),
-                            "sourceQuote", ReadString(signal, "evidenceQuote", ""), "speaker", self,
+                            "sourceQuote", quote, "sourceQuoteSpeakerId", quoteAuthor, "speaker", self,
+                            "participantSpeechVersion", ParticipantGossipSpeechVersion, "participantSpeechHash", ParticipantGossipSpeechHash(sources),
                             "policy", prior == null ? PersonalGossipSettings() : ReadDictionary(GossipJson(prior), "policy") ?? PersonalGossipSettings(),
                             "rootId", id, "hop", 1, "holders", new List<string> { speaker },
                             "presenceComplete", ReadBool(ReadDictionary(payload, "gossipPresence"), "rosterComplete", false));
@@ -337,7 +358,8 @@ namespace ReignBetaServer
                             && !ReadStringList(topic, "relationshipReassessmentExchangeIds").Contains(exchange, StringComparer.Ordinal)) continue;
                         var snapshot = GossipSnapshot(c, ReadString(topic, "timelineId", "main"));
                         if (Math.Abs(ReadDouble(snapshot, "worldDay", -1) - ReadDouble(topic, "worldDay", 0)) > 1d / 1440) continue;
-                        EvaluatePersonalGossip(c, campaign, topic, ReadDictionaryList(snapshot, "people"));
+                        if (GossipSourcesActive(c, topic))
+                            EvaluatePersonalGossip(c, campaign, topic, ReadDictionaryList(snapshot, "people"));
                     }
                 }
                 SchedulePersonalGossip(campaign);

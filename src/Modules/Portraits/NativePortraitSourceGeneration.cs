@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using AIPortraits;
 using ReignPortraits;
 
@@ -17,6 +18,7 @@ namespace ReignBetaServer
         private const int NativePortraitSourceWidth = 768;
         private const int NativePortraitSourceHeight = 1024;
         private const int NativePortraitGeneratorTimeoutMs = 180000;
+        private const int NativePortraitOwnedRenderBudgetMs = 160000;
         private const int PortraitProductReceiptVersion = 1;
         private const string PortraitProductReceiptSchema = "reign-portrait-product-v1";
         private const string PortraitInputReceiptSchema = "reign-portrait-input-v1";
@@ -114,13 +116,25 @@ namespace ReignBetaServer
                 return false;
             }
 
-            string jobRoot = Path.Combine(Path.GetTempPath(), "ReignPortraitSource", Guid.NewGuid().ToString("N"));
+            string attemptId = Guid.NewGuid().ToString("N");
+            string jobRoot = Path.Combine(Path.GetTempPath(), "ReignPortraitSource", attemptId);
             string outputPath = Path.Combine(jobRoot, "source.png");
             string resultPath = Path.Combine(jobRoot, "result.json");
+            string closurePath = Path.Combine(jobRoot, "closed.json");
+            bool launchAttempted = false;
+            bool closureConfirmed = false;
             Directory.CreateDirectory(jobRoot);
             try
             {
-                var arguments = new StringBuilder();
+                var start = new ProcessStartInfo
+                {
+                    FileName = executable,
+                    WorkingDirectory = Path.GetDirectoryName(executable),
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                var arguments = start.ArgumentList;
                 var snapshot = ReadDictionary(payload, "nativeCharacterSnapshot");
                 if (snapshot != null)
                 {
@@ -139,17 +153,12 @@ namespace ReignBetaServer
                 AppendProcessArgument(arguments, "--hero-id", ReadFirstString(payload, "heroStringId", "heroId", "characterId"));
                 AppendProcessArgument(arguments, "--character-object-id", ReadString(payload, "characterObjectId", ""));
                 AppendProcessArgument(arguments, "--cache-key", ReadString(payload, "cacheKey", ""));
-                AppendProcessArgument(arguments, "--output", NativeGeneratorPath(outputPath));
+                AppendProcessArgument(arguments, "--owned-output", NativeGeneratorPath(outputPath));
                 AppendProcessArgument(arguments, "--result", NativeGeneratorPath(resultPath));
-                var start = new ProcessStartInfo
-                {
-                    FileName = executable,
-                    Arguments = arguments.ToString(),
-                    WorkingDirectory = Path.GetDirectoryName(executable),
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden
-                };
+                AppendProcessArgument(arguments, "--attempt-id", attemptId);
+                AppendProcessArgument(arguments, "--render-deadline-utc",
+                    DateTimeOffset.UtcNow.AddMilliseconds(NativePortraitOwnedRenderBudgetMs).ToString("O", CultureInfo.InvariantCulture));
+                launchAttempted = true;
                 using (Process process = Process.Start(start))
                 {
                     if (process == null)
@@ -166,6 +175,13 @@ namespace ReignBetaServer
                     if (process.ExitCode != 0 || !File.Exists(outputPath))
                     {
                         error = ReadNativePortraitGeneratorError(resultPath, process.ExitCode);
+                        return false;
+                    }
+                    closureConfirmed = TryReadNativePortraitClosure(closurePath, attemptId, out bool deadlineReached);
+                    if (!closureConfirmed || deadlineReached)
+                    {
+                        error = deadlineReached ? "The Windows native portrait attempt reached its deadline."
+                            : "The Windows native portrait job did not confirm closure.";
                         return false;
                     }
                 }
@@ -198,8 +214,41 @@ namespace ReignBetaServer
             }
             finally
             {
-                try { if (Directory.Exists(jobRoot)) Directory.Delete(jobRoot, true); } catch { }
+                if (!launchAttempted || closureConfirmed || TryReadNativePortraitClosure(closurePath, attemptId, out _))
+                {
+                    try { if (Directory.Exists(jobRoot)) Directory.Delete(jobRoot, true); } catch { }
+                }
+                else
+                {
+                    error += $" Windows job closure is unconfirmed; native portrait attempt {attemptId} was retained.";
+                }
             }
+        }
+
+        internal static bool TryReadNativePortraitClosure(string path, string attemptId, out bool deadlineReached)
+        {
+            deadlineReached = false;
+            try
+            {
+                using var file = File.OpenRead(path);
+                if (file.Length > 1024) return false;
+                using var document = JsonDocument.Parse(file, new JsonDocumentOptions { MaxDepth = 2 });
+                var receipt = document.RootElement;
+                if (receipt.ValueKind != JsonValueKind.Object
+                    || !receipt.TryGetProperty("schema", out var schema)
+                    || schema.ValueKind != JsonValueKind.String || !schema.ValueEquals("reign-native-render-closure-v1")
+                    || !receipt.TryGetProperty("attemptId", out var id)
+                    || id.ValueKind != JsonValueKind.String || !id.ValueEquals(attemptId)
+                    || !receipt.TryGetProperty("jobClosed", out var closed) || closed.ValueKind != JsonValueKind.True
+                    || !receipt.TryGetProperty("deadlineReached", out var deadline)
+                    || deadline.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    return false;
+                deadlineReached = deadline.GetBoolean();
+                return true;
+            }
+            catch (IOException) { return false; }
+            catch (UnauthorizedAccessException) { return false; }
+            catch (JsonException) { return false; }
         }
 
         private static string ResolveNativePortraitGeneratorPath(Dictionary<string, object> settings)
@@ -252,15 +301,23 @@ namespace ReignBetaServer
             return "The native portrait generator exited with code " + exitCode + ".";
         }
 
-        private static void AppendProcessArgument(StringBuilder builder, string name, string value = null)
+        private static readonly HashSet<string> NativePortraitCommandOptions = new(StringComparer.OrdinalIgnoreCase)
         {
-            if (builder.Length > 0) builder.Append(' ');
-            builder.Append(QuoteProcessArgument(name));
-            if (value != null) builder.Append(' ').Append(QuoteProcessArgument(value));
-        }
+            "--reign-render-portrait-source", "--character-snapshot", "--campaign-id", "--reign-data-root",
+            "--hero-id", "--character-object-id", "--cache-key", "--owned-output", "--result",
+            "--attempt-id", "--render-deadline-utc", "--game", "--output"
+        };
 
-        private static string QuoteProcessArgument(string value) =>
-            "\"" + (value ?? "").Replace("\"", "\\\"") + "\"";
+        private static void AppendProcessArgument(IList<string> arguments, string name, string value = null)
+        {
+            // WSL forwards NUL-terminated arguments. Both helpers also inspect values for option names.
+            if (name.Contains('\0') || value?.Contains('\0') == true
+                || string.Equals(name, "--output", StringComparison.OrdinalIgnoreCase)
+                || value != null && NativePortraitCommandOptions.Contains(value))
+                throw new ArgumentException("Native portrait arguments contain invalid characters or a reserved option.");
+            arguments.Add(name);
+            if (value != null) arguments.Add(value);
+        }
 
         private static void RequirePortraitSourceContract(byte[] bytes, string label)
         {
