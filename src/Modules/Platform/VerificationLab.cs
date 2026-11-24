@@ -501,6 +501,12 @@ namespace ReignBetaServer
                 AddSubsystemListSummary(checks, "contracts.chat_view", "portraits_images", PortraitsService.RunChatViewContractTests());
                 return;
             }
+            if (string.Equals(requestedSuite, "character_editor", StringComparison.OrdinalIgnoreCase))
+            {
+                AddSubsystemListSummary(checks, "pipeline.character_editor", "character_construction",
+                    CharactersService.RunCharacterEditorSubsystemSelfTests(), caseResultLimit: 64);
+                return;
+            }
             if (string.Equals(requestedSuite, "character_narrative", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(requestedSuite, "contracts", StringComparison.OrdinalIgnoreCase))
                 AddSubsystemListSummary(checks, "contracts.character_narrative", "characters", CharactersService.RunCharacterNarrativeTests());

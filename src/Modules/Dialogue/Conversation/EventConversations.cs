@@ -112,16 +112,26 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "eventId is required." };
             }
 
-            List<Dictionary<string, object>> all = Program.ReadJsonLinesFromPath(SocialEventTranscriptFile(campaignId, eventId));
-            all = DialogueService.ReadOriginalConversationHistory(campaignId, payload, "", "social_event_" + DialogueService.SafeMemoryKey(eventId), limit, all);
-            int start = Math.Max(0, all.Count - limit);
+            List<Dictionary<string, object>> lines = ReadEventConversationHistory(
+                campaignId, payload, "social_event_" + SafeMemoryKey(eventId), limit,
+                SocialEventTranscriptFile(campaignId, eventId));
             return new Dictionary<string, object>
             {
                 ["ok"] = true,
                 ["campaignId"] = campaignId,
                 ["eventId"] = eventId,
-                ["lines"] = all.Skip(start).ToList()
+                ["lines"] = lines
             };
+        }
+
+        private static List<Dictionary<string, object>> ReadEventConversationHistory(string campaignId,
+            Dictionary<string, object> payload, string sessionId, int limit, string transcriptPath)
+        {
+            if (ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId").Length == 0)
+                return Program.ReadDialogueHistoryTail(transcriptPath, limit);
+
+            List<Dictionary<string, object>> legacy = Program.ReadJsonLinesFromPath(transcriptPath);
+            return ReadOriginalConversationHistory(campaignId, payload, "", sessionId, limit, legacy);
         }
 
         internal static Dictionary<string, object> PartyChatHistory(Dictionary<string, object> payload)
@@ -139,11 +149,8 @@ namespace ReignBetaServer
                 };
             }
 
-            List<Dictionary<string, object>> all = Program.ReadJsonLinesFromPath(
-                PartyChatSessionTranscriptFile(campaignId, payload));
-            all = DialogueService.ReadOriginalConversationHistory(campaignId, payload, "", sessionId, limit, all);
-            int start = Math.Max(0, all.Count - limit);
-            List<Dictionary<string, object>> lines = all.Skip(start).ToList();
+            List<Dictionary<string, object>> lines = ReadEventConversationHistory(
+                campaignId, payload, sessionId, limit, PartyChatSessionTranscriptFile(campaignId, payload));
             for (int index = 0; index < lines.Count; index++)
             {
                 Dictionary<string, object> line = lines[index];

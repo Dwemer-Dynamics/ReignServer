@@ -689,6 +689,10 @@ namespace ReignBetaServer
             });
             try
             {
+                using var suppressRetries = new ReignDatabase.SqlStatementRetrySuppression(connection);
+                using var transaction = connection.BeginTransaction();
+                // The rebuild helpers enlist on this connection. Readers keep
+                // the prior projections until every replacement has committed.
                 DialogueService.RebuildCategorizedSearchIndexes(connection);
                 CharactersStore.DeleteSummaryFts(connection);
                 foreach (var row in CharactersStore.SelectSummaries(connection))
@@ -698,7 +702,9 @@ namespace ReignBetaServer
                         DialogueService.ExtractEntityIdsFromJson(ReadString(row, "about_entities_json", "[]")));
                 }
                 CharactersStore.UpdateCharacterEditorReconciliation(connection,
-                    new Dictionary<string, object> { ["job"] = job, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() });
+                    new Dictionary<string, object> { ["job"] = job, ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds() },
+                    transaction);
+                transaction.Commit();
                 return "completed";
             }
             catch (Exception ex)
@@ -1237,6 +1243,64 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
+        private static void VerifyCharacterEditorReconciliationTransaction(Action<string, bool, string> add)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation) return;
+            string campaign = "ce_reconcile_" + Guid.NewGuid().ToString("N");
+            const string hero = "editor_reconciliation_fixture";
+            const string rejectedJob = "editor_reconciliation_expected_failure";
+            const string acceptedJob = "editor_reconciliation_expected_success";
+            try
+            {
+                using var writer = ReignDatabase.OpenCampaignConnection(campaign);
+                EnsureCharacterEditorSchema(writer);
+                DialogueService.InsertMemoryFts(writer, "fixture_memory", "earlier memory", new(), new());
+                DialogueService.InsertSummaryFts(writer, "fixture_summary", "earlier summary", new(), new());
+                DialogueStore.InsertConversationTurnFts(writer, TestDict("id", "fixture_turn", "text", "earlier turn",
+                    "speaker", "Fixture", "participants", "", "channel", "in_person"));
+
+                // Reject the final status transition, after all three rebuilds
+                // have performed writes on the same PostgreSQL connection.
+                ReignDatabase.ExecuteSql(writer, "ALTER TABLE character_editor_reconciliation "
+                    + "ADD CONSTRAINT fixture_projection_completion CHECK (status <> 'completed') NOT VALID;");
+                string failure = ReconcileCharacterEditor(writer, hero, "profile", rejectedJob, "fixture_revision");
+                using var reader = ReignDatabase.OpenCampaignConnection(campaign);
+
+                List<Dictionary<string, object>> ProjectionRows() => ReignDatabase.QuerySql(reader,
+                    "SELECT text FROM memory_fts WHERE memory_id='fixture_memory' "
+                    + "UNION ALL SELECT text FROM summary_fts WHERE summary_id='fixture_summary' "
+                    + "UNION ALL SELECT text FROM conversation_turn_fts WHERE turn_id='fixture_turn';");
+                Dictionary<string, object> Job(string id) => ReignDatabase.QuerySql(reader,
+                    "SELECT status, result_json FROM character_editor_reconciliation WHERE job_id=$job;",
+                    TestDict("job", id)).SingleOrDefault();
+
+                var failedJob = Job(rejectedJob);
+                add("reconciliation_failure_keeps_prior_projections",
+                    failure == "failed" && ReadString(failedJob, "status", "") == "failed"
+                    && ReadString(failedJob, "result_json", "").Contains("fixture_projection_completion", StringComparison.Ordinal)
+                    && ProjectionRows().Select(row => ReadString(row, "text", "")).OrderBy(text => text, StringComparer.Ordinal)
+                        .SequenceEqual(new[] { "earlier memory", "earlier summary", "earlier turn" }),
+                    "Failure after the PostgreSQL rebuild keeps all three prior projections and a durable failure status.");
+
+                ReignDatabase.ExecuteSql(writer,
+                    "ALTER TABLE character_editor_reconciliation DROP CONSTRAINT fixture_projection_completion;");
+                string completed = ReconcileCharacterEditor(writer, hero, "profile", acceptedJob, "fixture_revision");
+                add("reconciliation_completion_commits_projection_replacement",
+                    completed == "completed" && ReadString(Job(acceptedJob), "status", "") == "completed"
+                    && ProjectionRows().Count == 0,
+                    "A successful rebuild publishes the new projections together with its completed status.");
+            }
+            catch (Exception ex)
+            {
+                add("reconciliation_transaction_fixture", false, ex.ToString());
+            }
+            finally
+            {
+                ReignPostgreSqlStorage.DropCampaign(campaign);
+                PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
+            }
+        }
+
         private static void VerifyCharacterEditorMetadataTransaction(Action<string, bool, string> add)
         {
             string campaign = "ce_meta_" + Guid.NewGuid().ToString("N");
@@ -1376,6 +1440,7 @@ namespace ReignBetaServer
             rows.AddRange(RunCharacterEditorHistoryProjectionSelfTests());
 #if !REIGN_EXCLUDE_VERIFICATION
             VerifyCharacterEditorMetadataTransaction(add);
+            VerifyCharacterEditorReconciliationTransaction(add);
 #endif
             string portraitFixture=Path.Combine(Path.GetTempPath(),"reign_character_editor_portraits_"+Guid.NewGuid().ToString("N"));
             try

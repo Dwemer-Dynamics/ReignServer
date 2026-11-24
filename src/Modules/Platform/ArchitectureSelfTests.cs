@@ -340,6 +340,14 @@ namespace ReignBetaServer
                     string eventHistoryPath = DialogueService.SocialEventTranscriptFile(campaignId, "history_roundtrip");
                     foreach (var eventLine in eventHistoryFixture) CampaignFileService.AppendJsonLineToPath(eventHistoryPath, eventLine);
                     CampaignFileService.AppendJsonLineToPath(eventHistoryPath, duplicateNpcLine);
+                    var displayedEventHistory = DialogueService.SocialEventHistory(TestDict(
+                        "campaignId", campaignId, "eventId", "history_roundtrip", "limit", 2));
+                    var legacyEventTail = ReadDictionaryList(displayedEventHistory, "lines");
+                    add("social_event_legacy_history_preserves_the_raw_tail",
+                        ReadBool(displayedEventHistory, "ok", false) && legacyEventTail.Count == 2
+                        && ReadString(legacyEventTail[0], "id", "") == ReadString(eventHistoryFixture[^1], "id", "")
+                        && ReadString(legacyEventTail[1], "id", "") == ReadString(duplicateNpcLine, "id", ""),
+                        "Anonymous event display keeps the last two physical records, including a raw retry.", legacyEventTail);
                     var recoveredEventHistory = Program.ReadIndexedSocialEventPromptTranscript(eventHistoryPath, 30);
                     string[] expectedHistory = eventHistoryFixture.Select(row => ReadString(row, "text", "")).ToArray();
                     add("social_event_history_keeps_each_speaker_and_deduplicates_retries",
