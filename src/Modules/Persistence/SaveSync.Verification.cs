@@ -1967,6 +1967,9 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
             try
             {
                 MarkSaveSyncActiveStateClean(campaignId, TestDict("savePointId", oldPoint));
+                string unrelatedTemporary = path + ".tmp_unrelated_fixture";
+                const string unrelatedContent = "Retain the unrelated temporary";
+                File.WriteAllText(unrelatedTemporary, unrelatedContent);
                 byte[] clean = File.ReadAllBytes(path);
                 bool directFailed = FailPublication(() => MarkSaveSyncActiveStateDirty(campaignId));
                 bool pathFailed = FailPublication(() => MarkSaveSyncActiveStateDirtyForPath(campaignPath));
@@ -1988,11 +1991,113 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
                     cleanFailed && dirtySurvived && CachedStateMatches(newPoint, false)
                     && !ReadBool(cleanSidecar, "dirty", true) && ReadString(cleanSidecar, "savePointId", "") == newPoint,
                     "A failed clean publication retains the last persisted dirty point until the clean retry is written.");
+
+                add("failed_active_state_publication_cleans_only_its_temporary", directFailed && pathFailed && cleanFailed
+                    && Directory.EnumerateFiles(fixtureRoot, "active-state.json.tmp_*").SequenceEqual(new[] { unrelatedTemporary })
+                    && File.ReadAllText(unrelatedTemporary) == unrelatedContent,
+                    "Failed active-state attempts remove their own scratch files while preserving an unrelated sibling.");
+                VerifyDirtyPublicationBeforeMetadataCommit(campaignId, path, FailPublication, add);
             }
             finally
             {
                 lock (SaveSyncActiveStateLock) SaveSyncActiveStates.Remove(campaignId);
                 if (Directory.Exists(fixtureRoot)) Directory.Delete(fixtureRoot, true);
+            }
+        }
+
+        private static void VerifyDirtyPublicationBeforeMetadataCommit(string campaign, string path,
+            Func<Action, bool> failPublication, Action<string, bool, string> add)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation)
+            {
+                add("dirty_before_commit_fixture_isolation", false, "The metadata fixture requires the isolated validation database.");
+                return;
+            }
+
+            const string point = "metadata_fixture_point";
+            try
+            {
+                using var writer = ReignPostgreSqlStorage.OpenCampaignConnection(campaign);
+                using var reader = ReignPostgreSqlStorage.OpenCampaignConnection(campaign);
+                ReignDatabase.ExecuteSql(writer, @"CREATE TABLE dirty_publication_fixture (
+marker INTEGER PRIMARY KEY CHECK (marker > 0));");
+                var activePoint = TestDict("savePointId", point);
+                MarkSaveSyncActiveStateClean(campaign, activePoint);
+
+                int Count(ReignDbConnection connection, ReignDbTransaction transaction = null) =>
+                    ReadInt(ReignDatabase.QuerySql(connection, "SELECT COUNT(*) AS count FROM dirty_publication_fixture;",
+                        transaction: transaction).Single(), "count", -1);
+                // The raw-only maintenance candidate would use the returning query seam and explicitly publish dirty before commit.
+                void Stage(int marker, ReignDbTransaction transaction) =>
+                    ReignDatabase.QuerySql(writer, "INSERT INTO dirty_publication_fixture(marker) VALUES($marker) RETURNING marker;",
+                        TestDict("marker", marker), transaction).Single();
+                bool DiskIsDirty()
+                {
+                    var sidecar = CampaignFileService.ReadAtomicallyReplacedJsonObject(path);
+                    return ReadString(sidecar, "savePointId", "") == point && ReadBool(sidecar, "dirty", false);
+                }
+                bool ReloadedStateIsDirty()
+                {
+                    lock (SaveSyncActiveStateLock)
+                    {
+                        SaveSyncActiveStates.Remove(campaign);
+                        var reloaded = ReadSaveSyncActiveStateLocked(campaign);
+                        return reloaded.SavePointId == point && reloaded.Dirty;
+                    }
+                }
+
+                byte[] clean = File.ReadAllBytes(path);
+                bool stagedBeforeFailure = false;
+                bool failed = failPublication(() =>
+                {
+                    using var transaction = writer.BeginTransaction();
+                    Stage(1, transaction);
+                    stagedBeforeFailure = Count(writer, transaction) == 1 && Count(reader) == 0;
+                    MarkSaveSyncActiveStateDirty(campaign);
+                    transaction.Commit();
+                });
+                add("dirty_publication_failure_rolls_back_staged_metadata",
+                    failed && stagedBeforeFailure && Count(reader) == 0 && clean.SequenceEqual(File.ReadAllBytes(path)),
+                    "A real sidecar replace failure rolls back staged PostgreSQL metadata and leaves the last clean marker intact.");
+
+                bool publishedBeforeCommit;
+                using (var transaction = writer.BeginTransaction())
+                {
+                    Stage(1, transaction);
+                    MarkSaveSyncActiveStateDirty(campaign);
+                    publishedBeforeCommit = DiskIsDirty() && Count(writer, transaction) == 1 && Count(reader) == 0;
+                    transaction.Commit();
+                }
+                add("dirty_publication_retry_is_visible_before_metadata_commit",
+                    publishedBeforeCommit && Count(reader) == 1 && ReloadedStateIsDirty(),
+                    "The same-process retry publishes the dirty checkpoint marker before PostgreSQL commit, and a fresh cache read observes it.");
+
+                MarkSaveSyncActiveStateClean(campaign, activePoint);
+                bool publishedBeforeSqlFailure = false, constraintRejected = false;
+                try
+                {
+                    using var transaction = writer.BeginTransaction();
+                    Stage(2, transaction);
+                    MarkSaveSyncActiveStateDirty(campaign);
+                    publishedBeforeSqlFailure = DiskIsDirty() && Count(writer, transaction) == 2 && Count(reader) == 1;
+                    Stage(0, transaction);
+                }
+                catch (Npgsql.PostgresException exception) when (exception.SqlState == "23514")
+                {
+                    constraintRejected = true;
+                }
+                add("dirty_publication_remains_conservative_after_metadata_rollback",
+                    publishedBeforeSqlFailure && constraintRejected && Count(reader) == 1
+                    && DiskIsDirty() && ReloadedStateIsDirty(),
+                    "A later PostgreSQL failure rolls back its staged row and leaves the already published dirty marker conservative.");
+            }
+            catch (Exception exception)
+            {
+                add("dirty_before_commit_fixture_exception", false, "The isolated metadata fixture failed with " + exception.GetType().Name + ".");
+            }
+            finally
+            {
+                ReignPostgreSqlStorage.DropCampaign(campaign);
             }
         }
 
@@ -2179,6 +2284,57 @@ WHERE locktype='advisory' AND NOT granted AND pg_backend_pid()=ANY(pg_blocking_p
                     queued && ReadString(superseded, "result", "") == "owner_mismatch"
                     && !superseded.ContainsKey("event") && ReadString(newOwner, "result", "") == "observed",
                     "A proof blocked by a prior PostgreSQL connection refuses the obsolete generation after that connection commits.");
+
+                Dictionary<string, object> CursorEvent(string id, long sequence) =>
+                    new Dictionary<string, object>(original) { ["eventId"] = id, ["sequence"] = sequence };
+
+                bool CursorsAt(long sequence, string id)
+                {
+                    using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                    var head = WorldSimulationStore.SelectWorldHistoryTimelines(connection, TestDict("id", timeline)).SingleOrDefault();
+                    var ingest = ReignDatabase.QuerySql(connection, @"SELECT last_sequence,last_event_id
+FROM world_history_ingest_state WHERE client_id='bannerlord' AND timeline_id=$timeline;",
+                        TestDict("timeline", timeline)).SingleOrDefault();
+                    return ReadLong(head, "head_sequence", -1) == sequence && ReadString(head, "head_event_id", "") == id
+                        && ReadLong(ingest, "last_sequence", -1) == sequence && ReadString(ingest, "last_event_id", "") == id;
+                }
+
+                bool UploadStoresEvent(string id, long sequence)
+                {
+                    var uploaded = Upload(CursorEvent(id, sequence));
+                    using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                    var stored = WorldSimulationStore.SelectWorldHistoryEvents4(connection,
+                        TestDict("id", id, "timeline", timeline)).SingleOrDefault();
+                    return ReadBool(uploaded, "ok", false) && ReadInt(uploaded, "accepted", -1) == 1
+                        && ReadString(stored, "event_id", "") == id && ReadLong(stored, "sequence", -1) == sequence;
+                }
+
+                add("world_history_cursors_keep_matching_pair_after_late_accepted_event",
+                    CursorsAt(3L, unrelatedId) && UploadStoresEvent("history_proof_late", 2L)
+                    && CursorsAt(3L, unrelatedId),
+                    "The ordinary wire still accepts the late row while both persisted cursors keep the newer pair.");
+
+                add("world_history_cursors_keep_established_id_on_equal_sequence_conflict",
+                    UploadStoresEvent("history_proof_equal_conflict", 3L) && CursorsAt(3L, unrelatedId),
+                    "An independently persisted equal-sequence event cannot replace an established cursor ID.");
+
+                const string nextEventId = "history_proof_newer";
+                add("world_history_cursors_advance_both_fields_to_newer_event",
+                    UploadStoresEvent(nextEventId, 4L) && CursorsAt(4L, nextEventId),
+                    "A higher sequence advances the sequence and event ID together in both cursors.");
+
+                using (var legacy = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    ReignDatabase.ExecuteSql(legacy, "UPDATE world_history_timelines SET head_event_id='' WHERE timeline_id=$timeline;",
+                        TestDict("timeline", timeline));
+                    ReignDatabase.ExecuteSql(legacy, @"UPDATE world_history_ingest_state SET last_event_id=''
+WHERE client_id='bannerlord' AND timeline_id=$timeline;", TestDict("timeline", timeline));
+                }
+                const string legacyEventId = "history_proof_legacy_fill";
+                add("world_history_cursors_initialize_empty_legacy_id_at_matching_sequence",
+                    CursorsAt(4L, "") && UploadStoresEvent("history_proof_legacy_older", 3L) && CursorsAt(4L, "")
+                    && UploadStoresEvent(legacyEventId, 4L) && CursorsAt(4L, legacyEventId),
+                    "A blank legacy ID stays blank for earlier events and can be filled at its existing sequence.");
             }
             finally
             {

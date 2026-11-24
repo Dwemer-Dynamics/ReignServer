@@ -466,7 +466,8 @@ namespace ReignBetaServer
             string generationOperationId,
             string generationStartedUtc,
             Dictionary<string, object> timing,
-            long durationMs)
+            long durationMs,
+            Dictionary<string, object> refreshPublication)
         {
             if (string.IsNullOrWhiteSpace(heroId))
             {
@@ -487,7 +488,7 @@ namespace ReignBetaServer
                 File.WriteAllBytes(portraitPath, imageBytes);
                 File.WriteAllBytes(sourcePath, sourceImage);
                 File.WriteAllText(promptPath, prompt ?? "", Encoding.UTF8);
-                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.json"), new Dictionary<string, object>
+                var metadata = new Dictionary<string, object>
                 {
                     ["campaignId"] = campaignId,
                     ["heroStringId"] = heroId,
@@ -509,7 +510,9 @@ namespace ReignBetaServer
                     ["physicalConfidence"] = physicalConfidence ?? new Dictionary<string, object>(),
                     ["storedPath"] = portraitPath,
                     ["updatedUtc"] = DateTime.UtcNow.ToString("o")
-                });
+                };
+                if (refreshPublication != null) metadata[PortraitRefreshPublicationKey] = refreshPublication;
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.json"), metadata);
             }
 
             return portraitPath;

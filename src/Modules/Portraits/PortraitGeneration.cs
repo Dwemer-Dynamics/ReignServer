@@ -356,10 +356,10 @@ namespace ReignBetaServer
                 }
                 payload["generationOperationId"] = generationOperationId;
                 payload["generationStartedUtc"] = generationStartedUtc;
-                string StoreCharacterPortrait()
+                string StoreCharacterPortrait(Dictionary<string, object> refreshPublication)
                     => StoreGeneratedPortrait(campaignId, heroId, characterObjectId, cacheKey, prompt, sourceImage,
                         call.ImageBytes, call, physicalConfidence, sourceProvenance, productReceipt, portraitInput,
-                        generationOperationId, generationStartedUtc, timing, total.ElapsedMilliseconds);
+                        generationOperationId, generationStartedUtc, timing, total.ElapsedMilliseconds, refreshPublication);
                 string storedPath = ReadBool(payload, "sharedCacheOutput", false)
                     ? StoreGeneratedSharedPortrait(
                         payload,
@@ -371,7 +371,7 @@ namespace ReignBetaServer
                         physicalConfidence,
                         productReceipt)
                     : refreshBaseline == null
-                        ? StoreCharacterPortrait()
+                        ? StoreCharacterPortrait(null)
                         : PublishPortraitRefresh(refreshBaseline, call.ImageBytes, productReceipt, StoreCharacterPortrait);
                 Dictionary<string, object> response = new Dictionary<string, object>
                 {
@@ -605,6 +605,17 @@ namespace ReignBetaServer
                     };
                 }
                 portraitBytes = File.ReadAllBytes(portraitPath);
+                if (metadata.TryGetValue(PortraitRefreshPublicationKey, out object publication)
+                    && !PortraitRefreshPublicationMatches(Path.GetDirectoryName(portraitPath), portraitBytes, publication))
+                {
+                    return new Dictionary<string, object>
+                    {
+                        ["ok"] = false,
+                        ["generationOperationId"] = operationId,
+                        ["generationStatus"] = "failed",
+                        ["error"] = "The stored portrait refresh is incomplete or has been superseded. Start a new refresh."
+                    };
+                }
                 sourceBytes = File.ReadAllBytes(sourcePath);
                 prompt = File.ReadAllText(promptPath, Encoding.UTF8);
             }

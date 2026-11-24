@@ -607,17 +607,26 @@ namespace ReignBetaServer
             string path = SaveSyncActiveStatePath(campaignId);
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             string temp = path + ".tmp_" + Guid.NewGuid().ToString("N");
-            File.WriteAllText(temp, Json.Serialize(new Dictionary<string, object>
+            try
             {
-                ["format"] = "bannerlord-reign-save-sync-active-state",
-                ["version"] = 1,
-                ["campaignId"] = campaignId,
-                ["savePointId"] = state.SavePointId ?? "",
-                ["calendarSha256"] = state.CalendarSha256 ?? "",
-                ["dirty"] = dirty,
-                ["updatedUtc"] = DateTime.UtcNow.ToString("o")
-            }), new UTF8Encoding(false));
-            ReplaceSaveSyncFileWithRetry(temp, path);
+                File.WriteAllText(temp, Json.Serialize(new Dictionary<string, object>
+                {
+                    ["format"] = "bannerlord-reign-save-sync-active-state",
+                    ["version"] = 1,
+                    ["campaignId"] = campaignId,
+                    ["savePointId"] = state.SavePointId ?? "",
+                    ["calendarSha256"] = state.CalendarSha256 ?? "",
+                    ["dirty"] = dirty,
+                    ["updatedUtc"] = DateTime.UtcNow.ToString("o")
+                }), new UTF8Encoding(false));
+                ReplaceSaveSyncFileWithRetry(temp, path);
+            }
+            catch
+            {
+                // The active marker may be retried. Only remove the temporary created by this publication.
+                TryDeleteFile(temp);
+                throw;
+            }
         }
 
         internal static void ResumePendingSaveSyncOptimizations()

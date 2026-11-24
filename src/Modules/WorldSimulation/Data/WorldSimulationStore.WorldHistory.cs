@@ -174,13 +174,23 @@ AND event_type IN ('battle_completed','raid_completed','siege_completed');", par
 
         internal static void UpdateWorldHistoryTimelines2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            ReignDatabase.ExecuteSql(connection, "UPDATE world_history_timelines SET head_sequence=MAX(head_sequence,$sequence),head_event_id=$event,updated_utc=$now WHERE timeline_id=$timeline;", parameters, transaction);
+            // Update the sequence and event ID together. A legacy blank ID may be filled at the recorded sequence.
+            ReignDatabase.ExecuteSql(connection, @"UPDATE world_history_timelines
+SET head_sequence=$sequence,head_event_id=$event,updated_utc=$now
+WHERE timeline_id=$timeline AND (head_sequence<$sequence OR (head_sequence=$sequence AND head_event_id='' AND $event<>''));",
+                parameters, transaction, skipSaveSyncDirtyIfNoRowsAffected: true);
         }
 
         internal static void UpsertWorldHistoryIngestState(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_ingest_state(client_id,timeline_id,last_sequence,last_event_id,updated_utc)
-VALUES($client,$timeline,$sequence,$event,$now) ON CONFLICT(client_id,timeline_id) DO UPDATE SET last_sequence=MAX(world_history_ingest_state.last_sequence,$sequence),last_event_id=$event,updated_utc=$now;", parameters, transaction);
+VALUES($client,$timeline,$sequence,$event,$now)
+ON CONFLICT(client_id,timeline_id) DO UPDATE SET
+    last_sequence=excluded.last_sequence,last_event_id=excluded.last_event_id,updated_utc=excluded.updated_utc
+WHERE world_history_ingest_state.last_sequence<excluded.last_sequence
+    OR (world_history_ingest_state.last_sequence=excluded.last_sequence
+        AND world_history_ingest_state.last_event_id='' AND excluded.last_event_id<>'');",
+                parameters, transaction, skipSaveSyncDirtyIfNoRowsAffected: true);
         }
 
         internal static List<Dictionary<string, object>> SelectWorldHistoryEvents4(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
