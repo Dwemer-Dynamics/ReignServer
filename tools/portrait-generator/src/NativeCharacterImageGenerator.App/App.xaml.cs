@@ -1,4 +1,5 @@
 using System.IO;
+using System.Globalization;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media.Imaging;
@@ -33,9 +34,28 @@ internal static class BackgroundPortraitSourceCommand
     public static async Task<int> RunAsync(IReadOnlyList<string> args)
     {
         string resultPath = Value(args, "--result");
+        string attemptId = Value(args, "--attempt-id");
+        string closurePath = string.Empty;
+        DateTimeOffset deadline = default;
+        OwnedPortraitRenderJob? ownedJob = null;
         try
         {
-            string outputPath = Required(args, "--output");
+            bool ownedAttempt = args.Any(arg => arg is "--owned-output" or "--attempt-id" or "--render-deadline-utc");
+            string outputPath = Required(args, ownedAttempt ? "--owned-output" : "--output");
+            if (ownedAttempt)
+            {
+                string directory = Path.GetDirectoryName(Path.GetFullPath(outputPath))!;
+                if (!Guid.TryParseExact(attemptId, "N", out var parsedId)
+                    || attemptId != parsedId.ToString("N")
+                    || Path.GetFileName(directory) != attemptId
+                    || Path.GetFileName(outputPath) != "source.png"
+                    || Path.GetFullPath(resultPath) != Path.Combine(directory, "result.json")
+                    || !DateTimeOffset.TryParseExact(Value(args, "--render-deadline-utc"), "O",
+                        CultureInfo.InvariantCulture, DateTimeStyles.None, out deadline))
+                    throw new InvalidDataException("The owned native portrait attempt is invalid.");
+                closurePath = Path.Combine(directory, "closed.json");
+                ownedJob = new OwnedPortraitRenderJob(deadline);
+            }
             string heroId = Value(args, "--hero-id");
             string characterObjectId = Value(args, "--character-object-id");
             string cacheKey = Value(args, "--cache-key");
@@ -85,7 +105,8 @@ internal static class BackgroundPortraitSourceCommand
                 progress: null,
                 CancellationToken.None,
                 reignCatalog.Characters,
-                frameContract).ConfigureAwait(true);
+                frameContract,
+                ownedJob).ConfigureAwait(true);
             var item = render.Items.Single();
             if (!item.Success || !File.Exists(item.RawOutputPath))
             {
@@ -102,7 +123,9 @@ internal static class BackgroundPortraitSourceCommand
             if (!float.IsFinite(effectiveWeight) || effectiveWeight < 0 || effectiveWeight > 1
                 || !float.IsFinite(effectiveBuild) || effectiveBuild < 0 || effectiveBuild > 1)
                 throw new InvalidDataException("Rendered physique is outside the native 0-1 range.");
-            WriteFileAtomic(outputPath, await File.ReadAllBytesAsync(item.RawOutputPath).ConfigureAwait(true));
+            var bytes = await File.ReadAllBytesAsync(item.RawOutputPath).ConfigureAwait(true);
+            ownedJob?.ThrowIfExpired();
+            WriteFileAtomic(outputPath, bytes);
             WriteResult(resultPath, new
             {
                 ok = true,
@@ -131,6 +154,26 @@ internal static class BackgroundPortraitSourceCommand
         {
             WriteResult(resultPath, new { ok = false, error = exception.Message, generatedUtc = DateTime.UtcNow });
             return 1;
+        }
+        finally
+        {
+            bool confirmed = ownedJob?.CloseAndConfirm() ?? true;
+            if (confirmed && closurePath.Length != 0)
+            {
+                // This is the last write to the cross-platform attempt directory.
+                try
+                {
+                    WriteResult(closurePath, new
+                    {
+                        schema = "reign-native-render-closure-v1",
+                        attemptId,
+                        jobClosed = true,
+                        deadlineReached = ownedJob?.IsExpired ?? (DateTimeOffset.UtcNow >= deadline)
+                    });
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
         }
     }
 
