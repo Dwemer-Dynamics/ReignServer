@@ -2132,7 +2132,14 @@
     function renderCharacterEditor() {
       const d=characterEditorState.data,p=d?.documents?.profile||{};document.getElementById('characterEditorName').textContent=p.name||characterEditorState.heroId;document.getElementById('characterEditorMeta').textContent=[p.title,p.occupation,p.clanId,p.kingdomId].filter(Boolean).join(' | ');
       document.getElementById('characterEditorPortrait').src=`/character-editor/portrait?campaignId=${encodeURIComponent(editorCampaign())}&heroStringId=${encodeURIComponent(characterEditorState.heroId)}&variant=active&v=${Date.now()}`;
-      const pending=(d.nativeCommands||[]).filter(x=>['pending','claimed','failed'].includes(x.status)).length;document.getElementById('characterEditorPending').textContent=pending?`${pending} native change(s) pending`:'No pending native changes';const sectionSave=document.getElementById('characterEditorSaveSection');if(sectionSave)sectionSave.disabled=['traits','relationships','dynamic'].includes(characterEditorState.section);
+      const commands=d.nativeCommands||[];
+      const pending=commands.filter(x=>['pending','claimed','reconciling'].includes(x.status)).length;
+      const review=commands.filter(x=>['failed','projection_conflict'].includes(x.status)).length;
+      const queueStatus=[];
+      if(pending)queueStatus.push(`${pending} native change(s) pending`);
+      if(review)queueStatus.push(`${review} native change(s) need review`);
+      document.getElementById('characterEditorPending').textContent=queueStatus.join(' · ')||'No pending native changes';
+      const sectionSave=document.getElementById('characterEditorSaveSection');if(sectionSave)sectionSave.disabled=['traits','relationships','dynamic'].includes(characterEditorState.section);
       document.getElementById('characterEditorTabs').innerHTML=characterEditorSections.map(([id,label])=>`<button class='${id===characterEditorState.section?'active':''}' onclick='selectCharacterEditorSection("${id}")'>${label}${characterEditorState.dirty.has(id)?' *':''}</button>`).join('');renderCharacterEditorPanel();
     }
 

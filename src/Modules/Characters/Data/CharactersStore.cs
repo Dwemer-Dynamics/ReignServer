@@ -9,7 +9,7 @@ namespace ReignBetaServer
         internal static List<Dictionary<string, object>> SelectCharacterEditorNativeCommands(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, @"SELECT hero_id,COUNT(*) count FROM character_editor_native_commands
-WHERE status IN ('pending','claimed','failed') GROUP BY hero_id;", parameters, transaction);
+WHERE status IN ('pending','claimed','reconciling','failed','projection_conflict') GROUP BY hero_id;", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectCharacterEditorHeads(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
@@ -180,14 +180,23 @@ WHERE hero_a_id=$id OR hero_b_id=$id ORDER BY last_day DESC,updated_ts DESC LIMI
             ReignDatabase.ExecuteSql(connection, "UPDATE character_editor_revisions SET reconciliation_json=$reconcile WHERE revision_id=$id;", parameters, transaction);
         }
 
-        internal static List<Dictionary<string, object>> SelectCharacterEditorNativeCommands4(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static List<Dictionary<string, object>> ClaimCharacterEditorNativeCommands(ReignDbConnection connection, Dictionary<string, object> parameters)
         {
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM character_editor_native_commands WHERE status='pending' OR (status='claimed' AND claimed_ts<$stale) ORDER BY created_ts LIMIT 25;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"WITH next AS (
+SELECT c.command_id FROM character_editor_native_commands c
+WHERE (c.status='pending' OR (c.status='claimed' AND c.claimed_ts<$stale))
+AND NOT EXISTS (SELECT 1 FROM character_editor_native_commands earlier
+    WHERE earlier.hero_id=c.hero_id AND earlier.status IN ('pending','claimed','reconciling')
+    AND (earlier.status='reconciling' OR (earlier.created_ts,earlier.command_id)<(c.created_ts,c.command_id)))
+ORDER BY c.created_ts,c.command_id LIMIT 25 FOR UPDATE OF c SKIP LOCKED)
+UPDATE character_editor_native_commands c SET status='claimed',claimed_ts=$ts,result_json=$claim
+FROM next WHERE c.command_id=next.command_id RETURNING c.*;", parameters);
         }
 
-        internal static void UpdateCharacterEditorNativeCommands(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static List<Dictionary<string, object>> ReadCharacterEditorNativeReconciliations(ReignDbConnection connection)
         {
-            ReignDatabase.ExecuteSql(connection, "UPDATE character_editor_native_commands SET status='claimed',claimed_ts=$ts WHERE command_id=$id;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"SELECT * FROM character_editor_native_commands
+WHERE status='reconciling' ORDER BY created_ts,command_id;");
         }
 
         internal static List<Dictionary<string, object>> SelectCharacterEditorNativeCommands5(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
@@ -195,10 +204,11 @@ WHERE hero_a_id=$id OR hero_b_id=$id ORDER BY last_day DESC,updated_ts DESC LIMI
             return ReignDatabase.QuerySql(connection, "SELECT * FROM character_editor_native_commands WHERE command_id=$id LIMIT 1;", parameters, transaction);
         }
 
-        internal static void UpdateCharacterEditorNativeCommands2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static bool TransitionCharacterEditorNativeCommand(ReignDbConnection connection, Dictionary<string, object> parameters)
         {
-            ReignDatabase.ExecuteSql(connection, @"UPDATE character_editor_native_commands SET
-status=$status,resolved_ts=$ts,result_json=$result WHERE command_id=$id;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, @"UPDATE character_editor_native_commands SET
+status=$status,resolved_ts=$ts,result_json=$result WHERE command_id=$id AND status=$previous AND result_json=$basis
+RETURNING command_id;", parameters).Count == 1;
         }
 
         internal static void UpdateNotableMbtiProfiles(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
@@ -206,7 +216,8 @@ status=$status,resolved_ts=$ts,result_json=$result WHERE command_id=$id;", param
             ReignDatabase.ExecuteSql(connection, @"UPDATE notable_mbti_profiles SET
 native_sync_status='synchronized',native_action_id='',
 last_native_observed_json=$observed,updated_ts=$ts
-WHERE hero_id=$hero;", parameters, transaction);
+WHERE hero_id=$hero AND native_action_id=$action
+AND native_sync_status IN ('pending','claimed','awaiting_confirmation');", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectEditorHistorySources(ReignDbConnection connection, Dictionary<string, object> parameters)
