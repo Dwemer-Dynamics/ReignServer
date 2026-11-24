@@ -34,7 +34,7 @@ namespace ReignBetaServer
 
         private sealed record OutfitJournalEntry(string Role, string BeforeSha256, string AfterSha256, UnixFileMode? BeforeMode);
         private sealed record OutfitFileJournal(string Schema, string CampaignId, string HeroId, string OperationId,
-            string PublicationId, string Phase, OutfitJournalEntry[] Entries);
+            string PlayerId, string TimelineId, string SourceSha256, string PublicationId, string Phase, OutfitJournalEntry[] Entries);
         private sealed record OutfitFileSettlement(bool Committed, bool CleanupPending);
 
         private static string OutfitRolePath(string characterRoot, string role) =>
@@ -73,16 +73,19 @@ namespace ReignBetaServer
         // Caller must own the physical campaign/product roots and keep the campaign fenced
         // until the active manifest has been settled. The same role order is used for rollback.
         private static OutfitFileJournal StageOutfitFileJournal(string journalRoot, string characterRoot,
-            string campaign, string hero, string operation, IReadOnlyList<KeyValuePair<string, byte[]>> writes)
+            string campaign, string hero, string operation, string player, string timeline, string sourceSha256,
+            IReadOnlyList<KeyValuePair<string, byte[]>> writes)
         {
             if (!OutfitSafeId(campaign) || campaign == "_shared" || campaign != campaign.Trim() || !OutfitSafeId(hero) || hero != hero.Trim()
-                || !Guid.TryParseExact(operation, "N", out _) || writes.Count != OutfitFileRoles.Length
+                || !Guid.TryParseExact(operation, "N", out _) || !OutfitSafeId(player) || !OutfitSafeId(timeline)
+                || !OutfitJournalHash(sourceSha256) || writes.Count != OutfitFileRoles.Length
                 || writes.Where((entry, i) => entry.Key != OutfitRolePath(characterRoot, OutfitFileRoles[i]) || entry.Value == null).Any())
                 throw new InvalidDataException("Outfit publication does not match the known file roles.");
 
             string publication = Guid.NewGuid().ToString("N");
             var entries = new OutfitJournalEntry[OutfitFileRoles.Length];
-            var intent = new OutfitFileJournal(OutfitFileJournalSchema, campaign, hero, operation, publication, OutfitFilesPrepared, entries);
+            var intent = new OutfitFileJournal(OutfitFileJournalSchema, campaign, hero, operation, player, timeline, sourceSha256,
+                publication, OutfitFilesPrepared, entries);
             var active = Path.Combine(journalRoot, OutfitFileJournalName);
             if (OutfitActiveFileExists(active))
                 throw new InvalidOperationException("An outfit publication already needs settlement.");
@@ -123,7 +126,8 @@ namespace ReignBetaServer
                 throw new InvalidDataException("The retained outfit journal has an invalid size.");
             var journal = JsonSerializer.Deserialize<OutfitFileJournal>(source, OutfitJournalJson);
             if (journal == null || journal.Schema != OutfitFileJournalSchema || journal.CampaignId != campaign || journal.HeroId != hero
-                || !Guid.TryParseExact(journal.OperationId, "N", out _)
+                || !Guid.TryParseExact(journal.OperationId, "N", out _) || !OutfitSafeId(journal.PlayerId)
+                || !OutfitSafeId(journal.TimelineId) || !OutfitJournalHash(journal.SourceSha256)
                 || !Guid.TryParseExact(journal.PublicationId, "N", out Guid publication) || journal.PublicationId != publication.ToString("N")
                 || (journal.Phase != OutfitFilesPrepared && journal.Phase != OutfitFilesCommitted)
                 || journal.Entries == null || journal.Entries.Length != OutfitFileRoles.Length
@@ -219,7 +223,7 @@ namespace ReignBetaServer
 
         private sealed record OutfitRecoveryFence(string Campaign, string Hero, string Journal, string Operation, bool Ambiguous = false);
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, OutfitRecoveryFence> OutfitRecoveryFences =
-            new(StringComparer.OrdinalIgnoreCase);
+            new(StringComparer.Ordinal);
 
         private static string OutfitJournalsRoot(string campaignsRoot) =>
             Path.Combine(campaignsRoot, ".save-sync-work", "outfits");
@@ -244,13 +248,26 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> OutfitRecoveryStatus(string campaign)
         {
-            if (!IsOutfitStorageId(campaign) || !OutfitRecoveryFences.TryGetValue(
-                OutfitFenceKey(CampaignFileService.CampaignsRoot(), campaign), out var fence)) return null;
+            if (!IsOutfitStorageId(campaign) || !TryFindOutfitFence(CampaignFileService.CampaignsRoot(), campaign, out var fence)) return null;
             return TestDict("ok", false, "result", "recovery_required", "outcome", "recovery_required",
                 "status", "recovery_required", "storageCategory", "recovery_required", "eligibleForPermanentDeletion", false,
                 "campaignId", campaign, "backupId", fence.Operation, "operationId", fence.Operation,
                 "journalKind", "outfit", "journalPath", Path.Combine(fence.Journal, OutfitFileJournalName),
                 "error", "An interrupted outfit publication needs recovery before this campaign can be changed.");
+        }
+
+        private static bool TryFindOutfitFence(string root, string campaign, out OutfitRecoveryFence fence)
+        {
+            if (OutfitRecoveryFences.TryGetValue(OutfitFenceKey(root, campaign), out fence)) return true;
+            // Distinct Linux spellings are distinct owners. A spelling that resolves
+            // only through a folded directory still shares the physical owner's fence.
+            string journalRoot = OutfitJournalsRoot(root);
+            var folded = OutfitRecoveryFences.FirstOrDefault(pair => Path.GetDirectoryName(pair.Key) == journalRoot
+                && pair.Value.Campaign.Equals(campaign, StringComparison.OrdinalIgnoreCase));
+            if (folded.Value == null) return false;
+            try { RequireOutfitPhysicalPath(root, Path.Combine(root, campaign), directory: true); }
+            catch (InvalidDataException) { fence = folded.Value; return true; }
+            return false;
         }
 
         // The configured runtime root may be mounted elsewhere. Below that root, owned
@@ -270,13 +287,11 @@ namespace ReignBetaServer
                 for (int i = 0; i < parts.Length; i++)
                 {
                     string part = parts[i];
-                    string[] matches = Directory.EnumerateFileSystemEntries(root)
-                        .Where(entry => string.Equals(Path.GetFileName(entry), part, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray();
-                    if (matches.Length == 0) return false;
-                    if (matches.Length != 1 || Path.GetFileName(matches[0]) != part)
-                        throw new InvalidDataException("Outfit storage does not have an exact physical spelling.");
-                    root = matches[0];
-                    var attributes = File.GetAttributes(root);
+                    string candidate = Path.Combine(root, part);
+                    var attributes = File.GetAttributes(candidate);
+                    if (!Directory.EnumerateFileSystemEntries(root).Any(entry => Path.GetFileName(entry) == part))
+                        throw new InvalidDataException("Outfit storage resolves through a differently spelled directory entry.");
+                    root = candidate;
                     var expected = i < parts.Length - 1 || directory ? FileAttributes.Directory : 0;
                     if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != expected)
                         throw new InvalidDataException("Outfit storage has an unexpected path kind.");
@@ -329,11 +344,10 @@ namespace ReignBetaServer
 
         internal static void RequireOfflineOutfitCampaignAvailable(string campaignsRoot, string campaign)
         {
-            // Check the ordinary spelling and case aliases before allowing raw offline access.
-            foreach (string path in OutfitCampaignJournalDirectories(campaignsRoot)
-                .Where(path => Path.GetFileName(path).Equals(campaign, StringComparison.OrdinalIgnoreCase)))
-                if (ReadOutfitCampaignFences(campaignsRoot, path).Any())
-                    throw new InvalidOperationException("Outfit recovery is pending for campaign " + campaign + ".");
+            string path = OutfitCampaignJournalRoot(campaignsRoot, campaign);
+            if (RequireOutfitPhysicalPath(campaignsRoot, path, directory: true)
+                && ReadOutfitCampaignFences(campaignsRoot, path).Any())
+                throw new InvalidOperationException("Outfit recovery is pending for campaign " + campaign + ".");
         }
 
         internal static bool AnyOfflineOutfitPublication(string campaignsRoot) =>
@@ -402,7 +416,7 @@ namespace ReignBetaServer
             internal OutfitRecoveryPendingException(Exception inner) : base("The outfit result needs recovery.", inner) { }
         }
 
-        private static void CommitOutfitWithJournal(OutfitChangeOperation op, string characterRoot,
+        private static bool CommitOutfitWithJournal(OutfitChangeOperation op, string characterRoot,
             IReadOnlyList<KeyValuePair<string, byte[]>> writes, Action markProfileDirty)
         {
             string campaignsRoot = CampaignFileService.CampaignsRoot();
@@ -413,7 +427,6 @@ namespace ReignBetaServer
             var fence = new OutfitRecoveryFence(op.Campaign, op.Hero, journalRoot, op.Id);
             string key = OutfitFenceKey(campaignsRoot, op.Campaign);
             string active = Path.Combine(journalRoot, OutfitFileJournalName);
-            bool stageBegan = false;
             PersistenceService.RequireSaveSyncCampaignAvailable(op.Campaign);
             if (RequireOutfitPhysicalPath(campaignsRoot, active, directory: false))
                 throw new InvalidDataException("An active outfit journal exists without its recovery fence.");
@@ -422,27 +435,30 @@ namespace ReignBetaServer
             if (!OutfitRecoveryFences.TryAdd(key, fence)) throw new InvalidOperationException("The campaign is already fenced.");
             try
             {
-                stageBegan = true;
-                var journal = StageOutfitFileJournal(journalRoot, characterRoot, op.Campaign, op.Hero, op.Id, writes);
+                var journal = StageOutfitFileJournal(journalRoot, characterRoot, op.Campaign, op.Hero, op.Id,
+                    op.Player, op.Timeline, op.SourceHash, writes);
                 for (int i = 0; i < writes.Count; i++)
                     PersistenceService.WriteRecoveryFile(writes[i].Key, writes[i].Value, mode: journal.Entries[i].BeforeMode);
                 CommitOutfitFileJournal(journalRoot, characterRoot, journal);
             }
             catch (Exception ex)
             {
-                if (stageBegan && PendingOutfitJournalOrUncertain(campaignsRoot, active))
+                if (PendingOutfitJournalOrUncertain(campaignsRoot, active))
                 {
                     var settled = TrySettleOutfitFence(campaignsRoot, fence);
-                    if (settled?.Committed == true) return;
+                    if (settled?.Committed == true) return settled.CleanupPending;
                     if (settled == null || settled.CleanupPending) throw new OutfitRecoveryPendingException(ex);
                 }
                 OutfitRecoveryFences.TryRemove(new KeyValuePair<string, OutfitRecoveryFence>(key, fence));
                 throw;
             }
 
-            // The preceding on-disk commit is authoritative. Failure to clean the
-            // journal stays fenced for the next retry without changing its response.
-            TrySettleOutfitFence(campaignsRoot, fence);
+            // Committed bytes are authoritative even when unlinking the journal fails.
+            // Unknown bytes have a different disposition and keep the campaign held.
+            var completed = TrySettleOutfitFence(campaignsRoot, fence);
+            if (completed?.Committed != true)
+                throw new OutfitRecoveryPendingException(new IOException("The committed outfit could not be verified."));
+            return completed.CleanupPending;
         }
 
         private static bool PendingOutfitJournalOrUncertain(string root, string active)
@@ -457,16 +473,30 @@ namespace ReignBetaServer
             string operation, Dictionary<string, object> payload)
         {
             string root = CampaignFileService.CampaignsRoot();
-            if (!OutfitRecoveryFences.TryGetValue(OutfitFenceKey(root, campaign), out var fence)) return null;
+            if (!TryFindOutfitFence(root, campaign, out var fence)) return null;
             if (action != "confirm" || fence.Ambiguous || fence.Campaign != campaign || fence.Hero != hero
                 || fence.Operation != operation || PersistenceService.HasSaveSyncJournalFence(campaign))
                 return OutfitRecoveryStatus(campaign);
             lock (Program.FileLock)
             {
+                OutfitFileJournal journal;
+                try { journal = ReadOutfitFileJournal(fence.Journal, campaign, hero); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
+                { return OutfitRecoveryStatus(campaign); }
+
+                if (journal.OperationId != operation || journal.PlayerId != ReadString(payload, "playerHeroId", "")
+                    || journal.TimelineId != ReadString(payload, "timelineId", "")
+                    || journal.SourceSha256 != ReadString(payload, "sourceSha256", ""))
+                    return OutfitRecoveryStatus(campaign);
+
                 var settled = TrySettleOutfitFence(root, fence);
                 if (settled?.Committed == true)
-                    return CommittedOutfitResponse(payload, OutfitCharacterRoot(root, campaign, hero))
-                        ?? OutfitFailure("The completed outfit does not match this confirmation.");
+                {
+                    var response = CommittedOutfitResponse(payload, OutfitCharacterRoot(root, campaign, hero));
+                    if (response == null) return OutfitFailure("The completed outfit does not match this confirmation.");
+                    if (settled.CleanupPending) response["cleanupPending"] = true;
+                    return response;
+                }
                 return settled == null || settled.CleanupPending ? OutfitRecoveryStatus(campaign) : null;
             }
         }

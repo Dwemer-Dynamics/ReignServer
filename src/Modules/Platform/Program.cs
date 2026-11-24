@@ -319,6 +319,13 @@ namespace ReignBetaServer
             }
 #if !REIGN_EXCLUDE_VERIFICATION
             if (PortraitsService.TryRunOutfitRecoveryFixtureCommand(args)) return;
+            if (HasArg(args, "--cancel-verification") || (HasArg(args, "--run-verification") && HasArg(args, "--cancel")))
+            {
+                var cancelled = VerificationService.RunVerificationCli(args.Concat(new[] { "--cancel" }).ToArray());
+                Console.WriteLine(Json.Serialize(cancelled));
+                Environment.ExitCode = ReadBool(cancelled, "ok", false) ? 0 : 1;
+                return;
+            }
 #endif
             using var ownership = PortraitsService.AcquireOutfitRuntimeOwnership(DataDir);
             SettingsService.MigrateLegacyRuntimeDataIfNeeded();
@@ -339,13 +346,10 @@ namespace ReignBetaServer
             VerificationService.EnsureDefaultTestCases();
 
 #if !REIGN_EXCLUDE_VERIFICATION
-            if (HasArg(args, "--run-verification") || HasArg(args, "--cancel-verification"))
+            if (HasArg(args, "--run-verification"))
             {
-                string[] verificationArgs = HasArg(args, "--cancel-verification") && !HasArg(args, "--cancel")
-                    ? args.Concat(new[] { "--cancel" }).ToArray()
-                    : args;
-                Dictionary<string, object> result = VerificationService.RunVerificationCli(verificationArgs);
-                Console.WriteLine(HasArg(args, "--json") ? Json.Serialize(result) : Json.Serialize(result));
+                Dictionary<string, object> result = VerificationService.RunVerificationCli(args);
+                Console.WriteLine(Json.Serialize(result));
                 Environment.ExitCode = ReadBool(result, "passed", ReadBool(result, "ok", false)) ? 0 : 1;
                 return;
             }

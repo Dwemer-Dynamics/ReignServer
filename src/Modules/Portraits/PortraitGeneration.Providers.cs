@@ -482,9 +482,10 @@ namespace ReignBetaServer
             string portraitPath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "portrait.png");
             string sourcePath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "source.png");
             string promptPath = CampaignFileService.CharacterFile(campaignId, heroId, "portraits", "prompt.txt");
-            Directory.CreateDirectory(Path.GetDirectoryName(portraitPath));
             lock (Program.FileLock)
             {
+                PersistenceService.RequireSaveSyncCampaignAvailable(campaignId);
+                Directory.CreateDirectory(Path.GetDirectoryName(portraitPath));
                 File.WriteAllBytes(portraitPath, imageBytes);
                 File.WriteAllBytes(sourcePath, sourceImage);
                 File.WriteAllText(promptPath, prompt ?? "", Encoding.UTF8);

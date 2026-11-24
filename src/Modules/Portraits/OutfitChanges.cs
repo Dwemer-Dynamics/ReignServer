@@ -144,9 +144,10 @@ namespace ReignBetaServer
                     || !OutfitEligible(freshNpc, freshPlayer)) return OutfitFailure("This character is no longer eligible for an outfit change.");
                 if (ReadString(payload, "sourceSha256", "") != op.SourceHash)
                     return OutfitFailure("The portrait changed while the preview was open. Cancel and try again.");
+                bool cleanupPending;
                 try
                 {
-                    CommitOutfit(op);
+                    cleanupPending = CommitOutfit(op);
                 }
                 catch (OutfitRecoveryPendingException)
                 {
@@ -156,7 +157,9 @@ namespace ReignBetaServer
                 op.Status = "committed";
                 op.Before = null;
                 DialogueService.InvalidatePromptRuntimeCache();
-                return OutfitResponse(op, true);
+                var response = OutfitResponse(op, true);
+                if (cleanupPending) response["cleanupPending"] = true;
+                return response;
             }
         }
 
@@ -255,18 +258,18 @@ namespace ReignBetaServer
             return "";
         }
 
-        private static void CommitOutfit(OutfitChangeOperation op)
+        private static bool CommitOutfit(OutfitChangeOperation op)
         {
             // A verification campaign directory can be redirected while the Save Sync sidecar remains live.
             // Legacy dotted outfit identities also have no Save Sync checkpoint.
             Action<string> markProfileDirty = string.IsNullOrWhiteSpace(Program.CampaignsRootOverride.Value)
                 && !op.Campaign.Contains('.') ? PersistenceService.MarkSaveSyncActiveStateDirtyForPath : null;
-            CommitOutfitInDirectory(op, CampaignFileService.CharacterDirectory(op.Campaign, op.Hero),
+            return CommitOutfitInDirectory(op, CampaignFileService.CharacterDirectory(op.Campaign, op.Hero),
                 markProfileDirty: markProfileDirty, durable: true);
         }
 
         // The production path is campaign-owned; contracts supply a disposable directory.
-        private static void CommitOutfitInDirectory(OutfitChangeOperation op, string characterDirectory,
+        private static bool CommitOutfitInDirectory(OutfitChangeOperation op, string characterDirectory,
             Action<string, byte[]> write = null, Action<string, byte[]> restore = null,
             Action<string> markProfileDirty = null, bool durable = false)
         {
@@ -306,8 +309,9 @@ namespace ReignBetaServer
                 };
                 // profile.json is temporal Save Sync state. Publish dirty before any outfit file can change.
                 Action markDirty = markProfileDirty == null ? null : () => markProfileDirty(profilePath);
-                if (durable) CommitOutfitWithJournal(op, characterDirectory, writes, markDirty);
-                else CommitOutfitFiles(writes, write ?? WriteSharedPortraitAtomic, restore, markDirty);
+                if (durable) return CommitOutfitWithJournal(op, characterDirectory, writes, markDirty);
+                CommitOutfitFiles(writes, write ?? WriteSharedPortraitAtomic, restore, markDirty);
+                return false;
             }
         }
 
@@ -453,6 +457,7 @@ namespace ReignBetaServer
         {
             lock (Program.FileLock)
             {
+                PersistenceService.RequireSaveSyncPathAvailable(directory);
                 var outfit = CampaignFileService.ReadJsonObject(Path.Combine(directory, "outfit.json"));
                 return OutfitConfirmationMatches(directory, campaign, hero, outfit) ? outfit : null;
             }
@@ -465,6 +470,7 @@ namespace ReignBetaServer
         {
             lock (Program.FileLock)
             {
+                PersistenceService.RequireSaveSyncPathAvailable(directory);
                 var formal = CampaignFileService.ReadJsonObject(Path.Combine(directory, "formal_outfit.json"));
                 if (ReadString(formal, "descriptionSource", "") != "confirmed_outfit_change"
                     || !formal.Keys.Any(key => key.Equals(OutfitConfirmationFormatKey, StringComparison.OrdinalIgnoreCase)))

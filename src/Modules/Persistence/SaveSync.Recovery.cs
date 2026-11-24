@@ -54,7 +54,10 @@ namespace ReignBetaServer
             internal readonly Dictionary<string, object> Status;
 
             internal SaveSyncCampaignFencedException(string campaignId, string operation, bool applying)
-                : this(SaveSyncFencedResult(campaignId, operation, applying)) { }
+                : base("Save Sync recovery_required for campaign " + campaignId + ", operation " + operation + ". The campaign is fenced.")
+            {
+                Status = SaveSyncFencedResult(campaignId, operation, applying);
+            }
 
             internal SaveSyncCampaignFencedException(Dictionary<string, object> status)
                 : base(ReadString(status, "error", "The campaign is fenced."))
