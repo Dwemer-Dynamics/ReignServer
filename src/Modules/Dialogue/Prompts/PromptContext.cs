@@ -1490,9 +1490,7 @@ namespace ReignBetaServer
         internal static List<Dictionary<string, object>> ReadDialogueLines(string campaignId, string heroId, int limit)
         {
             string path = CampaignFileService.CharacterFile(campaignId, heroId, "history", "dialogue.jsonl");
-            List<Dictionary<string, object>> all = Program.ReadJsonLinesFromPath(path);
-            int start = Math.Max(0, all.Count - Math.Max(1, limit));
-            List<Dictionary<string, object>> lines = all.Skip(start).ToList();
+            List<Dictionary<string, object>> lines = Program.ReadDialogueHistoryTail(path, limit);
             foreach (Dictionary<string, object> line in lines)
             {
                 if (string.Equals(ReadString(line, "role", ""), "npc", StringComparison.OrdinalIgnoreCase))

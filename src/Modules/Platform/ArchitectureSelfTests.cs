@@ -52,6 +52,11 @@ namespace ReignBetaServer
                 };
                 File.WriteAllLines(path, rows.Select(Json.Serialize));
                 var selected = Program.ReadRecentDialogueMemoryRows(path, 3);
+                add("short_dialogue_history_tail_keeps_physical_order",
+                    new[] { -1, 0, 1, 3, 100 }.All(limit =>
+                        Json.Serialize(Program.ReadDialogueHistoryTail(path, limit))
+                            == Json.Serialize(Program.ReadJsonLinesFromPath(path).TakeLast(Math.Max(1, limit)).ToList())),
+                    "The short history preserves physical order and the legacy minimum count.", null);
                 add("recent_dialogue_memory_stable_cutoff",
                     selected.Select(row => ReadString(row, "id", "")).SequenceEqual(new[] { "b", "a", "early-largest" })
                     && new[] { -1, 0, 1, 3, 100 }.All(limit =>
@@ -65,6 +70,9 @@ namespace ReignBetaServer
                     "A classification failure is preserved after a complete read, while a zero limit skips classification.", null);
 
                 File.AppendAllText(path, "\n{malformed");
+                add("short_dialogue_history_tail_keeps_strict_parse",
+                    Failure(() => Program.ReadDialogueHistoryTail(path, 1)) == "json",
+                    "Reading only the displayed tail still checks the ledger with the existing strict parser.", null);
                 add("recent_dialogue_memory_strict_eof_failure",
                     new[] { 0, 1 }.All(limit => Failure(() => Baseline(limit)) == "json"
                         && Failure(() => Program.ReadRecentDialogueMemoryRows(path, limit)) == "json"),

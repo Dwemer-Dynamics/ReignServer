@@ -108,6 +108,7 @@ namespace ReignBetaServer
             {
                 VerifyTypedArrestEffectOwner(add);
                 VerifyOwnedWorldHistoryEventProof(add);
+                VerifyWorldHistoryVerifiedFork(add, token);
                 string fallbackRoot = Path.Combine(Program.DataDir, "ss");
                 string stableRoot = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -2352,6 +2353,160 @@ WHERE client_id='bannerlord' AND timeline_id=$timeline;", TestDict("timeline", t
                         foreach (string root in roots)
                             if (Directory.Exists(root)) Directory.Delete(root, true);
                     }
+                }
+            }
+        }
+
+        private static void VerifyWorldHistoryVerifiedFork(Action<string, bool, string> add, string token)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation)
+                throw new InvalidOperationException("The verified fork fixture requires the isolated validation database.");
+            string campaign = "world_history_selftest_d18_" + token;
+            string fixture = Path.Combine(Program.TestsDir, "verified_fork_" + token);
+            string previousRoot = Program.CampaignsRootOverride.Value;
+            string ledgerRoot = SaveSyncCampaignRoot(campaign);
+            const string source = "d18_fork_source", head = "d18_retained_head", newer = "d18_newer_head";
+            const string pointId = "d18_fork_checkpoint", session = "d18_fork_session";
+            const double savedDay = 100.75d;
+
+            using (var existing = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                if (!CampaignFileService.IsInternalCampaignId(campaign) || existing != null
+                    || Directory.Exists(fixture) || Directory.Exists(ledgerRoot)
+                    || File.Exists(fixture) || File.Exists(ledgerRoot))
+                    throw new IOException("The disposable verified fork fixture is already occupied.");
+
+            Dictionary<string, object> Open(Dictionary<string, object> request) =>
+                WorldSimulationService.WorldHistoryOpenTimelineApi(request);
+
+            Dictionary<string, object> Ingest(string eventId, long sequence, double day) =>
+                WorldSimulationService.WorldHistoryIngestBatchApi(TestDict("campaignId", campaign, "timelineId", source,
+                    "waitForRetention", true, "events", new List<Dictionary<string, object>>
+                    {
+                        TestDict("eventId", eventId, "sequence", sequence, "worldDay", day,
+                            "eventType", "arrest_evidence_reclassified", "category", "justice",
+                            "summary", "Disposable verified checkpoint anchor.")
+                    }));
+
+            (string Active, int Rows) State()
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                return (WorldSimulationService.ActiveWorldHistoryTimeline(connection),
+                    ReadInt(ReignDatabase.QuerySql(connection,
+                        "SELECT COUNT(*) AS count FROM world_history_timelines;").Single(), "count", 0));
+            }
+
+            try
+            {
+                Program.CampaignsRootOverride.Value = Path.Combine(fixture, "campaigns");
+                var ordinary = Open(TestDict("campaignId", campaign, "timelineId", source));
+                if (!ReadBool(ordinary, "ok", false) || ordinary.ContainsKey("verifiedFork")
+                    || ReadInt(Ingest(head, 1L, 100.5d), "accepted", 0) != 1)
+                    throw new InvalidOperationException("The fixture could not establish the legacy timeline and retained head.");
+
+                var point = SaveSyncTestPointPayload(campaign, pointId, savedDay, "D18 fixture " + token);
+                point["timelineId"] = source;
+                point["worldHistorySequence"] = 1L;
+                point["worldHistoryHeadEventId"] = head;
+                if (!ReadBool(SaveSyncRegisterApi(point), "ok", false)
+                    || !ReadBool(SaveSyncFinalizeApi(TestDict("campaignId", campaign,
+                        "savePointId", pointId, "nativeSaveName", "D18 fixture " + token, "successful", true)), "ok", false))
+                    throw new InvalidOperationException("The fixture could not register and finalize its exact checkpoint.");
+                // Establish a real restore generation before exercising the clean-load handshake.
+                // Register and finalize alone do not prove a previously applied load.
+                AppendSaveSyncTestLine(campaign, "actions", "verified_fork_fixture_dirty");
+                MarkSaveSyncActiveStateDirty(campaign);
+                string setupSession = "d18_fork_initial_restore";
+                var restored = SaveSyncLoadApi(new Dictionary<string, object>(point)
+                    { ["loadSessionId"] = setupSession }, false);
+                if (ReadString(restored, "result", "") != "rolled_back"
+                    || ReadString(restored, "restoreGeneration", "").Length == 0
+                    || ReadString(restored, "loadSessionId", "") != setupSession)
+                    throw new InvalidOperationException("The verified fork fixture initial restore failed: "
+                        + ReadString(restored, "result", "<missing>"));
+
+                point["loadSessionId"] = session;
+                point["skipCleanLoadComparison"] = true;
+                var loaded = SaveSyncLoadApi(point, false);
+                string generation = ReadString(loaded, "restoreGeneration", "");
+                if (ReadString(loaded, "result", "") != "no_op" || generation.Length == 0
+                    || ReadString(loaded, "loadSessionId", "") != session)
+                    throw new InvalidOperationException("The verified fork fixture clean load failed: "
+                        + ReadString(loaded, "result", "<missing>") + ", generation echoed: " + (generation.Length > 0));
+
+                Dictionary<string, object> Request(string eventId = head, string loadSession = session) =>
+                    TestDict("campaignId", campaign, "timelineId", source, "savedSequence", 1L, "savedHeadEventId", eventId,
+                        "verifiedForkLoad", TestDict("schemaVersion", 1, "savePointId", pointId,
+                            "loadSessionId", loadSession, "restoreGeneration", generation));
+
+                var same = Open(Request());
+                add("verified_fork_exact_load_without_divergence",
+                    ReadBool(same, "ok", false) && !same.ContainsKey("verifiedFork")
+                    && !ReadBool(same, "branched", true) && State() == (source, 1),
+                    "A genuine load at the unchanged head keeps the source timeline and issues no fork receipt.");
+                // Keep this exact load context and move its source cursor forward.
+                // This isolates the divergent-head branch case without moving day
+                // in any native campaign or introducing a second verified load.
+                if (ReadInt(Ingest(newer, 2L, 101d), "accepted", 0) != 1)
+                    throw new InvalidOperationException("The fixture could not advance its own source timeline.");
+
+                var ledger = ReadSaveSyncLedger(campaign);
+                var withoutReceipt = new Dictionary<string, object>(ledger);
+                withoutReceipt.Remove("lastLoadReceipt");
+                WriteSaveSyncLedger(campaign, withoutReceipt);
+                var missingReceipt = Open(Request());
+                WriteSaveSyncLedger(campaign, ledger);
+                add("verified_fork_requires_committed_save_sync_receipt",
+                    !ReadBool(missingReceipt, "ok", true) && State() == (source, 1),
+                    "A restore context alone cannot substitute for the committed Save Sync load receipt.");
+
+                var invalid = Open(Request(newer));
+                var stale = Open(Request(loadSession: "d18_stale_session"));
+                var untyped = Request();
+                untyped["savedSequence"] = "1";
+                add("verified_fork_requires_exact_checkpoint_cursor_and_load",
+                    !ReadBool(invalid, "ok", true) && !ReadBool(stale, "ok", true)
+                    && !ReadBool(Open(untyped), "ok", true) && State() == (source, 1),
+                    "Another retained event, a different load session and an untyped sequence cannot fork the current timeline.");
+
+                var first = Open(Request());
+                var proof = ReadDictionary(first, "verifiedFork");
+                string child = ReadString(first, "timelineId", "");
+                add("verified_fork_commits_one_bound_direct_child",
+                    ReadBool(first, "ok", false) && ReadBool(first, "branched", false)
+                    && ReadString(first, "parentTimelineId", "") == source && child.Length > 0 && child != source
+                    && State() == (child, 2)
+                    && ReadString(proof, "campaignId", "") == campaign && ReadString(proof, "savePointId", "") == pointId
+                    && ReadString(proof, "loadSessionId", "") == session && ReadString(proof, "restoreGeneration", "") == generation
+                    && ReadString(proof, "sourceTimelineId", "") == source && ReadLong(proof, "sourceSequence", -1) == 1L
+                    && ReadString(proof, "sourceHeadEventId", "") == head && ReadDouble(proof, "checkpointDay", -1d) == savedDay
+                    && ReadString(proof, "childTimelineId", "") == child && !ReadBool(proof, "nativeMembershipVerified", true),
+                    "The server verifies the direct child, exact checkpoint and current load while leaving native membership unverified.");
+
+                var retried = Open(Request());
+                add("verified_fork_retry_after_lost_delivery_keeps_child",
+                    ReadBool(retried, "ok", false) && ReadString(retried, "timelineId", "") == child
+                    && Json.Serialize(ReadDictionary(retried, "verifiedFork")) == Json.Serialize(proof)
+                    && State() == (child, 2),
+                    "An identical request after a lost response returns the existing child and byte-equivalent proof.");
+
+                const string sibling = "d18_unrelated_active_timeline";
+                var unrelated = Open(TestDict("campaignId", campaign, "timelineId", sibling));
+                var inactive = Open(Request());
+                add("verified_fork_cannot_reactivate_a_replaced_child",
+                    ReadBool(unrelated, "ok", false) && !unrelated.ContainsKey("verifiedFork")
+                    && !ReadBool(inactive, "ok", true) && !inactive.ContainsKey("verifiedFork")
+                    && State() == (sibling, 3),
+                    "The exact old load session cannot reactivate a child after another timeline takes ownership.");
+            }
+            finally
+            {
+                try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                finally
+                {
+                    lock (SaveSyncActiveStateLock) SaveSyncActiveStates.Remove(campaign);
+                    Program.CampaignsRootOverride.Value = previousRoot;
+                    TryDeleteDirectory(ledgerRoot);
+                    TryDeleteDirectory(fixture);
                 }
             }
         }

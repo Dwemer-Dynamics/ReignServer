@@ -457,6 +457,7 @@ namespace ReignBetaServer
                 byte[] manifestBytes = Encoding.UTF8.GetBytes(Json.Serialize(build.Manifest));
                 bool committed = PortraitDerivativeCore.CommitV2(sourcePath, output, build, manifestBytes, out string commitError);
                 AddPortraitDerivativeTest(rows, "atomic_v2_commit", committed, commitError ?? "The complete v2 set committed successfully.");
+                VerifyDerivativeRollback(rows, tempRoot, sourcePath, sourcePng, build, manifestBytes);
 
                 bool missingFocusRejected = false;
                 try
@@ -666,6 +667,47 @@ namespace ReignBetaServer
             return rows;
         }
 #endif
+
+        private static void VerifyDerivativeRollback(List<Dictionary<string, object>> rows, string root,
+            string sourcePath, byte[] original, PortraitDerivativeBuild build, byte[] manifestBytes)
+        {
+            string output = Path.Combine(root, "derivative-rollback");
+            Directory.CreateDirectory(output);
+            string thumbnail = Path.Combine(output, PortraitDerivativeCore.ThumbnailFileName);
+            File.WriteAllBytes(thumbnail, original);
+            const string installFault = "Injected later derivative installation failure.";
+            const string restoreFault = "Injected derivative compensation failure.";
+            void FailLaterInstallation(string phase, string target)
+            {
+                if (phase == "install" && Path.GetFileName(target) == PortraitDerivativeCore.PartyThumbnailFileName)
+                    throw new IOException(installFault);
+            }
+            bool clean = PortraitDerivativeCore.CommitV2(sourcePath, output, build, manifestBytes,
+                out string cleanError, FailLaterInstallation);
+            AddPortraitDerivativeTest(rows, "derivative_rollback_verified",
+                !clean && cleanError == installFault && File.Exists(thumbnail) && File.ReadAllBytes(thumbnail).SequenceEqual(original)
+                && Directory.GetFileSystemEntries(output).SequenceEqual(new[] { thumbnail }),
+                "A verified rollback restores the original bytes and removes its temporary recovery files.");
+
+            bool sawReplacement = false;
+            bool accepted = PortraitDerivativeCore.CommitV2(sourcePath, output, build, manifestBytes,
+                out string recovery, (phase, target) =>
+                {
+                    FailLaterInstallation(phase, target);
+                    if (phase == "restore" && target == thumbnail)
+                    {
+                        sawReplacement = File.ReadAllBytes(thumbnail).SequenceEqual(build.ThumbnailPng);
+                        throw new IOException(restoreFault);
+                    }
+                });
+            string[] backups = Directory.GetFiles(output, Path.GetFileName(thumbnail) + ".bak.*");
+            AddPortraitDerivativeTest(rows, "derivative_failed_compensation_retains_verified_preimage",
+                !accepted && sawReplacement && backups.Length == 1 && File.ReadAllBytes(backups[0]).SequenceEqual(original)
+                && File.Exists(thumbnail) && File.ReadAllBytes(thumbnail).SequenceEqual(build.ThumbnailPng)
+                && recovery.Contains("Derivative recovery required.") && recovery.Contains(restoreFault)
+                && recovery.Contains(backups[0]),
+                "A later installation failure followed by failed restoration leaves the verified preimage and identifies its path.");
+        }
 
         private static bool ContainsStrongBlue(byte[] rgba)
         {

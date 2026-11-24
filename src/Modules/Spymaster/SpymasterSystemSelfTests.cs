@@ -417,6 +417,36 @@ namespace ReignBetaServer
                     ReadBool(retried, "ok", false) && ReadDictionaryList(retried, "actions").Count == 0
                     && ReadString(stale, "error", "") == "assignment_scope_changed" && issuedReceipts.Count == 1,
                     "Losing a reply leaves durable issuance evidence but does not redeliver on retry or accept a stale generation.", null);
+                var replayPayload = new Dictionary<string, object>(retryPayload)
+                {
+                    ["disruptionReplay"] = ForeignAgentDisruptionReplaySchema,
+                    ["worldDay"] = 14.25d
+                };
+                replayPayload.Remove("controlledAgentAction");
+                var delayed = SpymasterAgentsTickForClientApi(replayPayload);
+                var delayedAction = ReadDictionaryList(delayed, "actions").SingleOrDefault();
+                var wrongGeneration = SpymasterAgentsTickForClientApi(new Dictionary<string, object>(replayPayload)
+                    { ["restoreGeneration"] = generation + "_stale" });
+                add("agent_disruption_opt_in_replays_original_window_once_per_reply",
+                    ReadString(delayed, "disruptionReplay", "") == ForeignAgentDisruptionReplaySchema
+                    && ReadString(delayedAction, "actionId", "") == ReadString(issuedAction, "actionId", "")
+                    && ReadString(delayedAction, "assignmentId", "") == occurrence
+                    && ReadDouble(delayedAction, "issuedDay", -1d) == 14d
+                    && ReadDouble(delayedAction, "expiresDay", -1d) == ReadDouble(issuance, "expires_day", -2d)
+                    && ReadString(wrongGeneration, "error", "") == "assignment_scope_changed",
+                    "An eligible replay returns the original committed identity and timing. A different restore generation is rejected.", null);
+                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(activationCampaign))
+                using (var transaction = connection.BeginTransaction())
+                {
+                    var activeAtExpiry = SpymasterStore.SelectForeignAgentAssignments5(connection, disruptionScope, transaction);
+                    var expired = ReadUnexpiredForeignAgentDisruptions(connection, transaction, activationCampaign, activationTimeline,
+                        generation, ReadDouble(issuance, "expires_day", -1d), activeAtExpiry,
+                        ReadDictionaryList(replayPayload, "enemyKingdoms"), "player_kingdom");
+                    add("agent_disruption_replay_excludes_exact_expiry",
+                        expired.Count == 0 && activeAtExpiry.Count == 1,
+                        "The production replay selector stops delivering at the original expiry boundary.", null);
+                }
+
                 var exposure = new Dictionary<string, object>
                 {
                     ["campaignId"] = activationCampaign, ["timelineId"] = activationTimeline,
@@ -462,6 +492,11 @@ namespace ReignBetaServer
                 var retry = new Dictionary<string, object>(exposure) { ["worldDay"] = 15d, ["reason"] = "fixture_retry" };
                 var replay = SpymasterAgentExposeApi(retry);
                 var nextTick = tickAt(16d, -30d, 100d, 100d);
+                var replayAfterExposure = SpymasterAgentsTickForClientApi(replayPayload);
+                add("agent_disruption_replay_does_not_reactivate_exposed_assignment",
+                    ReadBool(replayAfterExposure, "ok", false)
+                    && ReadDictionaryList(replayAfterExposure, "actions").Count == 0,
+                    "A retained receipt for a now-exposed assignment never reattaches its old disruption.", null);
                 var terminal = ReadDictionaryList(nextTick, "exposedAgents").SingleOrDefault();
                 add("agent_exposure_receipt_is_terminal_and_replayable",
                     ReadBool(receipt, "ok", false) && Json.Serialize(receipt) == Json.Serialize(replay)
