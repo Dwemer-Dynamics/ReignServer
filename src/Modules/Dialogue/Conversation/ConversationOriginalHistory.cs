@@ -23,8 +23,16 @@ namespace ReignBetaServer
             var legacy = Program.EnumerateJsonLinesFromPath(path);
             if (legacyFilter != null) legacy = legacy.Where(legacyFilter);
             string player = ReadFirstString(payload, "playerHeroStringId", "mainHeroStringId", "playerId");
-            return player.Length == 0 ? legacy.ToList()
-                : MergeOriginalConversationHistory(campaign, payload, npc, session, limit, player, legacy);
+            if (player.Length == 0) return legacy.ToList();
+
+            bool schemaMayNeedInitialization;
+            lock (Program.CampaignSchemaLock)
+                schemaMayNeedInitialization = !Program.CampaignSchemaReady.Contains(ReignPostgreSqlStorage.CampaignSchemaName(campaign));
+            // Before a cold SQL open can initialize campaign state, validate the
+            // saved legacy stream as the original path did. Keep no row payloads
+            // from this pass, and release the writer lock before opening SQL.
+            if (schemaMayNeedInitialization) _ = legacy.LongCount();
+            return MergeOriginalConversationHistory(campaign, payload, npc, session, limit, player, legacy);
         }
 
         private static List<Dictionary<string, object>> ReadAuthoritativeConversationHistory(string campaign,

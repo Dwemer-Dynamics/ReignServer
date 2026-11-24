@@ -414,6 +414,22 @@ namespace ReignBetaServer
                     try { SocialEventHistory(eventPayload); }
                     catch (System.Text.Json.JsonException) { malformedRejected = true; }
                     Check("authenticated_file_history_keeps_strict_parse_at_eof", malformedRejected);
+
+                    string coldCampaign = "input_grounding_" + Guid.NewGuid().ToString("N");
+                    try
+                    {
+                        bool failedBeforeInitialization = false;
+                        try { ReadOriginalConversationHistoryFromFile(coldCampaign, eventPayload, "npc",
+                            "grounding_session", 2, eventTranscript); }
+                        catch (System.Text.Json.JsonException) { failedBeforeInitialization = true; }
+                        Check("authenticated_invalid_legacy_does_not_initialize_cold_campaign",
+                            failedBeforeInitialization && !ReignPostgreSqlStorage.CampaignExists(coldCampaign));
+                    }
+                    finally
+                    {
+                        if (ReignPostgreSqlStorage.CampaignExists(coldCampaign))
+                            ReignPostgreSqlStorage.DropCampaign(coldCampaign);
+                    }
                 }
                 finally { File.Delete(eventTranscript); }
                 bool mismatch = false;
