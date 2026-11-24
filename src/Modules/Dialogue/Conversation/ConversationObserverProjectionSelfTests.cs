@@ -19,6 +19,40 @@ namespace ReignBetaServer
                 && publicText.Contains("It survived the journey. Keep it.") && !publicText.Contains(secret), publicText);
             Check("author_keeps_complete_literary_reply", ObserverConversationText(reply, "npc_a", "npc_a") == reply);
             Check("actual_spoken_disclosure_remains_audible", ObserverConversationText(disclosed, "npc_a", "npc_b") == disclosed);
+            const string explicitInference = "*She regrets ever sheltering Orel. Her hands betray guilt about sheltering Orel.*";
+            const string unfamiliarGesture = "*She twirls the spindle.*";
+            const string attributedReport = "I heard that Orel was sheltered. She said she regretted it.";
+            string directScene = unfamiliarGesture + " " + explicitInference + " " + attributedReport;
+            string directView = ObserverConversationText(directScene, "npc_a", "npc_b");
+            Check("standalone_inferences_do_not_become_npc_observations",
+                ObserverConversationText(explicitInference + " Hello.", "npc_a", "npc_b") == "Hello."
+                && directView.Contains(unfamiliarGesture) && directView.Contains(attributedReport)
+                && !directView.Contains("regrets ever") && !directView.Contains("betray guilt"), directView);
+            Check("standalone_inference_guard_preserves_author_player_and_mixed_source",
+                ObserverConversationText(directScene, "npc_a", "npc_a") == directScene
+                && ObserverConversationText(directScene, "player", "npc_b", playerNarration: true) == directScene
+                && ObserverConversationText("*Her hands betray guilt while she closes the chest.* Hello.", "npc_a", "npc_b")
+                    == "*Her hands betray guilt while she closes the chest.* Hello."
+                && ObserverConversationText("*She regrets that she stayed, she says aloud.* Hello.", "npc_a", "npc_b")
+                    == "*She regrets that she stayed, she says aloud.* Hello.");
+            var inferenceSceneProjection = ProjectConversationNarration(directScene, "npc_a", "npc_b");
+            var inferenceSpans = ReadDictionaryList(inferenceSceneProjection, "spans");
+            Check("standalone_inference_keeps_exact_retained_spans",
+                ReadDictionaryList(inferenceSceneProjection, "coverageSpans").Sum(span => ReadInt(span, "length", 0)) == directScene.Length
+                && inferenceSpans.All(span => directScene.Substring(ReadInt(span, "start", 0),
+                    ReadInt(span, "length", 0)) == ReadString(span, "text", ""))
+                && inferenceSpans.Any(span => ReadString(span, "kind", "") == "observable_narration"
+                    && ReadString(span, "text", "") == "She twirls the spindle."));
+            var inferenceMemory = ScopeConversationMemoryWrites(new List<Dictionary<string, object>>
+                { TestDict("text", directScene) }, "npc_a", "player", "", directScene,
+                "standalone_inference_fixture", new List<string> { "npc_a", "npc_b" });
+            string inferenceObserved = ReadString(inferenceMemory.Single(row =>
+                ReadString(row, "observerScope", "") == "observable_source_spans"), "text", "");
+            Check("standalone_inference_is_not_added_to_new_observer_memory",
+                inferenceObserved.Contains(unfamiliarGesture) && inferenceObserved.Contains(attributedReport)
+                && !inferenceObserved.Contains("regrets ever") && !inferenceObserved.Contains("betray guilt")
+                && inferenceMemory.Any(row => ReadString(row, "observerScope", "") == "author_interpretation"
+                    && ReadString(row, "text", "") == directScene), inferenceObserved);
             Check("imagined_action_does_not_become_observed", ObserverConversationText("*She holds his hand in her imagination.* Hello.", "npc_a", "npc_b") == "Hello.");
             Check("private_fear_is_not_given_to_another_actor", ObserverConversationText("*He remembers his private fear of the throne.* I will listen.", "npc_a", "npc_b") == "I will listen.");
             Check("unclassified_narration_is_not_certified_as_observable", !ObserverConversationText("*A secret meaning lives here.* Good day.", "npc_a", "npc_b").Contains("secret meaning"));
