@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
+using ReignBeta.Shared.Characters;
 
 namespace ReignLiveTest
 {
@@ -40,10 +41,11 @@ namespace ReignLiveTest
                 && String(native, "campaignId") == campaign && String(native, "timelineId") == timeline;
             long Count(string name) => native.TryGetValue(name, out object raw) && (raw is int || raw is long)
                 ? ReadLong(native, name, -1) : -1;
-            return PassiveWorldCheckpointPolicy.NpcLivesBlocker(String(native, "schema"), scopeCurrent,
+            return NpcLivesCheckpointPolicy.Blocker(String(native, "schema"), scopeCurrent,
                 native.TryGetValue("snapshotReady", out object snapshot) && snapshot is bool ready ? ready : (bool?)null,
                 native.TryGetValue("mutationInFlight", out object mutation) && mutation is bool active ? active : (bool?)null,
-                Count("pendingReceipts"), Count("dueNativeRewards"), Count("dueNativePersonalTravel"));
+                Count("pendingReceipts"), Count("dueNativeRewards"), Count("dueNativePersonalTravel"),
+                Count("dueNativeMeetingRelease"));
         }
         private static bool _observeGovernmentNewsForPassiveWorldControl;
         private static string _checkpointPeriodicPollToken;

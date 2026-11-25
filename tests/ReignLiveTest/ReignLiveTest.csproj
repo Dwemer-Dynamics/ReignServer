@@ -13,6 +13,8 @@
   <ItemGroup>
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Web.Extensions" />
+    <Compile Include="..\..\shared\Reign.Core.Contracts\Characters\NpcLivesCheckpointPolicy.cs"
+             Link="Shared\NpcLivesCheckpointPolicy.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Update="scenarios\*.json" CopyToOutputDirectory="PreserveNewest" />

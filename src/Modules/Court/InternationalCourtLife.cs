@@ -217,7 +217,8 @@ namespace ReignBetaServer
                 || !ReadBool(player, "isPlayerKingdom", false)) return CourtError("Pressure must run from a foreign kingdom toward the player kingdom.");
             if (!new[] { "favor_domestic", "favor_foreign", "compensate", "compromise", "accept", "refuse" }.Contains(outcome))
                 return CourtError("The supplied outcome is not a completed international decision.");
-            if (ReadInt(payload, "continuityVersion", 0) > 0 && NormalizeCourtLifeResolutionFacts(payload) == null)
+            if ((ClaimsDirectCourtPrisonerReceipt(ReadDictionary(payload, "nativeReceipt")) || ReadInt(payload, "continuityVersion", 0) > 0)
+                && NormalizeCourtLifeResolutionFacts(payload) == null)
                 return CourtError("The native completion evidence is incomplete or inconsistent.");
             int severity = Math.Max(0, Math.Min(3, ReadInt(payload, "severityRank", 0)));
             bool favorable = outcome == "favor_foreign" || outcome == "compensate" || outcome == "compromise" || outcome == "accept";

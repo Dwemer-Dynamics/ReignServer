@@ -29,10 +29,30 @@ namespace ReignBetaServer
             Dictionary<string, object> payload)
         {
             payload = payload ?? new Dictionary<string, object>();
-            string campaignId = ReadString(payload, "campaignId", "");
-            string timelineId = ReadString(payload, "timelineId", "");
-            string chargeCategory = ReadString(payload, "chargeCategory", "");
-            string accusedId = ReadString(payload, "accusedHeroId", "").Trim();
+            bool versioned = payload.ContainsKey("schema");
+            string campaignId;
+            string timelineId;
+            string chargeCategory;
+            string accusedId;
+            if (versioned)
+            {
+                if (ArrestEvidenceExactText(payload, "schema") != "reign-arrest-evidence-request-v2"
+                    || (campaignId = ArrestEvidenceExactText(payload, "campaignId")) == null
+                    || (timelineId = ArrestEvidenceExactText(payload, "timelineId")) == null
+                    || (chargeCategory = ArrestEvidenceExactText(payload, "chargeCategory")) == null
+                    || (accusedId = ArrestEvidenceExactText(payload, "accusedHeroId")) == null)
+                    return new Dictionary<string, object>
+                    {
+                        ["ok"] = false, ["error"] = "An exact campaign, timeline, charge and accused are required."
+                    };
+            }
+            else
+            {
+                campaignId = ReadString(payload, "campaignId", "");
+                timelineId = ReadString(payload, "timelineId", "");
+                chargeCategory = ReadString(payload, "chargeCategory", "");
+                accusedId = ReadString(payload, "accusedHeroId", "").Trim();
+            }
             if (accusedId.Length == 0)
                 return new Dictionary<string, object>
                 {
@@ -55,7 +75,9 @@ namespace ReignBetaServer
                         .Where(id => id != null).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 }
             }
-            return new Dictionary<string, object>
+            if (versioned)
+                evidenceIds.RemoveAll(id => id.Length > 8192 || id != id.Trim() || id.Contains(",") || id.Any(char.IsControl));
+            var result = new Dictionary<string, object>
             {
                 ["ok"] = true, ["accusedHeroId"] = accusedId,
                 ["causeEstablished"] = evidenceIds.Count > 0,
@@ -63,7 +85,26 @@ namespace ReignBetaServer
                 ["evidenceIds"] = evidenceIds,
                 ["hiddenAgentInformationRevealed"] = false
             };
+            if (versioned)
+            {
+                result["schema"] = "reign-arrest-evidence-response-v2";
+                result["campaignId"] = campaignId;
+                result["timelineId"] = timelineId;
+                result["chargeCategory"] = chargeCategory;
+                result["evidence"] = evidenceIds.Select(id => new Dictionary<string, object>
+                {
+                    ["evidenceId"] = id,
+                    ["kind"] = "foreign_agent_exposure",
+                    ["subjectRole"] = "agent",
+                    ["subjectHeroId"] = accusedId
+                }).ToList();
+            }
+            return result;
         }
+
+        private static string ArrestEvidenceExactText(Dictionary<string, object> payload, string name) =>
+            payload.TryGetValue(name, out object value) && value is string text && !string.IsNullOrWhiteSpace(text)
+            && text.Length <= 8192 && text == text.Trim() && !text.Any(char.IsControl) ? text : null;
 
         internal static Dictionary<string, object> ArrestCaseApplyApi(
             Dictionary<string, object> payload)
