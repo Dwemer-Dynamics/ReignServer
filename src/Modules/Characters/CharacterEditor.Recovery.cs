@@ -44,6 +44,10 @@ namespace ReignBetaServer
         private const string EditorRestartFixtureFlag = "--run-character-editor-restart-fixture";
         private const string EditorRestartHero = "fixture_editor_restart_hero";
         private const string EditorRestartName = "Restart fixture native name";
+        private const string EditorRestartEventRow = "fixture_editor_restart_row";
+        private const string EditorRestartEventBefore = "The meeting is at the orchard.";
+        private const string EditorRestartEventAfter = "The meeting has moved to the vineyard gate.";
+        private const string EditorRestartEventSuffix = "fixture_editor_restart_suffix";
         private const int EditorRestartWriterExitCode = 86;
         private static string EditorRestartFixtureHome => Path.Combine(Program.TestsDir, "editor-restart-fixtures");
         private static string EditorRestartCampaign(string id) => "ce_restart_" + id;
@@ -101,13 +105,22 @@ namespace ReignBetaServer
                     .SingleOrDefault(), "revision_token", "");
             }
             if (token.Length == 0) throw new InvalidOperationException("The parent fixture did not prepare an editor token.");
+            // The signing key belongs to the writer process, so obtain its basis here.
+            var loaded = CharacterEditorLoadApi(TestDict("campaignId", campaign, "heroStringId", EditorRestartHero));
+            var eventBasis = ReadDictionary(ReadDictionary(loaded, "historyEditBasis"), "events");
+            string basis = ReadString(eventBasis, EditorRestartEventRow, "");
+            if (!ReadBool(loaded, "ok", false) || ReadString(loaded, "revisionToken", "") != token || basis.Length != 64)
+                throw new InvalidOperationException("The writer did not obtain the current event edit basis.");
             EditorRevisionBoundaryForTests = reached =>
             {
                 if (reached == phase) Environment.Exit(EditorRestartWriterExitCode);
             };
             CharacterEditorSaveApi(TestDict("campaignId", campaign, "heroStringId", EditorRestartHero,
                 "section", "state", "revisionToken", token, "documents", TestDict("state", TestDict("value", "after")),
-                "nativeChanges", TestDict("name", EditorRestartName)));
+                "nativeChanges", TestDict("name", EditorRestartName), "historyEdits", new[]
+                {
+                    TestDict("group", "events", "id", EditorRestartEventRow, "basis", basis, "text", EditorRestartEventAfter)
+                }));
             throw new InvalidOperationException("The Character Editor writer did not reach its hard-exit boundary.");
         }
 
@@ -138,9 +151,63 @@ namespace ReignBetaServer
                 throw new IOException("Character Editor restart child returned " + child.ExitCode + ": " + output.Result + error.Result);
         }
 
+        private static Dictionary<string, object> SeedEditorRestartEvent(string campaign, string path)
+        {
+            const string player = "fixture_editor_restart_player", source = "fixture_editor_restart_event";
+            const long timestamp = 120;
+            var audience = new List<string> { EditorRestartHero, player };
+            var context = TestDict("sceneTurnId", "fixture_editor_restart_beat", "timelineId", "main",
+                "worldDay", 5d, "participants", audience);
+            var exchange = DialogueService.StoreConversationExchange(campaign, context, EditorRestartHero, player,
+                "Player", EditorRestartHero, "Where?", EditorRestartEventBefore, source, timestamp);
+            DialogueService.StoreTurnMemoryLayers(campaign, source, "dialogue_turn", EditorRestartHero, player,
+                "town", "Where?", EditorRestartEventBefore, new List<Dictionary<string, object>>
+                {
+                    TestDict("memoryId", source + "_memory", "text", EditorRestartEventBefore, "evidenceQuote", EditorRestartEventBefore)
+                }, null, null, null, null, "conversation", timestamp, audience, continuityPayload: context);
+            var row = TestDict("id", EditorRestartEventRow, "eventId", source, "sourceTurnId", ReadStringList(exchange, "turnIds")[1],
+                "sessionId", ReadString(exchange, "sessionId", ""), "exchangeId", ReadString(exchange, "exchangeId", ""),
+                "timelineId", "main", "role", "npc", "speakerHeroStringId", EditorRestartHero,
+                "ts", timestamp, "text", EditorRestartEventBefore);
+            var prefix = Enumerable.Range(0, 64).Select(i => TestDict("id", "padding-" + i, "text", new string('x', 128)));
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllLines(path, prefix.Append(row).Append(TestDict("id", EditorRestartEventSuffix, "text", "unchanged"))
+                .Select(item => Json.Serialize(item)));
+            return row;
+        }
+
+        private static bool EditorRestartEventMatches(IEnumerable<Dictionary<string, object>> rows,
+            Dictionary<string, object> expected)
+        {
+            var matched = rows.Where(row => EditorHistoryRowId(row) == EditorRestartEventRow).Take(2).ToList();
+            return matched.Count == 1 && SameEditorHistoryRow(matched[0], expected);
+        }
+
+        private static bool VerifyEditorRestartIndexedEvent(string path, Dictionary<string, object> expected)
+        {
+            long fileBytes = new FileInfo(path).Length, readBytes = 0;
+            var previousObserver = StrictJsonlHistoryIndex.SourceBytesReadForTests;
+            StrictJsonlHistoryIndex.SourceBytesReadForTests = count => readBytes += count;
+            try
+            {
+                var cold = Program.ReadDialogueHistoryTail(path, 2);
+                long coldReads = readBytes;
+                readBytes = 0;
+                var warm = Program.ReadDialogueHistoryTail(path, 2);
+                return coldReads >= fileBytes && readBytes > 0 && readBytes < fileBytes / 8
+                    && EditorRestartEventMatches(cold, expected) && EditorRestartEventMatches(warm, expected)
+                    && cold.Count == 2 && warm.Count == 2
+                    && SameEditorHistoryRow(cold[1], warm[1])
+                    && EditorHistoryRowId(warm[1]) == EditorRestartEventSuffix
+                    && ReadString(warm[1], "text", "") == "unchanged";
+            }
+            finally { StrictJsonlHistoryIndex.SourceBytesReadForTests = previousObserver; }
+        }
+
         private static void VerifyEditorHardExit(Action<string, bool, string> add, bool committed)
         {
             string caseId = committed ? "mixed_recovery_hard_exit_after_commit" : "mixed_recovery_hard_exit_before_commit";
+            string indexCaseId = caseId + "_strict_event_index";
             string id = Guid.NewGuid().ToString("N"), campaign = EditorRestartCampaign(id);
             string fixture = Path.Combine(EditorRestartFixtureHome, id);
             string campaigns = Path.Combine(fixture, "campaigns");
@@ -154,11 +221,17 @@ namespace ReignBetaServer
                 CampaignFileService.WriteJsonObject(state, TestDict("value", "before"));
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, EditorRestartHero, "profile.json"),
                     TestDict("heroStringId", EditorRestartHero, "name", "Restart fixture before"));
+                string eventPath = CampaignFileService.CharacterFile(campaign, EditorRestartHero, "history", "events.jsonl");
+                var originalEvent = SeedEditorRestartEvent(campaign, eventPath);
+                var editedEvent = new Dictionary<string, object>(originalEvent) { ["text"] = EditorRestartEventAfter };
                 var loaded = CharacterEditorLoadApi(TestDict("campaignId", campaign, "heroStringId", EditorRestartHero));
                 string originalToken = ReadString(loaded, "revisionToken", "");
                 if (!ReadBool(loaded, "ok", false) || originalToken.Length == 0)
                     throw new InvalidDataException("The Character Editor restart fixture could not load its token.");
                 byte[] before = File.ReadAllBytes(state);
+                byte[] originalHistory = File.ReadAllBytes(eventPath);
+                long parentGeneration = System.Threading.Volatile.Read(ref PersistenceService.CampaignReplacementGeneration);
+                bool originalIndex = VerifyEditorRestartIndexedEvent(eventPath, originalEvent);
                 RunEditorRestartFixtureChild(id, committed ? "after_sql_commit" : "before_sql_commit", EditorRestartWriterExitCode);
 
                 string journalRoot = EditorJournalRoot(campaigns, campaign);
@@ -168,10 +241,16 @@ namespace ReignBetaServer
                 if (entry.BeforeHash != EditorFileHash(before) || entry.AfterHashes[^1] != EditorFileHash(published)
                     || ReadString(TryParseJsonObject(System.Text.Encoding.UTF8.GetString(published)), "value", "") != "after")
                     throw new InvalidDataException("The interrupted writer did not leave the exact file intent and postimage.");
+                byte[] publishedHistory = File.ReadAllBytes(eventPath);
+                var eventIntent = journal.Files.SingleOrDefault(item => item.Role == "history/events.jsonl");
+                bool exactEventIntent = eventIntent != null && eventIntent.BeforeHash == EditorFileHash(originalHistory)
+                    && eventIntent.AfterHashes[^1] == EditorFileHash(publishedHistory)
+                    && EditorRestartEventMatches(Program.ReadJsonLinesFromPath(eventPath), editedEvent);
                 RunEditorRestartFixtureChild(id, "recover", 0);
 
                 using var reader = ReignDatabase.OpenCampaignConnection(campaign);
-                var revisions = ReignDatabase.QuerySql(reader, "SELECT revision_id,hero_id FROM character_editor_revisions;");
+                var revisions = ReignDatabase.QuerySql(reader,
+                    "SELECT revision_id,hero_id,before_json,after_json FROM character_editor_revisions;");
                 var commands = ReignDatabase.QuerySql(reader,
                     "SELECT revision_id,hero_id,status,changes_json FROM character_editor_native_commands;");
                 var head = CharactersStore.SelectCharacterEditorHeads(reader, TestDict("id", EditorRestartHero)).Single();
@@ -186,15 +265,34 @@ namespace ReignBetaServer
                         && ReadString(commands[0], "status", "") == "pending"
                         && ReadString(TryParseJsonObject(ReadString(commands[0], "changes_json", "")), "name", "") == EditorRestartName
                     : revisions.Count == 0 && commands.Count == 0 && !tokenChanged;
-                passed = correctDatabase && journal.Hero == EditorRestartHero
+                bool recovered = correctDatabase && journal.Hero == EditorRestartHero
                     && EditorProfileRestoreGeneration(reader) == journal.Generation
                     && !File.Exists(Path.Combine(journalRoot, EditorJournalName))
                     && File.ReadAllBytes(state).SequenceEqual(committed ? published : before);
-                add(caseId, passed, committed
+                bool revisionEventWitness = !committed || correctDatabase
+                    && EditorRestartEventMatches(ReadDictionaryList(ReadDictionary(
+                        TryParseJsonObject(ReadString(revisions[0], "before_json", "")), EditorHistoryDeltaKey), "events"), originalEvent)
+                    && EditorRestartEventMatches(ReadDictionaryList(ReadDictionary(
+                        TryParseJsonObject(ReadString(revisions[0], "after_json", "")), EditorHistoryDeltaKey), "events"), editedEvent);
+                var expected = committed ? editedEvent : originalEvent;
+                bool recoveredIndex = VerifyEditorRestartIndexedEvent(eventPath, expected);
+                bool indexed = recovered && originalIndex && exactEventIntent && revisionEventWitness && recoveredIndex
+                    && parentGeneration == System.Threading.Volatile.Read(ref PersistenceService.CampaignReplacementGeneration)
+                    && File.ReadAllBytes(eventPath).SequenceEqual(committed ? publishedHistory : originalHistory)
+                    && EditorRestartEventMatches(Program.ReadJsonLinesFromPath(eventPath), expected);
+                add(caseId, recovered, committed
                     ? "A real exit after COMMIT retains the exact file bytes and one revision and native command across restart and replay."
                     : "A real exit before COMMIT restores the exact original file bytes and leaves no revision or native command after restart.");
+                add(indexCaseId, indexed, committed
+                    ? "The surviving strict index rebuilds after a child's committed event edit and returns exactly the event witnessed by SQL."
+                    : "The surviving strict index rebuilds after a child's abandoned event edit and returns only the exact rolled-back event.");
+                passed = recovered && indexed;
             }
-            catch (Exception ex) { add(caseId, false, ex.Message); }
+            catch (Exception ex)
+            {
+                add(caseId, false, ex.Message);
+                add(indexCaseId, false, ex.Message);
+            }
             finally
             {
                 try
