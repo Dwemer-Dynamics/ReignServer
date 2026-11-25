@@ -500,10 +500,56 @@ namespace ReignBetaServer
             if (!File.Exists(path))
                 return new List<Dictionary<string, object>>();
 
-            // Keep the existing parser and physical order. Stream earlier rows
-            // so the short reader only retains the requested tail.
+            int count = Math.Max(1, limit);
             lock (FileLock)
-                return ReadJsonLineRowsLocked(path).TakeLast(Math.Max(1, limit)).ToList();
+            {
+                if (!CampaignFileService.IsDialogueHistoryPath(path))
+                    return ReadJsonLineRowsLocked(path).TakeLast(count).ToList();
+
+                using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                return ReadTolerantDialogueHistoryTail(stream, count);
+            }
+        }
+
+        internal static List<Dictionary<string, object>> ReadTolerantDialogueHistoryTail(Stream stream, int count)
+        {
+            const int initialSuffixBytes = 16 * 1024;
+            long length = stream.Length;
+            long start = Math.Max(0L, length - initialSuffixBytes);
+            if (start > 0)
+            {
+                Span<byte> prefix = stackalloc byte[4];
+                stream.ReadExactly(prefix);
+                // StreamReader accepts older UTF-16 and UTF-32 files with a BOM.
+                // Byte offsets into those encodings cannot be treated as UTF-8.
+                if ((prefix[0] == 0xff && prefix[1] == 0xfe)
+                    || (prefix[0] == 0xfe && prefix[1] == 0xff)
+                    || (prefix[0] == 0x00 && prefix[1] == 0x00 && prefix[2] == 0xfe && prefix[3] == 0xff))
+                    start = 0;
+            }
+
+            while (true)
+            {
+                stream.Position = start;
+                using var reader = new StreamReader(stream, Encoding.UTF8,
+                    detectEncodingFromByteOrderMarks: start == 0, bufferSize: 4096, leaveOpen: true);
+                // A suffix may start in the middle of a row or an encoded character.
+                if (start > 0) _ = reader.ReadLine();
+                var tail = ReadTolerantDialogueRows(reader).TakeLast(count).ToList();
+                if (start == 0 || tail.Count == count) return tail;
+                start -= Math.Min(start, length - start);
+            }
+        }
+
+        private static IEnumerable<Dictionary<string, object>> ReadTolerantDialogueRows(StreamReader reader)
+        {
+            string line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                var row = CampaignFileService.ParseDialogueHistoryLine(line);
+                if (row != null) yield return row;
+            }
         }
 
         // Consume the returned sequence while holding FileLock.

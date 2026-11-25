@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using Reign.Shared;
 
@@ -84,6 +85,57 @@ namespace ReignBetaServer
             }
         }
 
+        private static void RunLegacyDialogueSuffixTests(Action<string, bool, string, object> add)
+        {
+            var directory = Directory.CreateTempSubdirectory("reign-short-dialogue-");
+            string history = Directory.CreateDirectory(Path.Combine(directory.FullName, "history")).FullName;
+            string path = Path.Combine(history, "dialogue.jsonl");
+            string earlier = string.Concat(Enumerable.Range(0, 2500)
+                .Select(i => Json.Serialize(TestDict("id", "earlier-" + i, "text", new string('x', 96))) + "\r\n"));
+            string lastRows = "{malformed\r{\"id\":\"penultimate\",\"text\":\"\u00E9\U0001F680\"}\n  \r\n{\"id\":\"last\"}";
+            try
+            {
+                var encodings = new Encoding[]
+                {
+                    new UTF8Encoding(false), Encoding.UTF8, Encoding.Unicode, Encoding.BigEndianUnicode,
+                    Encoding.UTF32, new UTF32Encoding(true, true)
+                };
+                string contents = earlier + "{\"id\":\"before-missing\"}\r\n" + new string('!', 40000) + "\r" + lastRows;
+                bool sameRows = encodings.All(encoding =>
+                {
+                    File.WriteAllText(path, contents, encoding);
+                    return new[] { 0, 2, 4 }.All(count =>
+                        Json.Serialize(Program.ReadDialogueHistoryTail(path, count))
+                        == Json.Serialize(Program.ReadJsonLinesFromPath(path).TakeLast(Math.Max(1, count)).ToList()));
+                });
+                add("legacy_dialogue_suffix_preserves_tolerant_tail",
+                    sameRows, "The checked-in reader preserves exact rows across damaged UTF-8, mixed newlines, and legacy wide encodings.", null);
+
+                byte[] input = Encoding.UTF8.GetBytes(earlier + lastRows);
+                using var stream = new CountedDialogueHistoryStream(input);
+                var result = Program.ReadTolerantDialogueHistoryTail(stream, 2);
+                add("legacy_dialogue_short_tail_skips_old_bytes",
+                    result.Select(row => ReadString(row, "id", "")).SequenceEqual(new[] { "penultimate", "last" })
+                    && stream.BytesRead > 0 && stream.BytesRead < input.Length / 4,
+                    "A short tolerant dialogue view reads only the necessary suffix of a large UTF-8 log.",
+                    TestDict("inputBytes", input.Length, "bytesRead", stream.BytesRead));
+            }
+            finally { Directory.Delete(directory.FullName, recursive: true); }
+        }
+
+        private sealed class CountedDialogueHistoryStream : MemoryStream
+        {
+            internal CountedDialogueHistoryStream(byte[] input) : base(input, writable: false) { }
+            internal long BytesRead { get; private set; }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                int read = base.Read(buffer, offset, count);
+                BytesRead += read;
+                return read;
+            }
+        }
+
         private static List<Dictionary<string, object>> RunInteractionArchitectureSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -97,6 +149,7 @@ namespace ReignBetaServer
             Action<string, bool, string, object> add = (id, passed, summary, data) => results.Add(new Dictionary<string, object>
             { ["caseId"] = id, ["suite"] = "interaction_architecture", ["passed"] = passed, ["summary"] = summary, ["data"] = data });
             RunRecentDialogueMemoryReadTests(add);
+            RunLegacyDialogueSuffixTests(add);
             var providerChoice = new Dictionary<string, object> {
                 ["message"] = new Dictionary<string, object> { ["content"] = "{\"reply\":\"Hello.\"}" },
                 ["finish_reason"] = "stop"
