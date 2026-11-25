@@ -7,9 +7,45 @@ import tarfile
 import posixpath
 import re
 
-def audit(image, provenance, support):
-    if provenance.get('rootfsLayerSha256')!='69245854ad5855991d16224f6abf55855d2d73922785206adea9c5c5988434a0' or provenance.get('ociManifest')!='sha256:366a6da5efcceffbaa19c560a101b97b87a1a9664eeeac8bc3d24395ddbf14f3':
+def image_lock(support):
+    """The reviewed base image and OS/PostgreSQL/Python identity, single-sourced in release.json."""
+    lock=json.loads((support/'release/release.json').read_text(encoding='utf-8'))['serverImage']
+    if lock.get('schema')!='reign-tester-image-v2':raise ValueError('Unsupported server image lock')
+    return lock
+
+def check_provenance(provenance, lock):
+    base=lock['base']
+    expected={'ociIndex':base['indexDigest'],'ociManifest':base['manifestDigest'],
+              'rootfsLayerSha256':base['rootfsLayerDigest'].removeprefix('sha256:'),'rootfsLayerBytes':base['rootfsLayerBytes'],
+              'reference':base['reference'],'platform':base['platform']}
+    if any(provenance.get(key)!=value for key,value in expected.items()):
         raise ValueError('Unreviewed Debian base provenance')
+
+def check_marker(marker, lock, req_sha, model_sha):
+    if not marker or marker.get('schema')!=lock['schema'] or marker.get('personalDataIncluded') is not False:
+        raise ValueError('Clean image marker missing or from an older image')
+    if (marker.get('debian'),marker.get('codename'),marker.get('postgresMajor'),marker.get('icuPackage'),marker.get('baseManifestDigest'))!=(
+        lock['os']['versionId'],lock['os']['codename'],lock['postgresMajor'],lock['icuPackage'],lock['base']['manifestDigest']) \
+        or not str(marker.get('python','')).startswith(lock['python']+'.'):
+        raise ValueError('Image OS/PostgreSQL/Python identity differs from release.json serverImage')
+    if marker.get('requirementsSha256')!=req_sha or marker.get('modelLockSha256')!=model_sha:
+        raise ValueError('Dependency image content/lock mismatch')
+    packages=dict(row.split('\t',1) for row in marker.get('packages',[]) if '\t' in row)
+    major=str(lock['postgresMajor'])
+    for name in ('postgresql-'+major,'postgresql-client-'+major,lock['icuPackage'],'python3','python3-venv'):
+        if name not in packages:raise ValueError('Pinned image package missing: '+name)
+    others=[n for n in packages if n.startswith(('postgresql-1','postgresql-client-1','postgresql-9')) and n.rsplit('-',1)[-1]!=major]
+    if others:raise ValueError('Unexpected PostgreSQL major in image: '+', '.join(sorted(others)))
+
+def check_venv(config, abis, lock):
+    # The venv path is keyed only by the requirements hash; bind it to the image's Python ABI too.
+    cfg=dict(line.split(' = ',1) for line in (config or '').splitlines() if ' = ' in line)
+    if not cfg.get('version','').startswith(lock['python']+'.') or abis!={'python'+lock['python']}:
+        raise ValueError('Dependency venv Python ABI differs from the image Python')
+
+def audit(image, provenance, support):
+    lock=image_lock(support)
+    check_provenance(provenance,lock)
     requirements=(support/'services/vector-worker/requirements-linux.txt').read_bytes()
     model_raw=(support/'release/embedding-model.lock.json').read_bytes()
     req_sha=hashlib.sha256(requirements).hexdigest();model_sha=hashlib.sha256(model_raw).hexdigest()
@@ -20,7 +56,7 @@ def audit(image, provenance, support):
         expected_models[name]=re.search(key+r' = "([a-f0-9]{64})"',preparation).group(1)
     expected_preparation={name:hashlib.sha256((support/'scripts'/name).read_bytes()).hexdigest()
                           for name in ('Prepare-MemorySelection.py','Prepare-LinuxRuntime.py')}
-    seen_models=set();seen_preparation=set();complete=False;marker=None;count=0;size=0
+    seen_models=set();seen_preparation=set();complete=False;marker=None;count=0;size=0;venv_cfg=None;venv_abis=set()
     with tarfile.open(image,'r|*') as archive:
         for item in archive:
             name=item.name.removeprefix('./').rstrip('/')
@@ -69,16 +105,19 @@ def audit(image, provenance, support):
                 short=name.removeprefix(script_prefix)
                 if hashlib.file_digest(archive.extractfile(item),'sha256').hexdigest()!=expected_preparation[short]:raise ValueError('Preparation source changed')
                 seen_preparation.add(short)
-            if name=='var/www/html/ReignServer/runtime/venvs/'+req_sha+'/.complete':complete=True
+            venv_prefix='var/www/html/ReignServer/runtime/venvs/'+req_sha+'/'
+            if name==venv_prefix+'.complete':complete=True
+            if name==venv_prefix+'pyvenv.cfg':venv_cfg=archive.extractfile(item).read().decode()
+            if name.startswith(venv_prefix+'lib/'):venv_abis.add(name.removeprefix(venv_prefix+'lib/').split('/',1)[0])
             if name=='etc/reign-tester-image.json':
                 marker=json.load(archive.extractfile(item))
-    if not marker or marker.get('schema')!='reign-tester-image-v1' or marker.get('personalDataIncluded') is not False:
-        raise ValueError('Clean image marker missing')
-    if not complete or seen_models!=set(expected_models) or seen_preparation!=set(expected_preparation) or marker['requirementsSha256']!=req_sha or marker['modelLockSha256']!=model_sha:
+    check_marker(marker,lock,req_sha,model_sha)
+    if not complete or seen_models!=set(expected_models) or seen_preparation!=set(expected_preparation):
         raise ValueError('Dependency image content/lock mismatch')
+    check_venv(venv_cfg,venv_abis,lock)
     with image.open('rb') as stream:
         digest=hashlib.file_digest(stream,'sha256').hexdigest()
-    return dict(schema='reign-tester-image-receipt-v1',auditPassed=True,sha256=digest,
+    return dict(schema='reign-tester-image-receipt-v2',auditPassed=True,sha256=digest,
         bytes=image.stat().st_size,expandedFileBytes=size,fileCount=count,
         requirementsSha256=marker['requirementsSha256'],modelLockSha256=marker['modelLockSha256'],
         preparationSha256=expected_preparation,verifiedModelCount=len(seen_models),

@@ -11,6 +11,7 @@ report=$4
 [[ "$report" = "/var/tmp/reign-tester-proof-$owner.json" ]] || exit 64
 test ! -e "$report" && test ! -L "$report" || { echo 'Retain the prior proof and choose a fresh fixture.' >&2; exit 1; }
 root=/var/www/html/ReignServer
+pg_major=$(python3 -I -c 'import json,sys;print(int(json.load(open(sys.argv[1]))["serverImage"]["postgresMajor"]))' "$root/release/release.json")
 test "$(sha256sum "$root/runtime/current/ReignServer.dll" | cut -d ' ' -f 1)" = "$expected_dll"
 python3 - "$root" "$owner" "$saves" <<'PY'
 import json,pathlib,sys
@@ -28,14 +29,14 @@ for unit in reignserver apache2 postgresql; do
     if systemctl is-active --quiet "$unit"; then echo 'Fixture services must start stopped.' >&2; exit 1; fi
 done
 namespace="reign-tester-${owner:0:12}"
-for unit in reignserver apache2 postgresql@15-main; do
+for unit in reignserver apache2 "postgresql@$pg_major-main"; do
     test ! -e "/run/systemd/system/$unit.service.d/tester-isolation.conf"
 done
 ip netns add "$namespace"
 cleanup() {
     result=$?
     systemctl stop reignserver.service apache2 postgresql || true
-    for unit in reignserver apache2 postgresql@15-main; do
+    for unit in reignserver apache2 "postgresql@$pg_major-main"; do
         rm -f -- "/run/systemd/system/$unit.service.d/tester-isolation.conf"
     done
     systemctl daemon-reload || true
@@ -44,14 +45,14 @@ cleanup() {
 }
 trap cleanup EXIT
 ip -n "$namespace" link set lo up
-for unit in reignserver apache2 postgresql@15-main; do
+for unit in reignserver apache2 "postgresql@$pg_major-main"; do
     install -d -m 0755 "/run/systemd/system/$unit.service.d"
     printf '[Service]\nNetworkNamespacePath=/run/netns/%s\n' "$namespace" > "/run/systemd/system/$unit.service.d/tester-isolation.conf"
 done
 systemctl daemon-reload
-test "$(pg_conftool 15 main show listen_addresses)" = "listen_addresses = ''"
-test "$(pg_conftool 15 main show port)" = 'port = 5432'
-for unit in reignserver apache2 postgresql@15-main; do
+test "$(pg_conftool "$pg_major" main show listen_addresses)" = "listen_addresses = ''"
+test "$(pg_conftool "$pg_major" main show port)" = 'port = 5432'
+for unit in reignserver apache2 "postgresql@$pg_major-main"; do
     test "$(systemctl show "$unit" -p NetworkNamespacePath --value)" = "/run/netns/$namespace"
 done
 systemctl start postgresql

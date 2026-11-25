@@ -484,8 +484,13 @@ EOF
         install -d -m 755 "$root" "$root/versions"
         install -d -o reign -g reign -m 700 "$data"
         /usr/local/lib/reign/prepare-systemd-sessions.sh
+        case "$(. /etc/os-release && echo "$ID:$VERSION_ID")" in
+            debian:12) icu_package=libicu72 ;;
+            debian:13) icu_package=libicu76 ;;
+            *) echo 'Unsupported Debian release for the Reign runtime.' >&2; exit 1 ;;
+        esac
         apt-get update -qq
-        apt-get install -y --no-install-recommends python3-venv libicu72 libgssapi-krb5-2 ca-certificates curl acl
+        apt-get install -y --no-install-recommends python3-venv "$icu_package" libgssapi-krb5-2 ca-certificates curl acl
         repair_permissions
         requirements="$source_root/services/vector-worker/requirements-linux.txt"
         scripts="$source_root/scripts"

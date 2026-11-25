@@ -19,7 +19,7 @@ $package=Join-Path $root 'package';New-Item -ItemType Directory -Path $package |
 $names=@('reign-server-image.tar','server/reign-linux-artifact.json','ReignBeta/SubModule.xml',
     'ReignBeta/bin/Win64_Shipping_Client/ReignBeta.dll','portrait-helper/Bannerlord.NativeCharacterImageGenerator.App.exe',
     'initialize-server.sh','Start-Reign.ps1','server-support/scripts/Start-ReignServer-Wsl.ps1',
-    'server-support/scripts/reign-recover.py','image-receipt.json','INSTALL.html','Reign User Guide.html')
+    'server-support/scripts/reign-recover.py','server-support/release/release.json','image-receipt.json','INSTALL.html','Reign User Guide.html')
 $entries=@()
 foreach($name in $names){
     $path=Resolve-ReignMember $package $name;New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
@@ -48,6 +48,18 @@ Require (Test-Path -LiteralPath (Join-Path $stage 'unknown.txt')) 'refusal does 
 $journal=Join-Path $root 'transaction.json';Write-ReignJson $journal @{phase='first'};Write-ReignJson $journal @{phase='second'}
 Require ((Get-Content -LiteralPath $journal -Raw | ConvertFrom-Json).phase -eq 'second') 'atomic journal replacement'
 Require (-not (Test-Path -LiteralPath "$journal.next")) 'no partial journal remains'
+$imageLock=(Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\release\release.json') -Raw -Encoding UTF8 | ConvertFrom-Json).serverImage
+$imageMarker=[pscustomobject]@{schema=$imageLock.schema;debian=$imageLock.os.versionId;postgresMajor=$imageLock.postgresMajor;python=$imageLock.python+'.5';icuPackage=$imageLock.icuPackage;baseManifestDigest=$imageLock.base.manifestDigest}
+Assert-ReignImageIdentity $imageMarker $imageLock @('17');Require $true 'current server image accepted'
+$refreshed=$imageMarker.PSObject.Copy();$refreshed.baseManifestDigest='sha256:'+('0'*64)
+Assert-ReignImageIdentity $refreshed $imageLock @('17');Require $true 'same-major refreshed base accepted for update'
+foreach($field in @(@('python','3.11.2'),@('icuPackage','libicu72'),@('postgresMajor',15),@('debian','12'))){
+    $changed=$imageMarker.PSObject.Copy();$changed.($field[0])=$field[1]
+    Refuse {Assert-ReignImageIdentity $changed $imageLock @('17')} "incompatible image $($field[0]) refused"
+}
+Refuse {Assert-ReignImageIdentity $imageMarker $imageLock @('15','17')} 'legacy PostgreSQL cluster refused'
+Refuse {Assert-ReignImageIdentity ([pscustomobject]@{schema='reign-tester-image-v1';debian='12';postgresMajor=15}) $imageLock @()} 'Debian 12 image marker refused'
+Refuse {Assert-ReignImageIdentity $null $imageLock @('17')} 'missing image marker refused'
 $tokens=$null;$errors=$null
 [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Install-Reign.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
 Require ($errors.Count -eq 0) 'PowerShell 5 installer parse'

@@ -24,9 +24,37 @@
 <li>Enable ReignBeta and its required dependencies in the Bannerlord launcher. Start Bannerlord yourself. Let campaign preparation finish before interacting.</li>
 <li>Read the included <a href="Reign%20User%20Guide.html">Reign User Guide</a> for controls and play. It is the latest available illustrated manual; its source-reviewed edition is November 9, 2026. This installation page describes the current tester installer. New beta behavior may be newer than that manual.</li></ol>
 <h2>Updates and interrupted installs</h2>
-<p>For a newer tester package, close the game and use the same game/server folders with <code>-Update</code>. Only a previously owned tester installation can be updated. Its database, settings, campaigns and previous runtime are retained. Changed or unknown module files cause a refusal.</p>
+<p>For a newer tester package, close the game and use the same game/server folders with <code>-Update</code>. Only a previously owned tester installation can be updated. Its database, settings, campaigns and previous runtime are retained. Changed or unknown module files cause a refusal. Installations from older Debian 12 / PostgreSQL 15 packages need the <a href="#older-server">manual steps below</a>.</p>
 <p>If installation stops, keep its extracted package, server folder and transaction journal under <code>ReignTester\transactions</code>. Fix the reported problem, then retry the same command with <code>-Resume</code>. Never delete a distro or player-data folder just to clear an error. Some interrupted storage/import or conflicting backup states require inspection before retrying.</p>
 <p><code>-VerifyOnly</code> checks package integrity and installation prerequisites without installing. It does not prove a complete clean-computer install or native gameplay.</p>
+<h3 id="older-server">Older Debian 12 / PostgreSQL 15 tester installations</h3>
+<p>This package's server uses Debian 13 and PostgreSQL 17. An installation made from an older Debian 12 / PostgreSQL 15 package cannot be updated in place: <code>-Update</code> stops before changing anything and keeps the old distro and data. There is no automatic migration. The manual steps below are not a qualified or tested migration; check your campaigns yourself before relying on the result, and keep every old copy until then.</p>
+<ol><li>Close Bannerlord. In Windows PowerShell, note which old services are running, stop Reign so nothing writes, then export the database and the complete private data folder (settings, API keys, campaigns, save sync, vectors and portraits) while PostgreSQL is running:
+<pre>wsl -d ReignServer -u root -e systemctl is-active reignserver apache2 postgresql
+wsl -d ReignServer -u root -e systemctl stop reignserver apache2
+wsl -d ReignServer -u root -e systemctl start postgresql
+wsl -d ReignServer -u root -e runuser -u postgres -- pg_dump -Fc -d reign -f /var/tmp/reign-pg15.dump
+wsl -d ReignServer -u root -e tar -C /var/www/html/ReignServer -cpf /var/tmp/reign-data.tar data
+wsl -d ReignServer -u root -e chown reign:reign /var/tmp/reign-pg15.dump /var/tmp/reign-data.tar
+wsl -d ReignServer -u root -e chmod 600 /var/tmp/reign-pg15.dump /var/tmp/reign-data.tar
+wsl -d ReignServer -u root -e systemctl stop postgresql
+New-Item -ItemType Directory "$env:USERPROFILE\ReignMigration"
+Copy-Item \\wsl.localhost\ReignServer\var\tmp\reign-pg15.dump, \\wsl.localhost\ReignServer\var\tmp\reign-data.tar "$env:USERPROFILE\ReignMigration"</pre>
+Keep <code>ReignMigration</code> private in your own profile. It contains your API keys and conversations; never put it in a shared or cloud folder.</li>
+<li>Leave the old server stopped. Run <code>wsl --terminate ReignServer</code>, then keep a whole-distro backup: <code>wsl --export ReignServer "$env:USERPROFILE\ReignMigration\ReignServer-pg15.tar"</code>. Keep the old distro registered and its server folder (default <code>%USERPROFILE%\ReignTester</code>) unchanged.</li>
+<li>Move <code>%USERPROFILE%\.reign\installation.json</code> and the game's <code>Modules\ReignBeta</code> folder to a backup folder outside <code>Modules</code>. Do not delete them. Install this package fresh with a new distro name and an empty new server folder, for example <code>-Distro ReignServer17 -InstallRoot "$env:USERPROFILE\ReignTester17"</code>. <strong>Do not start Reign yet.</strong></li>
+<li>Restore only into the new, still-empty installation. Replace <code>&lt;you&gt;</code> with your Windows user folder name. The first check must print <code>0</code> and the second nothing; otherwise stop and ask for help.
+<pre>wsl -d ReignServer17 -u root -e install -o reign -g reign -m 600 /mnt/c/Users/&lt;you&gt;/ReignMigration/reign-pg15.dump /mnt/c/Users/&lt;you&gt;/ReignMigration/reign-data.tar /var/tmp/
+wsl -d ReignServer17 -u root -e systemctl start postgresql
+wsl -d ReignServer17 -u root -e runuser -u postgres -- psql -XAt -d reign -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%'"
+wsl -d ReignServer17 -u root -e find /var/www/html/ReignServer/data -mindepth 1 -type f ! -name windows-bridge.json ! -path */logs/*
+wsl -d ReignServer17 -u root -e runuser -u postgres -- pg_restore --exit-on-error --single-transaction --no-owner --role=reign -d reign /var/tmp/reign-pg15.dump
+wsl -d ReignServer17 -u root -e tar -C /var/www/html/ReignServer --exclude=data/windows-bridge.json --exclude=data/logs -xpf /var/tmp/reign-data.tar data
+wsl -d ReignServer17 -u root -e reignctl repair-permissions
+wsl -d ReignServer17 -u root -e systemctl stop postgresql
+wsl -d ReignServer17 -u root -e rm /var/tmp/reign-pg15.dump /var/tmp/reign-data.tar</pre>
+A failed <code>pg_restore</code> is rolled back as one transaction; do not start Reign or retry over a partly restored folder. The new installation keeps its own <code>windows-bridge.json</code>.</li>
+<li>Start the new installation with <strong>Start Reign Tester</strong>; the server upgrades its own schema on first start. Confirm the Control Center is healthy and your campaigns and saves load before removing anything old. To go back, close the game, move the new record and module aside and restore the old ones.</li></ol>
 <h2>What the package keeps private</h2>
 <p>No distributor API keys, personal settings, campaigns, saves, campaign portraits or player database are supplied. Each tester provides their own game, dependency mods, provider credentials and campaign. The server environment includes the fixed dependency/model versions identified in its receipt.</p>
 <p>For a beta report, include your package ID, game version, steps to reproduce and a screenshot of the error. Review logs before sharing them; they may contain your conversations. Do not share API keys or your entire player database publicly.</p>

@@ -72,10 +72,22 @@ function Assert-ReignPackage([string]$Root) {
     foreach ($required in @('reign-server-image.tar','server/reign-linux-artifact.json','ReignBeta/SubModule.xml',
         'ReignBeta/bin/Win64_Shipping_Client/ReignBeta.dll','portrait-helper/Bannerlord.NativeCharacterImageGenerator.App.exe',
         'initialize-server.sh','Start-Reign.ps1','server-support/scripts/Start-ReignServer-Wsl.ps1',
-        'server-support/scripts/reign-recover.py','image-receipt.json','INSTALL.html','Reign User Guide.html')) {
+        'server-support/scripts/reign-recover.py','server-support/release/release.json','image-receipt.json','INSTALL.html','Reign User Guide.html')) {
         if (@($manifest.files | Where-Object {$_.path -ceq $required}).Count -ne 1) { throw "Required payload missing: $required" }
     }
     return $manifest
+}
+function Assert-ReignImageIdentity($Marker, $Lock, [string[]]$Clusters) {
+    # Database majors are never migrated in place; an older owned distro is left untouched.
+    $legacy=@($Clusters | Where-Object {$_ -and $_ -cne [string]$Lock.postgresMajor})
+    if($legacy.Count){throw "This Reign distro holds a PostgreSQL $($legacy -join ', ') cluster from an older server image. Nothing was changed. Keep it, export the reign database as described in INSTALL.html, then install into a new distro."}
+    # Same-major updates keep the installed distro, so compare runtime compatibility, not
+    # the base digest: a refreshed base of the same release must not strand player data.
+    if(-not $Marker -or $Marker.schema -cne $Lock.schema -or [string]$Marker.debian -cne [string]$Lock.os.versionId -or
+        [string]$Marker.postgresMajor -cne [string]$Lock.postgresMajor -or $Marker.icuPackage -cne $Lock.icuPackage -or
+        -not ([string]$Marker.python).StartsWith([string]$Lock.python+'.',[StringComparison]::Ordinal)){
+        throw 'The installed Reign server image differs from the image this package requires. Nothing was changed; install into a new distro.'
+    }
 }
 function Write-ReignJson([string]$Path, $Value) {
     $Path=Assert-ReignLocalPath $Path
@@ -246,6 +258,16 @@ try {
     if (@($registrations | Where-Object { $_.DistributionName -ine $Distro -and (Normalize-ReignBase $_.BasePath) -ieq $distroRoot }).Count) { throw 'Another distro uses the selected storage directory.' }
     if($selected.Count -eq 1 -and -not $previous -and -not $journal.importCompleted){throw 'An incomplete distro import needs inspection; its storage is preserved.'}
     if ($journal -and $journal.packageId -cne $packageId) { throw 'Recovery journal belongs to a different package.' }
+    if ($previous -and $selected.Count -eq 1) {
+        # Read-only: refuse an older image before the journal, snapshot or service stop.
+        [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+        $imageLock=(Get-Content -LiteralPath (Join-Path $package 'server-support\release\release.json') -Raw -Encoding UTF8 | ConvertFrom-Json).serverImage
+        $clusters=@(& "$env:SystemRoot\System32\wsl.exe" -d $Distro -u root --exec /usr/bin/find /etc/postgresql /var/lib/postgresql -mindepth 1 -maxdepth 1 -type d -regex '.*/[0-9]+' -printf '%f\n')
+        if($LASTEXITCODE -ne 0){throw 'The installed PostgreSQL clusters could not be inspected; nothing was changed.'}
+        $markerText=& "$env:SystemRoot\System32\wsl.exe" -d $Distro -u root --exec /bin/cat /etc/reign-tester-image.json
+        if($LASTEXITCODE -ne 0){throw 'The installed Reign server image identity could not be read; nothing was changed.'}
+        Assert-ReignImageIdentity (($markerText -join "`n") | ConvertFrom-Json) $imageLock $clusters
+    }
     if ($VerifyOnly) { Write-Output 'Package and installation preflight passed. No installation changes made.'; return }
     if($previous -and $previous.packageId -ceq $packageId -and $journal -and $journal.complete){Write-Output 'This exact package is already installed and verified.';return}
     if ($journal -and -not $Resume -and -not $journal.complete) { throw 'An interrupted install exists. Read its journal, then use -Resume.' }

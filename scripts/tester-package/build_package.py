@@ -163,8 +163,16 @@ def assemble(args):
     if not Path(__file__).resolve().is_relative_to(server) or Path(__file__).resolve().relative_to(server).as_posix() not in selected_sources:
         raise ValueError('Use the committed server-owned builder')
     image = read(args.image_receipt)
-    if image.get('schema') != 'reign-tester-image-receipt-v1' or image.get('auditPassed') is not True or sha(args.image) != image['sha256']:
+    if image.get('schema') != 'reign-tester-image-receipt-v2' or image.get('auditPassed') is not True or sha(args.image) != image['sha256']:
         raise ValueError('Prepared image audit/hash missing')
+    if 'release/release.json' not in selected_sources: raise ValueError('Untracked release input')
+    image_lock = read(server / 'release/release.json')['serverImage']
+    identity, upstream = image.get('imageIdentity') or {}, image.get('upstream') or {}
+    if (identity.get('schema') != image_lock['schema'] or identity.get('debian') != image_lock['os']['versionId']
+            or identity.get('postgresMajor') != image_lock['postgresMajor']
+            or identity.get('baseManifestDigest') != image_lock['base']['manifestDigest']
+            or upstream.get('ociManifest') != image_lock['base']['manifestDigest']):
+        raise ValueError('Prepared image predates the release.json serverImage identity')
     if image['requirementsSha256'] != sha(server / 'services/vector-worker/requirements-linux.txt') or image['modelLockSha256'] != sha(server / 'release/embedding-model.lock.json'):
         raise ValueError('Dependency image does not match current locks')
     for name in ('Prepare-MemorySelection.py','Prepare-LinuxRuntime.py'):

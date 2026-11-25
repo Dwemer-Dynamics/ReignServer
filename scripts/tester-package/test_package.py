@@ -80,7 +80,42 @@ class PackageContracts(unittest.TestCase):
         self.assertLess(source.index('policy-rc.d'),source.index('apt-get install'))
         self.assertIn('create_main_cluster = false',source)
         self.assertIn('--leave-stopped',(HERE/'initialize-server.sh').read_text())
-        self.assertIn('pg_createcluster 15 main --port=5432',(HERE/'initialize-server.sh').read_text())
+        initialize=(HERE/'initialize-server.sh').read_text()
+        self.assertIn('pg_createcluster "$pg_major" main --port=5432',initialize)
+        # The image/legacy-cluster guard must refuse before ownership, scripts, services or database change.
+        guard=initialize.index("raise SystemExit('This distro holds a PostgreSQL")
+        for mutation in ("p.write_text(json.dumps({'schema':'reign-tester-owner-v1'",'cp -r --no-preserve=all','systemctl unmask','pg_createcluster'):
+            self.assertLess(guard,initialize.index(mutation),mutation)
+        # Same-major updates compare runtime identity; only fresh/resume pins this package's base digest.
+        self.assertIn("(sys.argv[2]!='update' and marker.get('baseManifestDigest')!=lock['base']['manifestDigest'])",initialize)
+        self.assertIn('"$package/server-support/release/release.json" "$mode" <<',initialize)
+        for name in ('initialize-server.sh','prepare-image.sh','runtime_probe.sh'):
+            self.assertNotRegex((HERE/name).read_text(),r'postgresql[-@/]1[0-6]\b|pg_[a-z]+ 1[0-6] |libicu72|python3\.11',name)
+
+    def test_server_image_identity(self):
+        spec=importlib.util.spec_from_file_location('audit_image',HERE/'audit_image.py')
+        audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)
+        lock=audit.image_lock(HERE.parent.parent)
+        self.assertEqual((lock['os']['versionId'],lock['postgresMajor'],lock['python'],lock['icuPackage']),('13',17,'3.13','libicu76'))
+        base=lock['base']
+        provenance={'ociIndex':base['indexDigest'],'ociManifest':base['manifestDigest'],'rootfsLayerSha256':base['rootfsLayerDigest'][7:],
+                    'rootfsLayerBytes':base['rootfsLayerBytes'],'reference':base['reference'],'platform':base['platform']}
+        audit.check_provenance(provenance,lock)
+        old={'rootfsLayerSha256':'69245854ad5855991d16224f6abf55855d2d73922785206adea9c5c5988434a0',
+             'ociManifest':'sha256:366a6da5efcceffbaa19c560a101b97b87a1a9664eeeac8bc3d24395ddbf14f3'}
+        for changed in (old,dict(provenance,ociIndex=None),dict(provenance,rootfsLayerBytes=1)):
+            with self.assertRaises(ValueError):audit.check_provenance(changed,lock)
+        packages=['postgresql-17\t17.6-1','postgresql-client-17\t17.6-1','postgresql-common\t278','libicu76\t76.1-4','python3\t3.13.5-1','python3-venv\t3.13.5-1']
+        marker={'schema':'reign-tester-image-v2','debian':'13','codename':'trixie','postgresMajor':17,'python':'3.13.5','icuPackage':'libicu76',
+                'baseManifestDigest':base['manifestDigest'],'requirementsSha256':'r','modelLockSha256':'m','personalDataIncluded':False,'packages':packages}
+        audit.check_marker(marker,lock,'r','m')
+        legacy={'schema':'reign-tester-image-v1','debian':'12','postgresMajor':15,'requirementsSha256':'r','modelLockSha256':'m','personalDataIncluded':False,'packages':[]}
+        for changed in (legacy,dict(marker,postgresMajor=15),dict(marker,python='3.11.2'),dict(marker,baseManifestDigest=old['ociManifest']),
+                        dict(marker,packages=packages+['postgresql-15\t15.14-0']),dict(marker,packages=packages[1:]),dict(marker,requirementsSha256='x')):
+            with self.assertRaises(ValueError):audit.check_marker(changed,lock,'r','m')
+        audit.check_venv('home = /usr/bin\nversion = 3.13.5\n',{'python3.13'},lock)
+        for config,abis in (('version = 3.11.2\n',{'python3.11'}),('version = 3.13.5\n',{'python3.13','python3.11'}),('',{'python3.13'})):
+            with self.assertRaises(ValueError):audit.check_venv(config,abis,lock)
 
     def test_image_sanitizer_rewrites_gnu_sparse_members(self):
         spec=importlib.util.spec_from_file_location('sanitize_image',HERE/'sanitize_image.py')

@@ -17,7 +17,7 @@
   },
   "supportedPlatform": { "os": "Windows 11", "architecture": "x64", "gameStore": "Steam", "bannerlordVersion": "v1.5.7" },
   "dwemerdistro": {
-    "serverOs": "Debian 12 WSL",
+    "serverOs": "Debian 13 (trixie) WSL",
     "architecture": "x64",
     "serverRuntime": ".NET 10 self-contained",
     "productionBranch": "reign",
@@ -31,6 +31,24 @@
     "encoding": "UTF8",
     "runtimeRoot": "/var/www/html/ReignServer/runtime",
     "dataRoot": "/var/www/html/ReignServer/data"
+  },
+  "serverImage": {
+    "schema": "reign-tester-image-v2",
+    "os": { "id": "debian", "versionId": "13", "codename": "trixie" },
+    "postgresMajor": 17,
+    "python": "3.13",
+    "icuPackage": "libicu76",
+    "alignment": "Matches the DwemerDistro v3.4.14 Debian 13 / PostgreSQL 17 baseline for OS release and database major only; the shared distro and its PHP stack are not imported or required.",
+    "base": {
+      "source": "registry-1.docker.io/v2/library/debian",
+      "reference": "debian:trixie-slim",
+      "platform": "linux/amd64",
+      "imageCreatedUtc": "2026-11-23",
+      "indexDigest": "sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0",
+      "manifestDigest": "sha256:ab3b3c8c5159eebfca4376430132d53c4d425f869c765ecbe47177a030da575d",
+      "rootfsLayerDigest": "sha256:40748add9f4f6f944f334cbfc286590d6e93f60fb06f6ee7ffa1b894080ad861",
+      "rootfsLayerBytes": 29842182
+    }
   },
   "installation": {
     "moduleIdentity": "ReignBeta",
