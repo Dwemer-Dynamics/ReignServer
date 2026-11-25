@@ -64,7 +64,10 @@ namespace ReignBetaServer
             return new Dictionary<string, object>{{"ok",true},{"campaignId",campaign},{"characters",characters.OrderBy(x=>ReadString(x,"name","")).ToList()}};
         }
 
-        internal static Dictionary<string, object> CharacterEditorLoadApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> CharacterEditorLoadApi(Dictionary<string, object> payload) =>
+            ReadEditorBrowser(payload, OwnedEditorBrowserDeliveryReady);
+
+        private static Dictionary<string, object> ReadEditorBrowserCore(Dictionary<string, object> payload, bool ownedNative)
         {
             payload=payload??new Dictionary<string, object>();string campaign=ReadString(payload,"campaignId",SettingsService.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId");if(string.IsNullOrWhiteSpace(campaign))campaign=SettingsService.LatestCampaignId();if(string.IsNullOrWhiteSpace(hero))return new Dictionary<string, object>{{"ok",false},{"error","heroStringId is required."}};
             Dictionary<string,object> runtimeProfile=CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign,hero,"profile.json"));
@@ -75,6 +78,7 @@ namespace ReignBetaServer
                 CharactersService.UpsertCharacterProfile(campaign,runtimeProfile);
             }
             else if(runtimeProfile.Count>0)MaterializeCharacterProfile(campaign,hero,runtimeProfile,false,false);
+            using var timeline = ownedNative ? WorldSimulationService.EnterWorldHistoryTimelineScope(campaign) : null;
             lock (NarrativeStateLock)
             using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign))
             {
@@ -95,6 +99,12 @@ namespace ReignBetaServer
                     new EditorLetterStatusContext(campaign, hero, token, generation));
                 snapshot["summaryTextEditBasis"] = IssueEditorSummaryTextBasis(ReadDictionary(snapshot, "records"),
                     new EditorHistoryEditBasis(campaign, hero, token, generation));
+                if (ownedNative)
+                {
+                    string nativeBasis = IssueCurrentEditorNativeRevisionBasis(campaign, hero, token);
+                    snapshot["nativeEditAdmission"] = nativeBasis.Length > 0 ? "ready" : "registered_load_required";
+                    if (nativeBasis.Length > 0) snapshot["nativeRevisionBasis"] = nativeBasis;
+                }
                 snapshot["ok"] = true;
                 return snapshot;
             }
@@ -254,23 +264,34 @@ namespace ReignBetaServer
             return result;
         }
 
-        internal static Dictionary<string, object> CharacterEditorSaveApi(Dictionary<string, object> payload)
-        {
-            return OwnEditorCampaignWrite(() =>
-            {
-                lock (NarrativeStateLock) return CharacterEditorSaveApiLocked(payload);
-            });
-        }
+        internal static Dictionary<string, object> CharacterEditorSaveApi(Dictionary<string, object> payload) =>
+            WriteEditorBrowser(payload, OwnedEditorBrowserDeliveryReady, rollback: false);
 
-        private static Dictionary<string, object> CharacterEditorSaveApiLocked(Dictionary<string, object> payload)
+        private static Dictionary<string, object> CharacterEditorSaveApiLocked(Dictionary<string, object> payload,
+            string campaign, bool ownedNative)
         {
-            payload=payload??new Dictionary<string, object>();string campaign=ReadString(payload,"campaignId",SettingsService.LatestCampaignId()),hero=ReadFirstString(payload,"heroStringId","heroId"),section=ReadString(payload,"section","all"),token=ReadString(payload,"revisionToken","");if(string.IsNullOrWhiteSpace(campaign))campaign=SettingsService.LatestCampaignId();if(string.IsNullOrWhiteSpace(hero))return new Dictionary<string, object>{{"ok",false},{"error","heroStringId is required."}};
+            string hero=ReadFirstString(payload,"heroStringId","heroId"),section=ReadString(payload,"section","all"),token=ReadString(payload,"revisionToken","");if(string.IsNullOrWhiteSpace(hero))return new Dictionary<string, object>{{"ok",false},{"error","heroStringId is required."}};
             RequireEditorStorageIdentity(campaign, hero);
             using(ReignDbConnection c=ReignDatabase.OpenCampaignConnection(campaign))
             {
                 return RunEditorRevisionMutation(c, campaign, hero, (transaction, revision) =>
                 {
                 Dictionary<string, object> head=CharactersStore.SelectCharacterEditorHeads(c, new Dictionary<string, object>{{"id",hero}}).FirstOrDefault();string current=ReadString(head,"revision_token","");if(!string.IsNullOrWhiteSpace(current)&&!string.Equals(token,current,StringComparison.Ordinal))return new Dictionary<string, object>{{"ok",false},{"conflict",true},{"error","This character changed after it was loaded. Reload to compare before saving."},{"currentRevisionToken",current}};
+                var native = ReadDictionary(payload, "nativeChanges");
+                var documents = ReadDictionary(payload, "documents");
+                EditorNativeBrowserAdmission nativeAdmission = null;
+                if (ownedNative)
+                {
+                    if (!EditorBrowserNativeSourcesAgree(payload, documents, native))
+                        return TestDict("ok", false, "conflict", true,
+                            "error", "Reload the Character Editor and submit matching native profile or wealth changes.");
+                    if (native?.Count > 0)
+                    {
+                        nativeAdmission = AdmitEditorNativeBrowserWrite(campaign, hero, current, ReadExactNativeEditorBasis(payload));
+                        if (nativeAdmission == null) return EditorBrowserNativeAdmissionRequired();
+                    }
+                }
+                native ??= new Dictionary<string, object>();
                 if (!TryReadEditorHistoryEdits(payload, out var historyEdits))
                     return new Dictionary<string, object>
                     {
@@ -293,13 +314,11 @@ namespace ReignBetaServer
                         ["ok"] = false, ["conflict"] = true, ["currentRevisionToken"] = current,
                         ["error"] = "The summary text edit basis could not be verified. Reload the Character Editor before saving."
                     };
-                var documents = ReadDictionary(payload, "documents");
                 var narrativeChanges = new Dictionary<string, object>(StringComparer.Ordinal);
                 if (documents?.ContainsKey("narrative") == true && !TryPrepareEditorNarrative(c, campaign, hero, current,
                     EditorProfileRestoreGeneration(c), ReadString(payload, "narrativeEditBasis", ""), documents, narrativeChanges))
                     return TestDict("ok", false, "conflict", true, "currentRevisionToken", current,
                         "error", "This narrative changed after it was loaded. Reload to compare before saving.");
-                var native = ReadDictionary(payload, "nativeChanges") ?? new Dictionary<string, object>();
                 bool hasProfileEdit = payload.ContainsKey("profileEdit");
                 // The original snapshot and narrative validation must complete before the first profile write.
                 var rawBefore = CaptureEditorDocuments(campaign, hero);
@@ -356,7 +375,11 @@ namespace ReignBetaServer
                 } : null;
                 var headRow = new Dictionary<string, object>
                     { ["hero"] = hero, ["token"] = next, ["revision"] = revision, ["ts"] = ts };
-                CommitEditorRevisionMetadata(c, revisionRow, nativeRow, headRow, transaction: transaction);
+                if (nativeAdmission != null)
+                    CommitOwnedEditorNativeRevisionMetadata(c, campaign, nativeAdmission, revisionRow, nativeRow, headRow,
+                        transaction: transaction);
+                else
+                    CommitEditorRevisionMetadata(c, revisionRow, nativeRow, headRow, transaction: transaction);
                 CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign,hero,"editor_authority.json"),new Dictionary<string, object>{{"version",1},{"authoritative",true},{"latestRevisionId",revision},{"updatedUtc",DateTime.UtcNow.ToString("o")}});
                 return new Dictionary<string, object>
                 {
@@ -474,17 +497,12 @@ namespace ReignBetaServer
             return merged;
         }
 
-        internal static Dictionary<string, object> CharacterEditorRollbackApi(Dictionary<string, object> payload)
-        {
-            return OwnEditorCampaignWrite(() =>
-            {
-                lock (NarrativeStateLock) return CharacterEditorRollbackApiLocked(payload);
-            });
-        }
+        internal static Dictionary<string, object> CharacterEditorRollbackApi(Dictionary<string, object> payload) =>
+            WriteEditorBrowser(payload, OwnedEditorBrowserDeliveryReady, rollback: true);
 
-        private static Dictionary<string, object> CharacterEditorRollbackApiLocked(Dictionary<string, object> payload)
+        private static Dictionary<string, object> CharacterEditorRollbackApiLocked(Dictionary<string, object> payload,
+            string campaign, bool ownedNative)
         {
-            string campaign = ReadString(payload, "campaignId", SettingsService.LatestCampaignId());
             string hero = ReadFirstString(payload, "heroStringId", "heroId");
             string revision = ReadFirstString(payload, "revisionId", "revision_id");
             RequireEditorStorageIdentity(campaign, hero);
@@ -494,6 +512,26 @@ namespace ReignBetaServer
             var row = CharactersStore.SelectCharacterEditorRevisions2(c, new Dictionary<string, object>
                 { ["revision"] = revision, ["hero"] = hero }).FirstOrDefault();
             if (row == null) return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Revision was not found." };
+            EditorNativeBrowserAdmission nativeAdmission = null;
+            List<Dictionary<string, object>> lockedNativeCommands = null;
+            if (ownedNative)
+            {
+                lockedNativeCommands = CharactersStore.ReadEditorNativeCommandsForRevision(c,
+                    TestDict("revision", revision, "hero", hero), transaction);
+                var recordedNative = TryParseStrictJsonObject(ReadString(row, "native_changes_json", ""));
+                if (recordedNative == null || recordedNative.Count > 0 || lockedNativeCommands.Count > 0)
+                {
+                    var currentHead = CharactersStore.SelectCharacterEditorHeads(c, TestDict("id", hero), transaction).SingleOrDefault();
+                    string currentToken = ReadString(currentHead, "revision_token", "");
+                    nativeAdmission = AdmitEditorNativeBrowserWrite(campaign, hero, currentToken, ReadExactNativeEditorBasis(payload));
+                    if (nativeAdmission == null) return EditorBrowserNativeAdmissionRequired();
+                    if (recordedNative == null || lockedNativeCommands.Count != 1
+                        || ReadString(lockedNativeCommands[0], "changes_json", "") != ReadString(row, "native_changes_json", "")
+                        || !MatchesEditorNativeCommandOrigin(lockedNativeCommands[0], nativeAdmission.Owner))
+                        return TestDict("ok", false, "conflict", true,
+                            "error", "This revision's native changes have no verified origin. Its rollback was held.");
+                }
+            }
             var snapshot = TryParseJsonObject(ReadString(row, "before_json", "{}"));
             var revisionAfter = TryParseJsonObject(ReadString(row, "after_json", "{}"));
             if (!TryReadEditorHistoryRevision(snapshot, revisionAfter, out var history, out var postimage, out bool scopedUndo))
@@ -504,11 +542,15 @@ namespace ReignBetaServer
                 return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The retained summary text revision is invalid." };
             var rawBefore = CaptureEditorDocuments(campaign, hero);
             var recordIssues = new List<Dictionary<string, object>>();
-            var inverse = PrepareEditorNativeRollback(c, transaction, hero, revision, rawBefore, recordIssues, out bool busy);
+            var inverse = PrepareEditorNativeRollback(c, transaction, hero, revision, rawBefore, recordIssues, out bool busy,
+                existingCommands: lockedNativeCommands);
             if (busy)
                 return TestDict("ok", false, "conflict", true, "error", "Wait for the active native character command to settle before rolling back.");
             var before = BuildCharacterEditorSnapshot(campaign, hero, c, persistDerivedTraits: false, refreshSocialStanding: false);
             var documents = PrepareEditorDocumentRollback(snapshot, revisionAfter, rawBefore, recordIssues);
+            if (ownedNative && nativeAdmission == null && (documents.ContainsKey("profile") || documents.ContainsKey("wealth")))
+                return TestDict("ok", false, "conflict", true,
+                    "error", "This earlier profile or wealth change has no verified native origin. Its rollback was held.");
             var narrativeChanges = PrepareEditorNarrativeRollback(c, campaign, hero, snapshot, revisionAfter, documents, recordIssues);
             ApplyEditorDocuments(campaign, hero, documents, c, exactRollback: true);
             var letterStatuses = ApplyEditorLetterStatusEdits(c, hero, letterStatusEdits, recordIssues, "letter_status_changed_after_revision", transaction);
@@ -543,7 +585,11 @@ namespace ReignBetaServer
             };
             var headRow = new Dictionary<string, object>
                 { ["hero"] = hero, ["token"] = token, ["revision"] = newRevision, ["ts"] = ts };
-            CommitEditorRevisionMetadata(c, revisionRow, nativeRow, headRow, isRollback: true, transaction: transaction);
+            if (nativeAdmission != null)
+                CommitOwnedEditorNativeRevisionMetadata(c, campaign, nativeAdmission, revisionRow, nativeRow, headRow,
+                    isRollback: true, transaction: transaction);
+            else
+                CommitEditorRevisionMetadata(c, revisionRow, nativeRow, headRow, isRollback: true, transaction: transaction);
             string reconciliationStatus = ReconcileCharacterEditor(c, hero, "rollback", job, newRevision, transaction);
             CharactersStore.UpdateCharacterEditorRevisionReconciliation(c, new Dictionary<string, object>
             {
@@ -562,11 +608,19 @@ namespace ReignBetaServer
         // The native command is visible only together with its revision and head.
         private static void CommitEditorRevisionMetadata(ReignDbConnection connection,
             Dictionary<string, object> revision, Dictionary<string, object> nativeCommand,
-            Dictionary<string, object> head, bool isRollback = false, ReignDbTransaction transaction = null)
+            Dictionary<string, object> head, bool isRollback = false, ReignDbTransaction transaction = null,
+            EditorNativeBrowserAdmission nativeAdmission = null)
         {
             using var suppressRetries = transaction == null ? new ReignDatabase.SqlStatementRetrySuppression(connection) : null;
             using var ownedTransaction = transaction == null ? connection.BeginTransaction() : null;
             transaction ??= ownedTransaction;
+            if (nativeAdmission != null)
+            {
+                RequireUnchangedEditorNativeRevisionHead(connection, transaction, nativeAdmission);
+                if (isRollback && !OwnsEditorNativeRollbackSource(connection, transaction,
+                    nativeAdmission, ReadString(revision, "rollback", "")))
+                    throw new InvalidOperationException("The original manual native command is not owned by this Editor lineage.");
+            }
             if (isRollback)
             {
                 CharactersStore.InsertCharacterEditorRevisions2(connection, revision, transaction);
@@ -577,6 +631,8 @@ namespace ReignBetaServer
                 CharactersStore.InsertCharacterEditorRevisions(connection, revision, transaction);
                 if (nativeCommand != null) CharactersStore.InsertCharacterEditorNativeCommands(connection, nativeCommand, transaction);
             }
+            if (nativeAdmission != null && nativeCommand != null)
+                StampEditorNativeOrigin(connection, transaction, nativeAdmission, nativeCommand);
             CharactersStore.UpsertCharacterEditorHeads2(connection, head, transaction);
             ownedTransaction?.Commit();
         }
@@ -596,6 +652,7 @@ namespace ReignBetaServer
 
         internal static Dictionary<string, object> CharacterEditorNativePollApi(Dictionary<string, object> payload)
         {
+            if (OwnedEditorBrowserDeliveryReady) return PollOwnedEditorNativeCommands(payload);
             payload ??= new Dictionary<string, object>();
             string campaign = ReadString(payload, "campaignId", "default");
             using var timeline = WorldSimulationService.EnterWorldHistoryTimelineScope(campaign);
@@ -631,6 +688,7 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> CharacterEditorNativeReportApi(
             Dictionary<string, object> payload)
         {
+            if (OwnedEditorBrowserDeliveryReady) return ReportOwnedEditorNativeCommand(payload);
             payload ??= new Dictionary<string, object>();
             string campaign = ReadString(payload, "campaignId", "default");
             string id = ReadFirstString(payload, "commandId", "command_id");
@@ -646,7 +704,7 @@ namespace ReignBetaServer
                     : ReignDatabase.OpenCampaignConnection(campaign);
                 if (connection == null || !EditorNativeOwnerMatches(connection, payload, campaign))
                     return NativeEditorReportResult(id, "ownership_mismatch", false);
-                var command = CharactersStore.SelectCharacterEditorNativeCommands5(connection, TestDict("id", id)).SingleOrDefault();
+                var command = CharactersStore.ReadLegacyNativeEditorCommandForReport(connection, TestDict("id", id));
                 if (command == null) return NativeEditorReportResult(id, "unknown_command", false);
                 string prior = ReadString(command, "status", "");
                 var result = TryParseJsonObject(ReadString(command, "result_json", "{}"));
@@ -666,36 +724,42 @@ namespace ReignBetaServer
                       || ReadString(result, "sharedActivityGeneration", "") != ReadString(payload, "sharedActivityGeneration", ""))
                     return NativeEditorReportResult(id, "claim_mismatch", false);
 
-                string hero = ReadString(command, "hero_id", "");
-                var changes = TryParseJsonObject(ReadString(command, "changes_json", "{}"));
-                var applied = ReadStringList(payload, "applied");
-                var fields = new Dictionary<string, object>(StringComparer.Ordinal);
-                bool notable = ReadString(command, "confirmation", "") == "automatic_notable_mbti_sync";
-                // An older manual command can still report the native outcome after a newer
-                // editor revision. The newer revision owns the server profile in that case.
-                var head = CharactersStore.SelectCharacterEditorHeads(connection, TestDict("id", hero)).SingleOrDefault();
-                string revision = ReadString(head, "latest_revision_id", "");
-                if (status != "failed" && changes != null && (notable || revision.Length == 0 || revision == ReadString(command, "revision_id", "")))
-                    foreach (string key in applied)
-                        if (changes.TryGetValue(key, out object value) && !EditorProfileManagedFields.Contains(key)
-                            && !key.Equals("wealth", StringComparison.OrdinalIgnoreCase)) fields[key] = value;
-
-                long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                var basis = new Dictionary<string, object>(StringComparer.Ordinal);
-                if (fields.Count > 0)
-                {
-                    var profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json"));
-                    foreach (string key in fields.Keys)
-                        basis[key] = profile.TryGetValue(key, out object current) ? EditorProfileValueHash(current) : null;
-                }
-                string journal = Json.Serialize(TestDict("report", payload, "fields", fields, "basis", basis,
-                    "settledAt", now, "notableTraits", notable && fields.ContainsKey("traits")));
-                if (!TransitionNativeEditorReport(connection, campaign, command, "reconciling", journal, 0))
-                    return NativeEditorReportResult(id, "claim_mismatch", false);
-                command["status"] = "reconciling";
-                command["result_json"] = journal;
-                return FinishNativeEditorReport(connection, campaign, command);
+                return AdmitEditorNativeReport(connection, campaign, command, id, status, payload, manualOrigin: false);
             }
+        }
+
+        private static Dictionary<string, object> AdmitEditorNativeReport(ReignDbConnection connection, string campaign,
+            Dictionary<string, object> command, string id, string status, Dictionary<string, object> payload, bool manualOrigin)
+        {
+            string hero = ReadString(command, "hero_id", "");
+            var changes = TryParseJsonObject(ReadString(command, "changes_json", "{}"));
+            var applied = ReadStringList(payload, "applied");
+            var fields = new Dictionary<string, object>(StringComparer.Ordinal);
+            bool notable = !manualOrigin && ReadString(command, "confirmation", "") == "automatic_notable_mbti_sync";
+            // An older manual command can still report the native outcome after a newer
+            // editor revision. The newer revision owns the server profile in that case.
+            var head = CharactersStore.SelectCharacterEditorHeads(connection, TestDict("id", hero)).SingleOrDefault();
+            string revision = ReadString(head, "latest_revision_id", "");
+            if (status != "failed" && changes != null && (notable || revision.Length == 0 || revision == ReadString(command, "revision_id", "")))
+                foreach (string key in applied)
+                    if (changes.TryGetValue(key, out object value) && !EditorProfileManagedFields.Contains(key)
+                        && !key.Equals("wealth", StringComparison.OrdinalIgnoreCase)) fields[key] = value;
+
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var basis = new Dictionary<string, object>(StringComparer.Ordinal);
+            if (fields.Count > 0)
+            {
+                var profile = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json"));
+                foreach (string key in fields.Keys)
+                    basis[key] = profile.TryGetValue(key, out object current) ? EditorProfileValueHash(current) : null;
+            }
+            string journal = Json.Serialize(TestDict("report", payload, "fields", fields, "basis", basis,
+                "settledAt", now, "notableTraits", notable && fields.ContainsKey("traits")));
+            if (!TransitionNativeEditorReport(connection, campaign, command, "reconciling", journal, 0))
+                return NativeEditorReportResult(id, "claim_mismatch", false);
+            command["status"] = "reconciling";
+            command["result_json"] = journal;
+            return FinishNativeEditorReport(connection, campaign, command, manualOrigin);
         }
 
         private static bool TransitionNativeEditorReport(ReignDbConnection connection, string campaign,
@@ -709,7 +773,7 @@ namespace ReignBetaServer
         }
 
         private static Dictionary<string, object> FinishNativeEditorReport(ReignDbConnection connection, string campaign,
-            Dictionary<string, object> command)
+            Dictionary<string, object> command, bool manualOrigin = false)
         {
             string id = ReadString(command, "command_id", ""), hero = ReadString(command, "hero_id", "");
             string rawJournal = ReadString(command, "result_json", "{}");
@@ -724,6 +788,7 @@ namespace ReignBetaServer
                 return NativeEditorReportResult(id, "reconciling", false);
             if (!EditorNativeOwnerMatches(connection, report, campaign))
             {
+                if (manualOrigin) return NativeEditorReportResult(id, "ownership_mismatch", false);
                 bool superseded = TransitionNativeEditorReport(connection, campaign, command, "superseded", rawJournal, settled);
                 return NativeEditorReportResult(id, superseded ? "superseded" : "reconciling", superseded);
             }
@@ -732,7 +797,7 @@ namespace ReignBetaServer
             {
                 // Save and rollback share NarrativeStateLock with recovery. A newer manual
                 // revision supersedes this projection even if its values later happen to match.
-                if (ReadString(command, "confirmation", "") != "automatic_notable_mbti_sync")
+                if (manualOrigin || ReadString(command, "confirmation", "") != "automatic_notable_mbti_sync")
                 {
                     var head = CharactersStore.SelectCharacterEditorHeads(connection, TestDict("id", hero)).SingleOrDefault();
                     string revision = ReadString(head, "latest_revision_id", "");
@@ -765,7 +830,7 @@ namespace ReignBetaServer
                     else if (conflict) status = "projection_conflict";
                     else return NativeEditorReportResult(id, "reconciling", false);
                 }
-                if (status != "projection_conflict" && ReadBool(journal, "notableTraits", false))
+                if (!manualOrigin && status != "projection_conflict" && ReadBool(journal, "notableTraits", false))
                 {
                     RelationshipsService.EnsureNotableMbtiSchema(connection);
                     CharactersStore.UpdateNotableMbtiProfiles(connection, TestDict("observed", Json.Serialize(fields["traits"]),
@@ -850,12 +915,13 @@ namespace ReignBetaServer
         }
 
         private static Dictionary<string, object> PrepareEditorNativeRollback(ReignDbConnection connection, ReignDbTransaction transaction,
-            string hero, string revision, Dictionary<string, object> live, List<Dictionary<string, object>> issues, out bool busy)
+            string hero, string revision, Dictionary<string, object> live, List<Dictionary<string, object>> issues, out bool busy,
+            List<Dictionary<string, object>> existingCommands = null)
         {
             var result = new Dictionary<string, object>(StringComparer.Ordinal);
             busy = false;
             var parameters = TestDict("revision", revision, "hero", hero);
-            var commands = ReignDatabase.QuerySql(connection, @"SELECT command_id, status, changes_json, inverse_json, result_json
+            var commands = existingCommands ?? ReignDatabase.QuerySql(connection, @"SELECT command_id, status, changes_json, inverse_json, result_json
 FROM character_editor_native_commands WHERE revision_id=$revision AND hero_id=$hero FOR UPDATE;", parameters, transaction);
             if (commands.Count == 0) return result;
             if (commands.Any(command => ReadString(command, "status", "") is "claimed" or "reconciling"))
@@ -1640,6 +1706,8 @@ WHERE command_id=$id AND status='pending';", TestDict("id", ReadString(command, 
                     ReadDictionaryList(retry, "commands").Count == 0 && ReadString(held, "status", "") == "projection_conflict"
                     && ReadString(CampaignFileService.ReadJsonObject(profile), "name", "") == "Newer native observation",
                     "Recovery preserves a field that changed after the accepted report and records a conflict for review.");
+
+                VerifyLegacyNativeEditorOriginFence(add, connection, owner);
             }
             catch (Exception ex) { add("native_report_recovery_fixture", false, ex.ToString()); }
             finally
@@ -1647,6 +1715,78 @@ WHERE command_id=$id AND status='pending';", TestDict("id", ReadString(command, 
                 ReignPostgreSqlStorage.DropCampaign(campaign);
                 PersistenceService.TryDeleteDirectory(CampaignFileService.CampaignDirectory(campaign));
             }
+        }
+
+        private static void VerifyLegacyNativeEditorOriginFence(Action<string, bool, string> add,
+            ReignDbConnection connection, Dictionary<string, object> owner)
+        {
+            const string pending = "legacy_fence_manual_pending", stale = "legacy_fence_automatic_claimed",
+                reconciling = "legacy_fence_partial_reconciling", completed = "legacy_fence_typed_completed",
+                legacy = "legacy_fence_empty_origin";
+            const string oldClaim = "legacy_shaped_held_claim";
+            string campaign = ReadString(owner, "campaignId", "");
+            if (!CharactersSchema.NativeEditorOwnershipShapeReady(connection))
+                throw new InvalidOperationException("The fixture needs the migrated typed origin columns.");
+
+            void Seed(string id) => CharactersStore.InsertCharacterEditorNativeCommands(connection,
+                TestDict("id", id, "revision", id + "_revision", "hero", id,
+                    "changes", "{\"name\":\"Settled name\"}", "inverse", "{}", "dangerous", 0, "confirmation", "", "ts", 1L));
+            Dictionary<string, object> Stored(string id) =>
+                CharactersStore.SelectCharacterEditorNativeCommands5(connection, TestDict("id", id)).Single();
+            Dictionary<string, object> Report(string id, string claim) =>
+                new(owner) { ["commandId"] = id, ["claimId"] = claim, ["status"] = "completed",
+                    ["applied"] = new[] { "name" } };
+
+            foreach (string id in new[] { pending, stale, reconciling, completed, legacy }) Seed(id);
+            ReignDatabase.ExecuteSql(connection, @"UPDATE character_editor_native_commands SET
+manual_origin_json=$origin WHERE command_id IN ($pending,$completed);",
+                TestDict("origin", Json.Serialize(TestDict("schema", EditorNativeCommandOriginSchema, "recorded", true)),
+                    "pending", pending, "completed", completed));
+            var retainedClaim = TestDict("claimId", oldClaim, "timelineId", ReadString(owner, "timelineId", ""),
+                "sharedActivityGeneration", ReadString(owner, "sharedActivityGeneration", ""));
+            ReignDatabase.ExecuteSql(connection, @"UPDATE character_editor_native_commands SET status='claimed',
+claimed_ts=1,result_json=$claim,automatic_origin_json=$origin WHERE command_id=$id;",
+                TestDict("id", stale, "claim", Json.Serialize(retainedClaim),
+                    "origin", Json.Serialize(TestDict("schema", AutomaticNotableOriginSchema, "recorded", true))));
+            var settledReport = Report(completed, oldClaim);
+            ReignDatabase.ExecuteSql(connection, @"UPDATE character_editor_native_commands SET status='completed',
+resolved_ts=1,result_json=$journal WHERE command_id=$id;",
+                TestDict("id", completed, "journal", Json.Serialize(TestDict("report", settledReport))));
+
+            string reconcilePath = CampaignFileService.CharacterFile(campaign, reconciling, "profile.json");
+            CampaignFileService.WriteJsonObject(reconcilePath, TestDict("heroStringId", reconciling, "name", "Keep existing"));
+            string reconcileBytes = PersistenceService.FileSha256(reconcilePath);
+            var heldReport = Report(reconciling, oldClaim);
+            var journal = TestDict("report", heldReport, "fields", TestDict("name", "Must not publish"),
+                "basis", TestDict("name", EditorProfileValueHash("Keep existing")), "settledAt", 1L);
+            ReignDatabase.ExecuteSql(connection, @"UPDATE character_editor_native_commands SET status='reconciling',
+manual_origin_timeline_id=$timeline,result_json=$journal WHERE command_id=$id;",
+                TestDict("id", reconciling, "timeline", ReadString(owner, "timelineId", ""), "journal", Json.Serialize(journal)));
+
+            string[] heldIds = { pending, stale, reconciling, completed };
+            var heldRows = heldIds.Select(id => CanonicalJson(Stored(id))).ToArray();
+            bool staleRefused = ReadString(CharacterEditorNativeReportApi(Report(stale, oldClaim)), "status", "") == "unknown_command";
+            bool reconcilingRefused = ReadString(CharacterEditorNativeReportApi(heldReport), "status", "") == "unknown_command";
+            bool terminalRefused = ReadString(CharacterEditorNativeReportApi(settledReport), "status", "") == "unknown_command";
+            var claims = ReadDictionaryList(CharacterEditorNativePollApi(owner), "commands");
+            var admitted = claims.FirstOrDefault(row => ReadString(row, "command_id", "") == legacy);
+            add("legacy_editor_delivery_holds_all_persisted_typed_and_partial_origins",
+                staleRefused && reconcilingRefused && terminalRefused && claims.Count == 1
+                && heldRows.SequenceEqual(heldIds.Select(id => CanonicalJson(Stored(id))))
+                && PersistenceService.FileSha256(reconcilePath) == reconcileBytes,
+                "Typed pending and stale claims remain unchanged, partial typed reconciliation cannot project, and an exact typed terminal repeat has no legacy admission.");
+
+            string profile = CampaignFileService.CharacterFile(campaign, legacy, "profile.json");
+            CampaignFileService.WriteJsonObject(profile, TestDict("heroStringId", legacy, "name", "Before"));
+            bool ordinaryClaimed = ReadString(admitted, "command_id", "") == legacy
+                && ReadString(Stored(legacy), "status", "") == "claimed";
+            var ordinaryReport = Report(legacy, ReadString(admitted, "claimId", ""));
+            bool ordinaryCompleted = ordinaryClaimed && ReadBool(CharacterEditorNativeReportApi(ordinaryReport), "ok", false)
+                && ReadString(Stored(legacy), "status", "") == "completed"
+                && ReadString(CampaignFileService.ReadJsonObject(profile), "name", "") == "Settled name";
+            add("legacy_editor_empty_origin_keeps_ordinary_claim_and_report",
+                ordinaryCompleted && ReadBool(CharacterEditorNativeReportApi(ordinaryReport), "ok", false),
+                "A genuine empty-origin command shares this PostgreSQL table and still claims, applies its projection and acknowledges the same report twice.");
         }
 
         private static void VerifyCharacterEditorReconciliationTransaction(Action<string, bool, string> add)
@@ -1848,6 +1988,7 @@ WHERE command_id=$id AND status='pending';", TestDict("id", ReadString(command, 
             VerifyCharacterEditorMetadataTransaction(add);
             VerifyCharacterEditorReconciliationTransaction(add);
             VerifyNativeEditorReportRecovery(add);
+            VerifyEditorNativeRevisionBasis(add);
             VerifyEditorRevisionRecovery(add);
 #endif
             string portraitFixture=Path.Combine(Path.GetTempPath(),"reign_character_editor_portraits_"+Guid.NewGuid().ToString("N"));

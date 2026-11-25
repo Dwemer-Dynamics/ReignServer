@@ -18,6 +18,7 @@ namespace ReignBetaServer
         private const int ForeignAgentDisruptionReceiptMigrationVersion = 5;
         internal const int ArrestEffectReceiptMigrationVersion = 6;
         private const int PoliticalPressureDailyProducerMigrationVersion = 7;
+        internal const int NativeEditorOwnershipCampaignMigrationVersion = 8;
 
         private sealed class CampaignSchemaMigration
         {
@@ -53,6 +54,8 @@ namespace ReignBetaServer
                 "arrest_effect_receipts", WorldSimulationStore.ApplyArrestEffectReceiptSchemaDdl),
             new CampaignSchemaMigration(PoliticalPressureDailyProducerMigrationVersion,
                 "political_pressure_daily_producers", DiplomacyStore.CreatePoliticalPressureDailyProducerSchema),
+            new CampaignSchemaMigration(NativeEditorOwnershipCampaignMigrationVersion,
+                "native_editor_ownership", CharactersSchema.ApplyNativeEditorOwnershipMigration),
         };
 
         internal static int LatestCampaignMigrationVersion =>
@@ -167,6 +170,11 @@ PRIMARY KEY(campaign_id,timeline_id,restore_generation,action_id));");
                 }
             }
         }
+
+        // Open-without-initialization callers must never mint authority or issue DDL.
+        internal static bool IsNativeEditorOwnershipSchemaReady(ReignDbConnection connection, ReignDbTransaction transaction = null) =>
+            CharactersSchema.NativeEditorOwnershipShapeReady(connection, transaction)
+            && ReadCampaignMigrationVersion(connection, transaction) >= NativeEditorOwnershipCampaignMigrationVersion;
 
         private static int ReadCampaignMigrationVersion(ReignDbConnection connection,
             ReignDbTransaction transaction)

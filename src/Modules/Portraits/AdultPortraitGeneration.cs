@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -41,6 +41,8 @@ namespace ReignBetaServer
         private static PortraitImageCallResult CallImageProvider(Dictionary<string, object> settings,
             ImageGenerationProfile profile, string prompt, byte[] source, string size)
         {
+            if (profile.Provider == LocalModelImageProviderId)
+                return GenerateLocalModelImage(settings, profile, prompt, source, size);
             if (profile.Provider == "OpenRouter") return GenerateOpenRouterImage(settings, profile, prompt, source, size);
             if (IsCodexImageProvider(profile.Provider))
                 return GenerateCodexImage(settings, profile, prompt, source, size);

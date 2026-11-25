@@ -839,13 +839,22 @@ namespace ReignBetaServer
                     ? "Save your OpenRouter key in API Settings." : "";
                 return string.IsNullOrWhiteSpace(error);
             }
+            if (provider == LocalModelImageProviderId)
+            {
+                model = DefaultLocalModelImageModel;
+                error = TryGetLocalModelImageEndpoint(settings, true, out _)
+                    ? "" : "Save a Local Model Desk loopback image edits URL in AI Image Generation.";
+                return error.Length == 0;
+            }
             bool atlas = IsAtlasProvider(provider);
             model = atlas
                 ? ReadString(settings, "portraitAtlasImageModel", DefaultAtlasImageModel)
                 : ReadString(settings, "portraitNanoGptImageModel", "gpt-image-1.5");
-            error = !SettingsService.ProviderKeyConfigured(settings, atlas ? "portraitAtlasApiKey" : "portraitNanoGptApiKey")
-                ? "No " + provider + " image API key is configured in AI Image Generation."
-                : "";
+            error = !atlas && !IsNanoGptImageCredentialDestination(NanoGptImageRequestUrl(settings, model))
+                ? NanoGptImageDestinationError
+                : !SettingsService.ProviderKeyConfigured(settings, atlas ? "portraitAtlasApiKey" : "portraitNanoGptApiKey")
+                    ? "No " + provider + " image API key is configured in AI Image Generation."
+                    : "";
             return string.IsNullOrWhiteSpace(error);
         }
 
@@ -1283,6 +1292,7 @@ namespace ReignBetaServer
                     && controlCenterHtml.Contains("'gemini-3-pro-image-preview'")
                     && controlCenterHtml.Contains("'xai/grok-imagine-image-quality/edit'"),
                 "The Control Center exposes four complete independent profile selectors with the full provider/model catalog and one shared connection area.");
+            rows.AddRange(RunLocalModelImageProviderContractTests());
             rows.AddRange(RunAdultPortraitContractTests());
             rows.AddRange(RunOutfitChangeContractTests());
             return rows;

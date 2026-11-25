@@ -50,6 +50,8 @@ namespace ReignBetaServer
                     ["databaseSchemaVersion"] = ReignPostgreSqlStorage.DatabaseSchemaVersion,
                     ["requiredDatabaseSchemaVersion"] = ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion,
                     ["databaseSchemaUpToDate"] = ReignPostgreSqlStorage.DatabaseSchemaVersion == ReignPostgreSqlStorage.RequiredDatabaseSchemaVersion,
+                    ["requiredCampaignMigrationVersion"] = PersistenceService.LatestCampaignMigrationVersion,
+                    ["characterEditorNativeOwnershipEnabled"] = CharactersService.OwnedAutomaticNotableDeliveryReady,
                     ["protocolVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.SupportedProtocol,
                     ["serverVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.Version ?? typeof(Program).Assembly.GetName().Version.ToString(3),
                     ["contentVersion"] = Reign.Core.Contracts.Platform.ReignInstallation.TryLoadCurrent()?.ContentVersion ?? "development",

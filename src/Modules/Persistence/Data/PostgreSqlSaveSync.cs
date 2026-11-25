@@ -27,6 +27,8 @@ namespace ReignBetaServer
                 ValidateSaveSyncId(loadSessionId, "loadSessionId");
 
             Dictionary<string, object> ledger = ReadSaveSyncLedger(campaignId);
+            if (!dryRun && BeginEditorNativeOwnerLoad(ledger, payload, savePointId, loadSessionId))
+                WriteSaveSyncLedger(campaignId, ledger);
             Dictionary<string, object> point = SaveSyncPoint(ledger, savePointId);
             if (point == null
                 && ReadString(payload, "savePointKind", "")
@@ -42,6 +44,7 @@ namespace ReignBetaServer
                         ["savePointId"] = savePointId
                     };
 
+                if (RetireExistingEditorNativeOwner(ledger)) WriteSaveSyncLedger(campaignId, ledger);
                 Dictionary<string, object> registered = SaveSyncRegisterCore(payload);
                 registered["dryRun"] = false;
                 if (ReadBool(registered, "ok", false))
@@ -64,13 +67,19 @@ namespace ReignBetaServer
             if (manifest != null && (!ReadString(manifest, "campaignId", "").Equals(campaignId, StringComparison.OrdinalIgnoreCase)
                 || !ReadString(manifest, "fingerprint", "").Equals(ReadString(point, "snapshotFingerprint", ""), StringComparison.OrdinalIgnoreCase)
                 || !ReadString(manifest, "databaseProvider", "").Equals("postgresql", StringComparison.OrdinalIgnoreCase)))
+            {
+                // The exact owner's own persisted snapshot has failed identity verification.
+                if (!dryRun && RetireExistingEditorNativeOwner(ledger)) WriteSaveSyncLedger(campaignId, ledger);
                 throw new InvalidDataException("Save Sync snapshot identity is inconsistent; campaign data was left untouched.");
+            }
 
             // Reject a damaged or unbound calendar before any SQL initialization, recovery copy, or active-state change.
             string calendarSha = manifest == null || dryRun ? null : VerifySaveSyncCalendarCheckpoint(campaignId, pointRoot, point, manifest, payload);
             bool registeredSnapshot = manifest != null && ReignPostgreSqlStorage.SnapshotExists(campaignId, postgresSnapshotPointId);
             if (!registeredSnapshot)
             {
+                // A matching session and point can still refer to unavailable storage.
+                if (!dryRun && RetireExistingEditorNativeOwner(ledger)) WriteSaveSyncLedger(campaignId, ledger);
                 if (!ReadBool(payload, "registrationConfirmed", true))
                 {
                     Dictionary<string, object> baseline =
@@ -204,7 +213,13 @@ namespace ReignBetaServer
                     }
                 }
                 string noOpProofGeneration = DialogueService.TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
-                if (noOpProofGeneration.Length > 0) result["restoreGeneration"] = noOpProofGeneration;
+                if (noOpProofGeneration.Length > 0)
+                {
+                    result["restoreGeneration"] = noOpProofGeneration;
+                    CompleteEditorNativeOwnerLoad(ledger, point, loadSessionId, noOpProofGeneration);
+                }
+                else
+                    RetireExistingEditorNativeOwner(ledger);
                 timer.Stop();
                 result["durationMs"] = timer.ElapsedMilliseconds;
                 StoreSaveSyncLoadReceipt(

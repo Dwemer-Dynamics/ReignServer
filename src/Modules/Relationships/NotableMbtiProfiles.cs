@@ -117,14 +117,31 @@ namespace ReignBetaServer
             Dictionary<string, object> hero,
             bool materialize,
             bool schemaReady = false,
-            ReignDbTransaction transaction = null)
+            ReignDbTransaction transaction = null,
+            bool queueNativeTraits = true) =>
+            EnsureNotableMbtiProfile(connection, campaignId, worldDay, hero, materialize, schemaReady,
+                transaction, queueNativeTraits, out _, out _);
+
+        private static Dictionary<string, object> EnsureNotableMbtiProfile(
+            ReignDbConnection connection, string campaignId, double worldDay, Dictionary<string, object> hero,
+            bool materialize, bool schemaReady, ReignDbTransaction transaction, bool queueNativeTraits,
+            out bool inserted, out bool legacyDeliveryHeld)
         {
+            inserted = false;
+            legacyDeliveryHeld = false;
             if (hero == null || !ReadBool(hero, "isNotable", false)) return new Dictionary<string, object>();
             string heroId = ReadFirstString(hero, "heroStringId", "heroId", "id");
             if (string.IsNullOrWhiteSpace(heroId)) return new Dictionary<string, object>();
             if (!schemaReady) EnsureNotableMbtiSchema(connection);
 
             Dictionary<string, object> row = RelationshipsStore.SelectNotableMbtiProfiles4(connection, new Dictionary<string, object> { ["id"] = heroId },                transaction).FirstOrDefault();
+            if (!CharactersService.OwnedAutomaticNotableDeliveryReady && (materialize || queueNativeTraits)
+                && LegacyNotableDeliveryMustHold(connection, transaction, campaignId, heroId, row))
+            {
+                legacyDeliveryHeld = true;
+                return NotableMbtiRowToProfile(row);
+            }
+
             bool created = row == null;
             if (row == null)
             {
@@ -137,7 +154,7 @@ namespace ReignBetaServer
                 Dictionary<string, object> percentages = ReadDictionary(traits, "traitPercentages") ?? new Dictionary<string, object>();
                 Dictionary<string, object> native = ReadDictionary(traits, "mbtiNativeTraits") ?? new Dictionary<string, object>();
                 long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                RelationshipsStore.InsertOrIgnoreNotableMbtiProfiles(connection, new Dictionary<string, object>
+                inserted = RelationshipsStore.InsertOrIgnoreNotableMbtiProfiles(connection, new Dictionary<string, object>
                     {
                         ["id"] = heroId, ["type"] = type, ["title"] = definition.Title,
                         ["description"] = definition.Description, ["foundation"] = Json.Serialize(foundation),
@@ -155,13 +172,17 @@ namespace ReignBetaServer
             {
                 MaterializeNotableMbtiProfile(campaignId, hero, profile);
             }
-            ObserveAndQueueNotableNativeTraits(connection, campaignId, worldDay, hero, profile, transaction);
+            if (queueNativeTraits) ObserveAndQueueNotableNativeTraits(connection, campaignId, worldDay, hero, profile, transaction);
             row = RelationshipsStore.SelectNotableMbtiProfiles4(connection, new Dictionary<string, object> { ["id"] = heroId },                transaction).FirstOrDefault();
             return NotableMbtiRowToProfile(row);
         }
 
-        internal static Dictionary<string, object> NotableMbtiInitializeApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> NotableMbtiInitializeApi(Dictionary<string, object> payload) =>
+            NotableMbtiInitializeCore(payload, CharactersService.OwnedAutomaticNotableDeliveryReady);
+
+        private static Dictionary<string, object> NotableMbtiInitializeCore(Dictionary<string, object> payload, bool typedStartup)
         {
+            if (typedStartup && !AcceptsTypedNotableStartup(payload)) return TypedNotableStartupRequired();
             string campaignId = ReadString(payload, "campaignId", "default");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             List<Dictionary<string, object>> heroes = ReadDictionaryList(payload, "heroes")
@@ -177,9 +198,20 @@ namespace ReignBetaServer
             Stopwatch totalTimer = Stopwatch.StartNew();
             long databaseMs;
             long materializationMs;
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            // The typed caller owns one timeline through SQL, files, index and response.
+            using var timeline = typedStartup ? WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId) : null;
+            var owner = typedStartup ? ReadNotableStartupRequest(payload) : null;
+            if (typedStartup && owner == null) return TypedNotableStartupOwnerStale();
+            using (ReignDbConnection connection = typedStartup
+                ? OpenOwnedNotableStartupCampaign(campaignId) : ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                EnsureNotableMbtiSchema(connection);
+                if (typedStartup)
+                {
+                    if (connection == null || !PersistenceService.IsNativeEditorOwnershipSchemaReady(connection))
+                        return TypedNotableStartupSchemaNotReady();
+                    if (!MatchesNotableStartupScope(connection, owner)) return TypedNotableStartupOwnerStale();
+                }
+                else EnsureNotableMbtiSchema(connection);
                 Stopwatch databaseTimer = Stopwatch.StartNew();
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
                 {
@@ -194,11 +226,22 @@ namespace ReignBetaServer
                                 hero,
                                 false,
                                 true,
-                                transaction);
+                                transaction,
+                                !typedStartup,
+                                out bool inserted, out bool legacyDeliveryHeld);
+                        if (legacyDeliveryHeld)
+                        {
+                            // No setter material can escape through an older client's direct path.
+                            assignments.Add(TestDict("heroId", heroId, "deferNativeTraitsToQueue", true));
+                            continue;
+                        }
                         if (profile.Count == 0) continue;
-                        materialization.Add(
-                            new KeyValuePair<Dictionary<string, object>, Dictionary<string, object>>(hero, profile));
-                        assignments.Add(new Dictionary<string, object>
+                        var reservation = typedStartup
+                            ? ReserveOrDeferNotableStartup(connection, transaction, campaignId, heroId, owner, inserted) : null;
+                        if (!typedStartup || reservation?.Deferred == false)
+                            materialization.Add(
+                                new KeyValuePair<Dictionary<string, object>, Dictionary<string, object>>(hero, profile));
+                        var assignment = new Dictionary<string, object>
                         {
                             ["heroId"] = heroId,
                             ["type"] = ReadString(profile, "type", "XXXX"),
@@ -207,7 +250,14 @@ namespace ReignBetaServer
                             ["nativeTraits"] = ReadDictionary(profile, "nativeTraits") ?? new Dictionary<string, object>(),
                             ["nativeActionId"] = ReadString(profile, "nativeActionId", ""),
                             ["nativeSyncStatus"] = ReadString(profile, "nativeSyncStatus", "pending")
-                        });
+                        };
+                        if (typedStartup)
+                        {
+                            if (reservation == null) return TypedNotableStartupSchemaNotReady();
+                            if (reservation.Deferred) assignment["deferNativeTraitsToQueue"] = true;
+                            else assignment["startupNativeSessionId"] = reservation.Session;
+                        }
+                        assignments.Add(assignment);
                     }
                     HashSet<string> livingIds = new HashSet<string>(
                         heroes.Select(x => ReadFirstString(x, "heroStringId", "heroId", "id")),
@@ -216,6 +266,11 @@ namespace ReignBetaServer
                     {
                         string staleHeroId = ReadString(stale, "hero_id", "");
                         if (string.IsNullOrWhiteSpace(staleHeroId) || livingIds.Contains(staleHeroId))
+                            continue;
+                        if (typedStartup
+                            ? ExistingNotableStartupDeliveryMustHold(connection, transaction, campaignId, staleHeroId)
+                            : LegacyNotableDeliveryMustHold(connection, transaction, campaignId, staleHeroId,
+                                RelationshipsStore.SelectNotableMbtiProfiles4(connection, TestDict("id", staleHeroId), transaction).SingleOrDefault()))
                             continue;
                         string staleActionId = ReadString(stale, "native_action_id", "");
                         long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -242,6 +297,9 @@ namespace ReignBetaServer
                 databaseMs = databaseTimer.ElapsedMilliseconds;
             }
 
+#if !REIGN_EXCLUDE_VERIFICATION
+            if (typedStartup) TypedNotableMaterializationStartingForTests?.Invoke(campaignId);
+#endif
             Stopwatch materializationTimer = Stopwatch.StartNew();
             ConcurrentBag<Dictionary<string, object>> materializedProfiles =
                 new ConcurrentBag<Dictionary<string, object>>();
@@ -261,7 +319,8 @@ namespace ReignBetaServer
                 });
             List<Dictionary<string, object>> indexProfiles =
                 materializedProfiles.ToList();
-            CampaignFileService.UpdateCharacterIndexBatch(campaignId, indexProfiles);
+            if (indexProfiles.Count > 0)
+                CampaignFileService.UpdateCharacterIndexBatch(campaignId, indexProfiles);
             materializationTimer.Stop();
             materializationMs = materializationTimer.ElapsedMilliseconds;
             totalTimer.Stop();
@@ -276,7 +335,7 @@ namespace ReignBetaServer
                 ["batchedIndex"] = true,
                 ["transactional"] = true
             });
-            return new Dictionary<string, object>
+            var response = new Dictionary<string, object>
             {
                 ["ok"] = assignments.Count == heroes.Count,
                 ["campaignId"] = campaignId,
@@ -288,25 +347,68 @@ namespace ReignBetaServer
                 ["totalMs"] = totalTimer.ElapsedMilliseconds,
                 ["assignments"] = assignments
             };
+            if (typedStartup)
+            {
+                response[TypedNotableStartupField] = 1;
+                response[StartupNativeOwnerField] = WriteNotableStartupRequest(owner);
+            }
+            return response;
         }
 
-        internal static Dictionary<string, object> NotableMbtiConfirmBatchApi(Dictionary<string, object> payload)
+        internal static Dictionary<string, object> NotableMbtiConfirmBatchApi(Dictionary<string, object> payload) =>
+            NotableMbtiConfirmBatchCore(payload, CharactersService.OwnedAutomaticNotableDeliveryReady);
+
+        private static Dictionary<string, object> NotableMbtiConfirmBatchCore(Dictionary<string, object> payload, bool typedStartup)
         {
+            if (typedStartup && !AcceptsTypedNotableStartup(payload)) return TypedNotableStartupRequired();
             string campaignId = ReadString(payload, "campaignId", "default");
             double worldDay = ReadDouble(payload, "worldDay", 0d);
             List<Dictionary<string, object>> observations = ReadDictionaryList(payload, "observations");
             int confirmed = 0;
+            int deferred = 0;
             List<Dictionary<string, object>> failures = new List<Dictionary<string, object>>();
             Stopwatch timer = Stopwatch.StartNew();
-            using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
+            var owner = typedStartup ? ReadNotableStartupRequest(payload) : null;
+            if (typedStartup && owner == null) return TypedNotableStartupOwnerStale();
+            using (var timeline = typedStartup ? WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId) : null)
+            using (ReignDbConnection connection = typedStartup
+                ? OpenOwnedNotableStartupCampaign(campaignId) : ReignDatabase.OpenCampaignConnection(campaignId))
             {
-                EnsureNotableMbtiSchema(connection);
+                if (typedStartup)
+                {
+                    if (connection == null || !PersistenceService.IsNativeEditorOwnershipSchemaReady(connection))
+                        return TypedNotableStartupSchemaNotReady();
+                    if (!MatchesNotableStartupScope(connection, owner)) return TypedNotableStartupOwnerStale();
+                }
+                else EnsureNotableMbtiSchema(connection);
                 using (ReignDbTransaction transaction = connection.BeginTransaction())
                 {
                     foreach (Dictionary<string, object> observation in observations)
                     {
                         string heroId = ReadFirstString(observation, "heroStringId", "heroId", "id");
+                        if (typedStartup)
+                        {
+                            var result = ConfirmOwnedNotableStartupObservation(connection, transaction, campaignId, heroId, worldDay, owner, observation);
+                            if (result.Deferred) deferred++;
+                            else if (result.Error.Length == 0) confirmed++;
+                            else failures.Add(TestDict("heroId", heroId, "error", result.Error));
+                            continue;
+                        }
                         Dictionary<string, object> row = RelationshipsStore.SelectNotableMbtiProfiles4(connection, new Dictionary<string, object> { ["id"] = heroId },                            transaction).FirstOrDefault();
+                        bool deliveryHeld = LegacyNotableDeliveryMustHold(connection, transaction, campaignId, heroId, row);
+                        bool deferredNotice = ReadString(observation, "status", "") == DeferredNativeStartupStatus;
+                        if (deliveryHeld || deferredNotice)
+                        {
+                            if (deliveryHeld && deferredNotice && observation.Count == 2
+                                && observation.Keys.Contains("heroId", StringComparer.Ordinal)
+                                && observation["heroId"] is string exactHero && exactHero == heroId
+                                && observation.Keys.Contains("status", StringComparer.Ordinal)
+                                && observation["status"] is string exactStatus && exactStatus == DeferredNativeStartupStatus)
+                                deferred++;
+                            else
+                                failures.Add(TestDict("heroId", heroId, "error", "native_delivery_has_other_owner"));
+                            continue;
+                        }
                         if (row == null)
                         {
                             failures.Add(new Dictionary<string, object> { ["heroId"] = heroId, ["error"] = "assignment_not_found" });
@@ -403,14 +505,16 @@ namespace ReignBetaServer
                 ["totalMs"] = timer.ElapsedMilliseconds,
                 ["transactional"] = true
             });
-            return new Dictionary<string, object>
+            var response = new Dictionary<string, object>
             {
-                ["ok"] = failures.Count == 0 && confirmed == observations.Count,
+                ["ok"] = failures.Count == 0 && confirmed + deferred == observations.Count,
                 ["confirmedCount"] = confirmed,
                 ["failureCount"] = failures.Count,
                 ["totalMs"] = timer.ElapsedMilliseconds,
                 ["failures"] = failures
             };
+            if (typedStartup || deferred > 0) response["deferredCount"] = deferred;
+            return response;
         }
 
         private static Dictionary<string, object> NotableMbtiRowToProfile(Dictionary<string, object> row)
@@ -639,6 +743,11 @@ namespace ReignBetaServer
             ReignDbTransaction transaction = null)
         {
             string heroId = ReadFirstString(hero, "heroStringId", "heroId", "id");
+            if (CharactersService.OwnedAutomaticNotableDeliveryReady)
+            {
+                ObserveOwnedNotableNativeTraits(connection, transaction, campaignId, heroId, worldDay, hero);
+                return;
+            }
             if (CharactersService.CharacterHasEditorCorrections(campaignId, heroId))
             {
                 RelationshipsStore.UpdateNotableMbtiProfiles6(connection, new Dictionary<string, object>
@@ -655,9 +764,10 @@ namespace ReignBetaServer
             bool matches = hasCompleteObservation
                 && expected.All(pair => ReadInt(observed, pair.Key, int.MinValue)
                     == Convert.ToInt32(pair.Value, CultureInfo.InvariantCulture));
-            string actionId = "notable_mbti_native_" + heroId + "_v" + NotableMbtiTemplateVersion.ToString(CultureInfo.InvariantCulture);
+            string actionId = ExpectedNotableStartupCommandId(heroId);
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            Dictionary<string, object> command = RelationshipsStore.SelectCharacterEditorNativeCommands(connection, new Dictionary<string, object> { ["id"] = actionId },                transaction).FirstOrDefault();
+            Dictionary<string, object> command = RelationshipsStore.SelectCharacterEditorNativeCommands(connection, TestDict("id", actionId), transaction)
+                .FirstOrDefault();
             string commandStatus = ReadString(command, "status", "");
             string priorStatus = ReadString(profile, "nativeSyncStatus", "pending");
             string status;
@@ -1090,6 +1200,10 @@ namespace ReignBetaServer
                 ReignPostgreSqlStorage.ClearAllPools();
                 if (Directory.Exists(generatedDirectory)) Directory.Delete(generatedDirectory, true);
             }
+#if !REIGN_EXCLUDE_VERIFICATION
+            CharactersService.VerifyTypedAutomaticNotableDelivery(add);
+            VerifyOwnedNotableStartupCoordination(add);
+#endif
             return rows;
         }
     }

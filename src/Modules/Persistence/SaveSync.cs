@@ -138,6 +138,10 @@ namespace ReignBetaServer
             }
 
             Dictionary<string, object> point = NormalizeSaveSyncPoint(payload);
+            CaptureEditorNativePointLineage(ledger, point, payload,
+                (anchorPoint, loadSession, restoreGeneration) =>
+                    EditorNativeOwnerStillVerified(campaignId, ReadString(point, "timelineId", ""),
+                        anchorPoint, loadSession, restoreGeneration));
             point["calendarSha256"] = calendarSha;
             Dictionary<string, object> cleanSharedPoint =
                 SaveSyncCleanActivePoint(campaignId, ledger);
@@ -350,7 +354,21 @@ namespace ReignBetaServer
             if (!IsSaveSyncEnabled())
             {
                 string blocked = FencedSaveSyncOperation(campaignId);
-                return blocked == null ? SaveSyncDisabledResult(payload) : SaveSyncFencedResult(campaignId, blocked);
+                if (blocked != null) return SaveSyncFencedResult(campaignId, blocked);
+                if (!forcePreview && !ReadBool(payload, "dryRun", false)
+                    && Regex.IsMatch(campaignId, @"\A[A-Za-z0-9_-]{1,180}\z"))
+                {
+                    Program.CampaignDataGate.EnterWriteLock();
+                    try
+                    {
+                        blocked = FencedSaveSyncOperation(campaignId);
+                        if (blocked != null) return SaveSyncFencedResult(campaignId, blocked);
+                        var ledger = ReadSaveSyncLedger(campaignId);
+                        if (RetireExistingEditorNativeOwner(ledger)) WriteSaveSyncLedger(campaignId, ledger);
+                    }
+                    finally { Program.CampaignDataGate.ExitWriteLock(); }
+                }
+                return SaveSyncDisabledResult(payload);
             }
             Program.CampaignDataGate.EnterWriteLock();
             try

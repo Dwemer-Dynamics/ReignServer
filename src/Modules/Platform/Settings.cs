@@ -110,6 +110,8 @@ namespace ReignBetaServer
                 ["portraitVisionNanoGptModel"] = PortraitsService.DefaultNanoPortraitVisionModel,
                 ["portraitNanoGptImageGenerationsUrl"] = "https://nano-gpt.com/api/v1/images/generations",
                 ["portraitNanoGptChatCompletionsUrl"] = "https://nano-gpt.com/api/v1/chat/completions",
+                [PortraitsService.LocalModelGenerationsKey] = PortraitsService.DefaultLocalModelGenerationsUrl,
+                [PortraitsService.LocalModelEditsKey] = PortraitsService.DefaultLocalModelEditsUrl,
                 ["portraitNanoGptApiKey"] = "",
                 ["portraitNanoGptImageModel"] = "gpt-image-1.5",
                 ["portraitAtlasGenerateImageUrl"] = "https://api.atlascloud.ai/api/v1/model/generateImage",
@@ -352,6 +354,18 @@ namespace ReignBetaServer
             string previousCodexSettingsIdentity = LlmProviderService.CodexSettingsIdentity(settings);
             string settingsBeforeMerge = Json.Serialize(settings);
             incoming = WithoutGlobalKeyMigrationPatch(incoming);
+            if (incoming.ContainsKey(PortraitsService.LocalModelGenerationsKey) || incoming.ContainsKey(PortraitsService.LocalModelEditsKey))
+            {
+                incoming = new Dictionary<string, object>(incoming);
+                foreach (string key in new[] { PortraitsService.LocalModelGenerationsKey, PortraitsService.LocalModelEditsKey })
+                {
+                    if (!incoming.ContainsKey(key)) continue;
+                    bool edit = key == PortraitsService.LocalModelEditsKey;
+                    if (!PortraitsService.TryNormalizeLocalModelImageEndpoint(ReadString(incoming, key, ""), edit, out string normalized))
+                        return TestDict("ok", false, "error", "Local Model image URLs must use the matching HTTP loopback generations or edits route without credentials, query or fragment.");
+                    incoming[key] = normalized;
+                }
+            }
             List<string> clearKeys = LlmProviderService.MergeProviderSettings(settings, incoming);
             foreach (var pair in ReadWarEconomyOptions(settings).Values()) settings[pair.Key] = pair.Value;
             var npcLivesOptions = ReadNpcLivesOptions(settings);
@@ -441,6 +455,14 @@ namespace ReignBetaServer
                 changed = true;
             }
 
+            bool legacyDeskGenerations = PortraitsService.IsLegacyLocalModelDeskEndpoint(
+                ReadString(settings, "portraitNanoGptImageGenerationsUrl", ""), false);
+            bool legacyDeskChat = PortraitsService.IsLegacyLocalModelDeskEndpoint(
+                ReadString(settings, "portraitNanoGptChatCompletionsUrl", ""), true);
+            bool migratedDeskGenerations = false;
+            bool migratedDeskChat = false;
+            changed |= settings.TryAdd(PortraitsService.LocalModelGenerationsKey, PortraitsService.DefaultLocalModelGenerationsUrl);
+            changed |= settings.TryAdd(PortraitsService.LocalModelEditsKey, PortraitsService.DefaultLocalModelEditsUrl);
             foreach (string prefix in PortraitsService.ImageProfilePrefixes)
             {
                 bool adult = prefix.StartsWith("adult", StringComparison.Ordinal);
@@ -486,8 +508,17 @@ namespace ReignBetaServer
                 }
 
                 string providerKey = prefix + "Provider";
-                string normalizedProvider = PortraitsService.NormalizeImageProvider(ReadString(settings, providerKey, "NanoGPT"));
-                if (!string.Equals(ReadString(settings, providerKey, ""), normalizedProvider, StringComparison.Ordinal))
+                string configuredProvider = ReadString(settings, providerKey, "");
+                string normalizedProvider = PortraitsService.NormalizeImageProvider(configuredProvider);
+                bool usesNanoGptChatImage = string.Equals(ReadString(settings, modelKey, ""),
+                    "gemini-3-pro-image-preview", StringComparison.OrdinalIgnoreCase);
+                if (normalizedProvider == "NanoGPT" && (usesNanoGptChatImage ? legacyDeskChat : legacyDeskGenerations))
+                {
+                    normalizedProvider = PortraitsService.LocalModelImageProviderId;
+                    if (usesNanoGptChatImage) migratedDeskChat = true;
+                    else migratedDeskGenerations = true;
+                }
+                if (!string.Equals(configuredProvider, normalizedProvider, StringComparison.Ordinal))
                 {
                     settings[providerKey] = normalizedProvider;
                     changed = true;
@@ -513,7 +544,13 @@ namespace ReignBetaServer
                 normalizeDouble("ImageStrength", 0.75d, 0.4d, 1d);
                 normalizeInt("InferenceSteps", 28, 10, 50);
                 normalizeDouble("GuidanceScale", 3.5d, 1d, 10d);
+                changed |= PortraitsService.NormalizeLocalModelImageProfile(settings, prefix);
             }
+            // Restore only legacy routes whose profiles moved to the keyless Desk provider.
+            if (migratedDeskGenerations)
+                settings["portraitNanoGptImageGenerationsUrl"] = PortraitsService.NanoGptImageGenerationsUrl;
+            if (migratedDeskChat)
+                settings["portraitNanoGptChatCompletionsUrl"] = PortraitsService.NanoGptChatCompletionsUrl;
             return changed;
         }
 

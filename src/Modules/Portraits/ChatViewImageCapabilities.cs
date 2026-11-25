@@ -13,6 +13,16 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ChatViewImageCapability(ImageGenerationProfile profile)
         {
             string model = ImageProfileModel(profile), size, resolution = "";
+            if (profile.Provider == LocalModelImageProviderId)
+            {
+                // View owns its 3:2 canvas and minimum even if a profile also serves another scenery ratio.
+                string selected = profile.LocalModel?.Size;
+                size = TryLocalModelImageSize(selected, out int width, out int height)
+                    && width >= 1536 && height >= 1024 && width * 2 == height * 3 ? selected : "2016x1344";
+                return TestDict("provider", profile.Provider, "model", model, "size", size, "aspectRatio", "3:2",
+                    "resolution", "", "quality", "configured", "maximumVerified", false, "capabilityVersion", "2026-11-25",
+                    "maximumMode", "configured Local Model 3:2 canvas, with the largest Desk-compatible 3:2 fallback");
+            }
             bool runtime = IsCodexImageProvider(profile.Provider);
             if (runtime) size = "maximum-native-3:2";
             else if (profile.Provider == "OpenRouter")

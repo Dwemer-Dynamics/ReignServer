@@ -224,11 +224,6 @@ namespace ReignBetaServer
                 hero["campaignId"] = campaignId;
             }
 
-            if (hero != null && !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(hero)))
-            {
-                UpsertCharacterProfile(campaignId, hero);
-            }
-
             string heroId = CampaignFileService.CharacterIdFrom(hero);
             if (string.IsNullOrWhiteSpace(heroId))
             {
@@ -242,7 +237,7 @@ namespace ReignBetaServer
 
             bool force = ReadBool(payload, "force", false);
             bool useLlm = ReadBool(payload, "useLlm", ReadBool(SettingsService.LoadSettings(), "constructCharactersWithLlm", true));
-            Dictionary<string, object> result = ConstructCharacterFiles(campaignId, heroId, hero, force, useLlm);
+            Dictionary<string, object> result = ConstructRequestedCharacter(campaignId, heroId, hero, force, useLlm);
             OperationsService.LogOperational("characters.construct", result);
             return result;
         }
@@ -273,8 +268,7 @@ namespace ReignBetaServer
                         hero["campaignId"] = campaignId;
                     }
 
-                    UpsertCharacterProfile(campaignId, hero);
-                    Dictionary<string, object> result = ConstructCharacterFiles(campaignId, CampaignFileService.CharacterIdFrom(hero), hero, force, useLlm);
+                    Dictionary<string, object> result = ConstructRequestedCharacter(campaignId, CampaignFileService.CharacterIdFrom(hero), hero, force, useLlm);
                     if (ReadBool(result, "ok", false))
                     {
                         constructed++;
@@ -391,6 +385,38 @@ namespace ReignBetaServer
             return response;
         }
 
+        private static Dictionary<string, object> ReadHeldStockNotableConstruction(string campaign, string heroId,
+            Dictionary<string, object> mergedHero, bool force)
+        {
+            if (!RelationshipsService.StockNotableConstructionMustHold(campaign, heroId,
+                requestsNotable: ReadBool(mergedHero, "isNotable", false)))
+                return null;
+            if (!force)
+            {
+                var status = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, heroId, "constructed.json"));
+                if (IsCharacterConstructionReady(status)
+                    && TraitDocumentReady(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, heroId, "traits.json"))))
+                {
+                    status["alreadyReady"] = true;
+                    return status;
+                }
+            }
+            return TestDict("ok", false, "status", "native_delivery_deferred", "heroStringId", heroId,
+                "error", "Character construction is held while this notable has retained native editor ownership.");
+        }
+
+        private static Dictionary<string, object> ConstructRequestedCharacter(string campaign, string heroId,
+            Dictionary<string, object> hero, bool force, bool useLlm)
+        {
+            if (string.IsNullOrWhiteSpace(heroId))
+                throw new InvalidOperationException("heroStringId is required.");
+            var held = ReadHeldStockNotableConstruction(campaign, heroId, MergeProfileForConstruction(campaign, heroId, hero), force);
+            if (held != null) return held;
+            if (hero != null && !string.IsNullOrWhiteSpace(CampaignFileService.CharacterIdFrom(hero)))
+                UpsertCharacterProfile(campaign, hero);
+            return ConstructCharacterFiles(campaign, heroId, hero, force, useLlm);
+        }
+
         internal static Dictionary<string, object> EnsureCharacterConstructed(string campaignId, string heroId, Dictionary<string, object> hero, string source)
             => CharactersService.WithCharacterConstructionGate(campaignId, heroId, source,
                 () => EnsureCharacterConstructedCore(campaignId, heroId, hero, source));
@@ -398,6 +424,8 @@ namespace ReignBetaServer
         private static Dictionary<string, object> EnsureCharacterConstructedCore(string campaignId, string heroId, Dictionary<string, object> hero, string source)
         {
             hero = MergeProfileForConstruction(campaignId, heroId, hero);
+            var held = ReadHeldStockNotableConstruction(campaignId, heroId, hero, force: false);
+            if (held != null) return held;
             if (CharactersService.IsEncounteredResidentProfile(hero))
                 return CharactersService.EnsureEncounteredResidentConstructed(campaignId, heroId, hero, source);
             if (ReadBool(hero, "isNotable", false))
@@ -578,6 +606,8 @@ namespace ReignBetaServer
             }
 
             hero = MergeProfileForConstruction(campaignId, heroId, hero);
+            var held = ReadHeldStockNotableConstruction(campaignId, heroId, hero, force);
+            if (held != null) return held;
             if (ReadInt(hero, "narrativeVersion", 0) >= 5)
             {
                 if (CharactersService.LoadCharacterProfileLibrary().ContainsKey(heroId))

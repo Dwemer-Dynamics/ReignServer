@@ -291,7 +291,7 @@ namespace ReignBetaServer
             {
                 AddSubsystemListSummary(checks, "contracts.spymaster", "spymaster", SpymasterService.RunSpymasterSystemSelfTests());
                 AddSubsystemListSummary(checks, "contracts.mbti_relationship_lifecycle", "memory_relationships", RelationshipsService.RunCurrentRelationshipSelfTests());
-                AddSubsystemListSummary(checks, "contracts.notable_mbti", "memory_relationships", RelationshipsService.RunNotableMbtiSelfTests());
+                AddSubsystemListSummary(checks, "contracts.notable_mbti", "memory_relationships", RelationshipsService.RunNotableMbtiSelfTests(), caseResultLimit: 64);
             }
             AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_models", "conversation_modes", DialogueService.RunFinalConversationGauntletModelSelfTests());
             AddSubsystemListSummary(checks, "contracts.final_conversation_gauntlet_catalog", "conversation_modes", DialogueService.RunFinalConversationGauntletCatalogSelfTests());

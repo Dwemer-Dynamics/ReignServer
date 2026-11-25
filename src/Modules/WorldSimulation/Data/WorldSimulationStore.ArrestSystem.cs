@@ -54,12 +54,14 @@ AND column_name IN ('material_revision','effect_intent_id','effect_intent_materi
         }
 
         internal static List<Dictionary<string, object>> SelectArrestCaseEffects(ReignDbConnection connection,
-            Dictionary<string, object> parameters, bool includeReceipt = false)
+            Dictionary<string, object> parameters, bool includeReceipt = false, ReignDbTransaction transaction = null,
+            bool lockRows = false)
         {
             string receiptColumns = includeReceipt ? ",material_revision,effect_intent_id,effect_intent_material,effect_receipt_json" : "";
+            string rowLock = lockRows ? " FOR UPDATE" : "";
             return ReignDatabase.QuerySql(connection, @"SELECT case_id,accused_id,player_id,tag_id,rescinded" + receiptColumns + @"
 FROM arrest_case_effect_state WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND (case_id=$case OR (accused_id=$subject AND tag_id=$tag));", parameters);
+AND (case_id=$case OR (accused_id=$subject AND tag_id=$tag))" + rowLock + ";", parameters, transaction);
         }
 
         internal static void UpsertArrestCaseEffect(ReignDbConnection connection, Dictionary<string, object> parameters)
@@ -83,12 +85,14 @@ material_revision=excluded.material_revision,effect_intent_id=excluded.effect_in
 effect_intent_material=excluded.effect_intent_material,effect_receipt_json=excluded.effect_receipt_json;", parameters);
         }
 
-        internal static List<Dictionary<string, object>> SelectCharacterReputations(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static List<Dictionary<string, object>> SelectCharacterReputations(ReignDbConnection connection,
+            Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null, bool lockRows = false)
         {
+            string rowLock = lockRows ? " FOR UPDATE" : "";
             return ReignDatabase.QuerySql(connection, @"
 SELECT * FROM character_reputations
 WHERE campaign_id=$campaign AND timeline_id=$timeline
-AND subject_id=$subject AND tag_id=$tag LIMIT 1;", parameters, transaction);
+AND subject_id=$subject AND tag_id=$tag LIMIT 1" + rowLock + ";", parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectOtherArrestCaseReputations(ReignDbConnection connection,
