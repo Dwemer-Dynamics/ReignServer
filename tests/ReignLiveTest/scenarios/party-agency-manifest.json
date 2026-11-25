@@ -5,7 +5,7 @@
   "autonomous": true,
   "controller": "Reign MCP Party Agency tools with ReignLiveTest observational fallback",
   "nativeOperation": "party_agency_test",
-  "requiredBannerlordVersion": "v1.4.8",
+  "requiredBannerlordVersion": "v1.5.7",
   "profiles": [
     "preflight", "language_contract", "eligibility_detachment", "waiting_camp",
     "reviews", "returns", "save_roundtrip", "hostility", "recovery_regression", "evaluate"
@@ -13,7 +13,7 @@
   "policy": {
     "openEndedReviewDays": 30,
     "fixedTermMinimumDays": 1,
-    "fixedTermMaximumDays": 30,
+    "fixedTermMaximumDays": 126,
     "minimumReturnHours": 1,
     "maximumReturnHours": 12,
     "requiredLogicalCaseCount": 40,
