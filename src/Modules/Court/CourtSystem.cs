@@ -763,6 +763,76 @@ namespace ReignBetaServer
             }
         }
 
+        internal static Dictionary<string, object> CourtSupplyValidateOwnedApi(Dictionary<string, object> payload)
+        {
+            // This route is separate so an older server cannot accept the request through legacy validation.
+            if (payload == null || !payload.Keys.Contains("sharedActivityGeneration", StringComparer.Ordinal)
+                || !payload.TryGetValue("sharedActivityGeneration", out object generation) || generation is not string owner
+                || !payload.Keys.Contains("sessionId", StringComparer.Ordinal)
+                || !payload.TryGetValue("sessionId", out object sessionId) || sessionId is not string exactSession
+                || string.IsNullOrWhiteSpace(exactSession)
+                || !payload.Keys.Contains("campaignId", StringComparer.Ordinal)
+                || !payload.Keys.Contains("timelineId", StringComparer.Ordinal)
+                || !payload.Keys.Contains("expectedRevision", StringComparer.Ordinal)
+                || !payload.TryGetValue("expectedRevision", out object revision) || revision is not (int or long))
+                return CourtError("The supply validation requires an exact restore owner and Court session.");
+
+            CourtApiContext ctx = ReadCourtContext(payload);
+            Dictionary<string, object> transfer = ReadDictionary(payload, "transfer");
+            if (ctx.SessionId != exactSession || ctx.ExpectedRevision <= 0 || string.IsNullOrWhiteSpace(ctx.CommandId)
+                || string.IsNullOrWhiteSpace(ctx.CampaignId) || string.IsNullOrWhiteSpace(ctx.TimelineId) || transfer == null)
+                return CourtError("The supply validation requires an exact Court session revision, command and transfer.");
+            string expected = CourtHash(CourtCanonicalJson(transfer));
+            if (!SameCourtText(expected, ReadString(payload, "termsHash", "")))
+                return CourtError("The supply-transfer hash does not match its canonical terms.");
+            if (string.IsNullOrWhiteSpace(ReadString(transfer, "sourceSettlementStringId", ""))
+                || string.IsNullOrWhiteSpace(ReadString(transfer, "targetSettlementStringId", ""))
+                || string.IsNullOrWhiteSpace(ReadString(transfer, "itemStringId", "")) || ReadInt(transfer, "amount", 0) <= 0
+                || ReadInt(transfer, "goldAmount", 0) < 0)
+                return CourtError("A source, target, real item, positive amount and nonnegative gold are required.");
+
+            using var timelineScope = WorldSimulationService.EnterWorldHistoryTimelineScope(ctx.CampaignId);
+            using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(ctx.CampaignId,
+                trackCampaignMutations: true, initializeInfrastructure: false);
+            if (connection == null) return CourtError("The supply validation campaign is not registered.");
+            using var transaction = connection.BeginTransaction();
+            AcquirePostgreSqlTransactionMutationLock(connection, transaction);
+            if (!WorldSimulationService.NoticeAcknowledgementOwnerMatches(connection, transaction, payload,
+                    ctx.CampaignId, ctx.TimelineId))
+                return CourtError("The supply validation restore owner is no longer current.");
+
+            var session = CourtStore.SelectCourtSessions5(connection,
+                TestDict("id", exactSession, "campaign", ctx.CampaignId, "timeline", ctx.TimelineId), transaction,
+                lockForShare: true).SingleOrDefault();
+            string host = ReadString(session, "host_settlement_id", "");
+            string state = ReadString(session, "state", "").ToLowerInvariant();
+            if (ReadString(session, "scope", "") != "capital"
+                || !CourtSessionStateAllowed(state) || state is "closed" or "inactive" or "interrupted"
+                || host.Length == 0 || host != ctx.HostSettlementId || host != ReadString(session, "capital_settlement_id", "")
+                || ReadLong(session, "revision", -1) != ctx.ExpectedRevision)
+                return CourtError("The exact capital Court sitting is no longer current.");
+
+            if (TryReadCourtCommand(connection, ctx, out var prior, transaction))
+                return ReadString(prior, "result", "") == "court_supply_transfer_validated"
+                    && ReadString(prior, "termsHash", "") == expected && ReadString(prior, "sessionId", "") == exactSession
+                    && ReadLong(prior, "sessionRevision", -1) == ctx.ExpectedRevision
+                    && prior.TryGetValue("sharedActivityGeneration", out object savedOwner) && savedOwner is string saved && saved == owner
+                    ? prior : CourtError("That command belongs to different supply terms or ownership.");
+
+            var action = new Dictionary<string, object>(transfer, StringComparer.OrdinalIgnoreCase)
+                { ["type"] = "transfer_item", ["commandId"] = ctx.CommandId };
+            var response = CourtMutationResult(ctx, ctx.CommandId, 1, "court_supply_transfer_validated", new ArrayList { action });
+            response["termsHash"] = expected;
+            response["sessionId"] = exactSession;
+            response["sessionRevision"] = ctx.ExpectedRevision;
+            response["sharedActivityGeneration"] = owner;
+            StoreCourtCommand(connection, ctx, "supply_validate", response, transaction);
+            AddCourtAudit(connection, ctx, "supply_transfer", ctx.CommandId, "validate", "validated", response, transaction);
+            PersistenceService.MarkSaveSyncActiveStateDirty(ctx.CampaignId);
+            transaction.Commit();
+            return response;
+        }
+
         internal static Dictionary<string, object> CourtNativeActionValidateApi(Dictionary<string, object> payload)
         {
             CourtApiContext ctx=ReadCourtContext(payload);Dictionary<string,object> action=ReadDictionary(payload,"nativeAction")??new Dictionary<string,object>();
@@ -875,12 +945,12 @@ namespace ReignBetaServer
             HashSet<string> tables=new HashSet<string>(new[]{"ambassador_postings","intelligence_operations","court_plots"},StringComparer.Ordinal);HashSet<string> columns=new HashSet<string>(new[]{"posting_id","operation_id","plot_id"},StringComparer.Ordinal);if(!tables.Contains(table)||!columns.Contains(idColumn))throw new InvalidOperationException("Unsafe court table lookup.");return CourtStore.SelectDynamic(connection, table, idColumn,new Dictionary<string,object>{{"id",id},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId}}).FirstOrDefault();
         }
 
-        private static bool TryReadCourtCommand(ReignDbConnection connection,CourtApiContext ctx,out Dictionary<string,object> response)
+        private static bool TryReadCourtCommand(ReignDbConnection connection,CourtApiContext ctx,out Dictionary<string,object> response,ReignDbTransaction transaction=null)
         {
-            response=null;if(string.IsNullOrWhiteSpace(ctx.CommandId))return false;Dictionary<string,object> row=CourtStore.SelectCourtCommands(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId}}).FirstOrDefault();if(row==null)return false;response=TryParseJsonObject(ReadString(row,"response_json","{}"));if(response==null)response=new Dictionary<string,object>();response["idempotentReplay"]=true;return true;
+            response=null;if(string.IsNullOrWhiteSpace(ctx.CommandId))return false;Dictionary<string,object> row=CourtStore.SelectCourtCommands(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId}},transaction).FirstOrDefault();if(row==null)return false;response=TryParseJsonObject(ReadString(row,"response_json","{}"));if(response==null)response=new Dictionary<string,object>();response["idempotentReplay"]=true;return true;
         }
-        private static void StoreCourtCommand(ReignDbConnection connection,CourtApiContext ctx,string type,Dictionary<string,object> response){CourtStore.UpsertCourtCommands(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId},{"type",type},{"response",Json.Serialize(response)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});}
-        private static void AddCourtAudit(ReignDbConnection connection,CourtApiContext ctx,string recordType,string recordId,string action,string status,Dictionary<string,object> receipt){CourtStore.InsertCourtAudit(connection, new Dictionary<string,object>{{"id","court_audit_"+Guid.NewGuid().ToString("N")},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId??""},{"type",recordType},{"record",recordId??""},{"action",action},{"status",status},{"day",ctx.WorldDay},{"receipt",Json.Serialize(receipt)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}});}
+        private static void StoreCourtCommand(ReignDbConnection connection,CourtApiContext ctx,string type,Dictionary<string,object> response,ReignDbTransaction transaction=null){CourtStore.UpsertCourtCommands(connection, new Dictionary<string,object>{{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId},{"type",type},{"response",Json.Serialize(response)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}},transaction);}
+        private static void AddCourtAudit(ReignDbConnection connection,CourtApiContext ctx,string recordType,string recordId,string action,string status,Dictionary<string,object> receipt,ReignDbTransaction transaction=null){CourtStore.InsertCourtAudit(connection, new Dictionary<string,object>{{"id","court_audit_"+Guid.NewGuid().ToString("N")},{"campaign",ctx.CampaignId},{"timeline",ctx.TimelineId},{"command",ctx.CommandId??""},{"type",recordType},{"record",recordId??""},{"action",action},{"status",status},{"day",ctx.WorldDay},{"receipt",Json.Serialize(receipt)},{"ts",DateTimeOffset.UtcNow.ToUnixTimeSeconds()}},transaction);}
         private static Dictionary<string,object> CourtMutationResult(CourtApiContext ctx,string recordId,long revision,string result,ArrayList actions){return new Dictionary<string,object>{{"ok",true},{"campaignId",ctx.CampaignId},{"timelineId",ctx.TimelineId},{"commandId",ctx.CommandId},{"recordId",recordId},{"result",result},{"revision",revision},{"receipt",new Dictionary<string,object>{{"receiptId","court_receipt_"+Guid.NewGuid().ToString("N")},{"commandId",ctx.CommandId},{"result",result}}},{"nativeActions",actions??new ArrayList()}};}
         private static Dictionary<string,object> CourtError(string error){return new Dictionary<string,object>{{"ok",false},{"error",error??"Court request failed."}};}
         private static Dictionary<string,object> CourtRevisionError(long revision){return new Dictionary<string,object>{{"ok",false},{"error","revision_conflict"},{"currentRevision",revision}};}
@@ -915,6 +985,94 @@ namespace ReignBetaServer
         private static bool SameCourtText(string a,string b){return string.Equals(a??"",b??"",StringComparison.OrdinalIgnoreCase);}
 
 #if !REIGN_EXCLUDE_VERIFICATION
+        private static void VerifyOwnedCourtSupply(string campaign, string timeline,
+            Action<string, bool, string, object> add)
+        {
+            const string session = "owned_supply_session", host = "town_owned_supply", command = "owned_supply_command";
+            const string previous = "fixture_old_restore", current = "fixture_current_restore";
+            var adopted = WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", timeline));
+            var opened = CourtSessionOpenApi(TestDict("campaignId", campaign, "timelineId", timeline, "commandId", "open_owned_supply",
+                "sessionId", session, "expectedRevision", 0, "authority", "royal", "playerIsKingdomRuler", true,
+                "scope", "capital", "hostSettlementStringId", host, "capitalSettlementStringId", host));
+            if (!ReadBool(adopted, "ok", false) || !ReadBool(opened, "ok", false))
+                throw new InvalidOperationException("The isolated Court supply owner fixture could not open its capital and timeline.");
+
+            var transfer = TestDict("sourceSettlementStringId", "source", "targetSettlementStringId", "target",
+                "itemStringId", "grain", "amount", 25, "goldAmount", 0, "vassalConsentGranted", true);
+            var request = TestDict("campaignId", campaign, "timelineId", timeline, "sessionId", session,
+                "hostSettlementStringId", host, "expectedRevision", ReadLong(opened, "revision", -1), "commandId", command,
+                "sharedActivityGeneration", previous, "transfer", transfer, "termsHash", CourtHash(CourtCanonicalJson(transfer)));
+            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+            {
+                DialogueService.EnsureMemoryPrecisionSchema(connection);
+                // Native Save Sync publishes restoration ownership in this same singleton.
+                DialogueStore.UpdateMemoryPrecisionState2(connection, TestDict("generation", previous, "ts", 1L));
+                DialogueStore.UpdateMemoryPrecisionState2(connection, TestDict("generation", current, "ts", 2L));
+            }
+
+            (int Commands, int Audits) Counts(string commandId)
+            {
+                using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                var key = TestDict("campaign", campaign, "timeline", timeline, "command", commandId);
+                int commands = CourtStore.SelectCourtCommands(connection, key).Count;
+                var audit = ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count FROM court_audit
+WHERE campaign_id=$campaign AND timeline_id=$timeline AND command_id=$command;", key).Single();
+                return (commands, ReadInt(audit, "count", -1));
+            }
+
+            var stale = CourtSupplyValidateOwnedApi(request);
+            add("owned_supply_stale_restore_rejects_before_replay_or_writes",
+                !ReadBool(stale, "ok", true) && !stale.ContainsKey("nativeActions") && Counts(command) == (0, 0),
+                "A request prepared before the stored restore owner changed leaves no command, audit or native plan.", stale);
+
+            request["sharedActivityGeneration"] = current;
+            var accepted = CourtSupplyValidateOwnedApi(request);
+            var replay = CourtSupplyValidateOwnedApi(request);
+            request["sharedActivityGeneration"] = previous;
+            var staleReplay = CourtSupplyValidateOwnedApi(request);
+            var actions = ReadDictionaryList(accepted, "nativeActions");
+            add("owned_supply_current_restore_accepts_once",
+                ReadBool(accepted, "ok", false) && ReadString(accepted, "sharedActivityGeneration", "") == current
+                && ReadString(accepted, "sessionId", "") == session && actions.Count == 1
+                && ReadString(actions[0], "type", "") == "transfer_item" && ReadInt(actions[0], "amount", 0) == 25
+                && ReadBool(replay, "idempotentReplay", false) && ReadBool(replay, "ok", false)
+                && !ReadBool(staleReplay, "ok", true) && !staleReplay.ContainsKey("nativeActions") && Counts(command) == (1, 1),
+                "Only exact current ownership can accept or replay one stored supply command and one audit.", accepted);
+
+            request["sharedActivityGeneration"] = current;
+            long priorRevision = ReadLong(opened, "revision", -1);
+
+            Dictionary<string, object> TickSitting(string state, long revision) => CourtSessionTickApi(
+                TestDict("campaignId", campaign, "timelineId", timeline, "sessionId", session,
+                    "expectedRevision", revision, "commandId", "owned_supply_tick_" + state, "state", state));
+
+            var refreshed = TickSitting("sitting", priorRevision);
+            long currentRevision = ReadLong(refreshed, "revision", -1);
+            var staleSitting = CourtSupplyValidateOwnedApi(request);
+            add("owned_supply_stale_sitting_rejects_before_replay",
+                ReadBool(refreshed, "ok", false) && currentRevision == priorRevision + 1
+                && !ReadBool(staleSitting, "ok", true) && !staleSitting.ContainsKey("nativeActions")
+                && Counts(command) == (1, 1),
+                "Updating the sitting revision stops replay of the earlier supply command without new writes.", staleSitting);
+
+            foreach (string state in new[] { "Closed", "Inactive", "Interrupted" })
+            {
+                var tick = TickSitting(state, currentRevision);
+                long inactiveRevision = ReadLong(tick, "revision", -1);
+                string refusedCommand = command + "_" + state;
+                request["commandId"] = refusedCommand;
+                request["expectedRevision"] = inactiveRevision;
+                var refused = CourtSupplyValidateOwnedApi(request);
+                add("owned_supply_" + state.ToLowerInvariant() + "_spelling_rejects_before_writes",
+                    ReadBool(tick, "ok", false) && inactiveRevision == currentRevision + 1
+                    && !ReadBool(refused, "ok", true) && !refused.ContainsKey("nativeActions")
+                    && ReadString(refused, "error", "") == "The exact capital Court sitting is no longer current."
+                    && Counts(refusedCommand) == (0, 0),
+                    "The legacy tick accepts this state spelling, but the owned supply route cannot authorize it.", refused);
+                currentRevision = inactiveRevision;
+            }
+        }
+
         internal static List<Dictionary<string, object>> RunCourtSelfTests()
         {
             List<Dictionary<string,object>> results=new List<Dictionary<string,object>>();Action<string,bool,string,object> add=(id,passed,summary,data)=>results.Add(new Dictionary<string,object>{{"ok",true},{"passed",passed},{"suite","court_system"},{"caseId",id},{"name",id},{"summary",summary},{"data",data??new Dictionary<string,object>()},{"durationMs",0}});
@@ -992,6 +1150,7 @@ namespace ReignBetaServer
                 AppendCourtLifeCreatorProfileTests(results, campaign);
                 AppendCourtLifeResolutionContinuityTests(results, campaign);
                 WarCouncilScrollSelfTests.Append(results);
+                VerifyOwnedCourtSupply(campaign, timeline, add);
             }
             catch(Exception ex){add("court_self_test_exception",false,"Court self-test threw: "+ex.Message,ex.ToString());}
             finally{try{string root=Path.GetFullPath(Path.Combine(Program.DataDir,"campaigns"))+Path.DirectorySeparatorChar;string target=Path.GetFullPath(path??"");if(target.StartsWith(root,StringComparison.OrdinalIgnoreCase)&&Path.GetFileName(target).StartsWith("__court_self_test_",StringComparison.OrdinalIgnoreCase)&&Directory.Exists(target))Directory.Delete(target,true);}catch{}}

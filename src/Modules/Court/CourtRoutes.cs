@@ -56,6 +56,7 @@ namespace ReignBetaServer
             routes.Post("/court/world-action/validate", request => CourtService.CapitalCourtApi(request.JsonBody, CourtService.CourtWorldActionValidateApi));
             routes.Post("/court/diplomacy/propose", request => CourtService.CapitalCourtApi(request.JsonBody, CourtService.CourtDiplomacyProposeApi));
             routes.Post("/court/supply/validate", request => CourtService.CapitalCourtApi(request.JsonBody, CourtService.CourtSupplyValidateApi));
+            routes.Post("/court/supply/validate-owned", request => CourtService.CourtSupplyValidateOwnedApi(request.JsonBody));
             routes.Post("/court/native/validate", request => CourtService.CapitalCourtApi(request.JsonBody, CourtService.CourtNativeActionValidateApi));
 #if !REIGN_EXCLUDE_VERIFICATION
             routes.Get("/court/tests", request => CourtService.RunCourtSelfTests());
