@@ -45,7 +45,7 @@ namespace ReignLiveTest
                 native.TryGetValue("snapshotReady", out object snapshot) && snapshot is bool ready ? ready : (bool?)null,
                 native.TryGetValue("mutationInFlight", out object mutation) && mutation is bool active ? active : (bool?)null,
                 Count("pendingReceipts"), Count("dueNativeRewards"), Count("dueNativePersonalTravel"),
-                Count("dueNativeMeetingRelease"));
+                Count("dueNativeMeetingRelease"), Count("dueNativeWeddingAttendanceRelease"));
         }
         private static bool _observeGovernmentNewsForPassiveWorldControl;
         private static string _checkpointPeriodicPollToken;
@@ -106,6 +106,9 @@ namespace ReignLiveTest
             string operation = args.Skip(1)
                 .FirstOrDefault(value => !value.StartsWith("-", StringComparison.Ordinal))
                 ?? "status";
+            bool postArmCurrentDiagnostic = Has(args, "--post-arm-current-diagnostic");
+            if (postArmCurrentDiagnostic && !operation.Equals("snapshot", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The post-arm Current diagnostic is only available for a snapshot.");
             if (_observeGovernmentNewsForPassiveWorldControl
                 && operation.Equals("checkpoint", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Government-news observation cannot create a checkpoint.");
@@ -121,8 +124,9 @@ namespace ReignLiveTest
                 case "status":
                     return CompactPassiveWorldStatus(runtime, campaignId, timelineId);
                 case "snapshot":
-                    return RunPassiveWorldStep(runtime, campaignId, "world_snapshot",
-                        new Dictionary<string, object>(), 120);
+                    var snapshotFields = new Dictionary<string, object>();
+                    if (postArmCurrentDiagnostic) snapshotFields["snapshotMode"] = "post_arm_current_diagnostic";
+                    return RunPassiveWorldStep(runtime, campaignId, "world_snapshot", snapshotFields, 120);
                 case "stop":
                     return RunPassiveWorldStep(runtime, campaignId, "world_time_control",
                         new Dictionary<string, object>

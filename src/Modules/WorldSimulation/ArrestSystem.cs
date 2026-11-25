@@ -845,7 +845,7 @@ namespace ReignBetaServer
         private static string ClassifyArrestSeverity(string accusation)
         {
             string value = ActionPipelineService.NormalizeLookup(accusation);
-            if (ActionPipelineService.ContainsAnyNormalized(value, "treason", "regicide", "betray the realm", "wartime betrayal"))
+            if (IsCapitalArrestAccusation(value))
                 return "capital";
             if (ActionPipelineService.ContainsAnyNormalized(value, "murder", "assassination", "espionage", "spying",
                 "foreign spy", "sabotage", "rebellion")) return "grave";
@@ -854,10 +854,14 @@ namespace ReignBetaServer
             return "minor";
         }
 
+        private static bool IsCapitalArrestAccusation(string normalizedAccusation) =>
+            ActionPipelineService.ContainsAnyNormalized(normalizedAccusation,
+                "treason", "regicide", "betray the realm", "wartime betrayal");
+
         private static string ClassifyArrestCharge(string accusation)
         {
             string value = ActionPipelineService.NormalizeLookup(accusation);
-            if (ActionPipelineService.ContainsAnyNormalized(value, "treason", "regicide")) return "treason";
+            if (IsCapitalArrestAccusation(value)) return "treason";
             if (ActionPipelineService.ContainsAnyNormalized(value, "espionage", "spying", "foreign spy", "spy")) return "espionage";
             if (ActionPipelineService.ContainsAnyNormalized(value, "murder", "assassination")) return "murder";
             if (ActionPipelineService.ContainsAnyNormalized(value, "sabotage")) return "sabotage";
@@ -980,6 +984,35 @@ namespace ReignBetaServer
             language("AR-LANG-035", "", "Have them detained for assault.", "prepare_arrest", false);
             language("AR-LANG-036", "", "The lady should be placed in custody for conspiracy; see it done.", "prepare_arrest", false);
 
+            // Keep these term-pair regressions separate from the fixed certification utterance count.
+            context["activeCaseId"] = string.Empty;
+            context["phase"] = string.Empty;
+            context["heldByPlayer"] = false;
+            foreach (var (id, accusation, category, severity) in new[]
+            {
+                ("treason", "treason", "treason", "capital"),
+                ("regicide", "regicide", "treason", "capital"),
+                ("betray_the_realm", "a plan to betray the realm", "treason", "capital"),
+                ("wartime_betrayal", "wartime betrayal", "treason", "capital"),
+                ("capital_and_murder", "wartime betrayal and murder", "treason", "capital"),
+                ("capital_and_espionage", "espionage and a plan to betray the realm", "treason", "capital"),
+                ("ordinary_murder", "murder", "murder", "grave"),
+                ("ordinary_espionage", "espionage", "espionage", "grave")
+            })
+            {
+                List<Dictionary<string, object>> candidates = BuildArrestDialogueCandidates(
+                    payload, hero, "Guards, arrest her for " + accusation + ".", "You will regret this.");
+                var candidate = candidates.FirstOrDefault();
+                var terms = ReadDictionary(candidate, "terms");
+                add("charge_terms_" + id, candidates.Count == 1
+                    && ReadString(candidate, "command", "") == "prepare_arrest"
+                    && ReadString(candidate, "TargetHero", "") == "npc"
+                    && ReadString(terms, "accusation", "") == accusation
+                    && ReadString(terms, "chargeCategory", "") == category
+                    && ReadString(terms, "severity", "") == severity,
+                    "Arrest proposal binds the exact accusation, target, category and severity.");
+            }
+
             add("severity_table", ClassifyArrestSeverity("treason") == "capital"
                 && ClassifyArrestSeverity("foreign espionage") == "grave"
                 && ClassifyArrestSeverity("corruption") == "serious"
@@ -1015,6 +1048,22 @@ namespace ReignBetaServer
                 && ReadString(ArrestEvidenceEvaluateApi(new Dictionary<string, object>(unsupportedEvidence)
                     { ["chargeCategory"] = "" }), "evidenceStatus", "") == "unsupported",
                 "Generic history flags cannot supply a charge. Missing categories retain the unsupported result.");
+            var treasonEvidence = ArrestEvidenceEvaluateApi(new Dictionary<string, object>(unsupportedEvidence)
+            {
+                ["schema"] = "reign-arrest-evidence-request-v2", ["chargeCategory"] = "treason"
+            });
+            add("evidence_treason_has_no_authoritative_producer",
+                ReadBool(treasonEvidence, "ok", false)
+                && ReadString(treasonEvidence, "schema", "") == "reign-arrest-evidence-response-v2"
+                && ReadString(treasonEvidence, "campaignId", "") == "fixture"
+                && ReadString(treasonEvidence, "timelineId", "") == "main"
+                && ReadString(treasonEvidence, "accusedHeroId", "") == "npc"
+                && ReadString(treasonEvidence, "chargeCategory", "") == "treason"
+                && !ReadBool(treasonEvidence, "causeEstablished", true)
+                && ReadString(treasonEvidence, "evidenceStatus", "") == "unsupported"
+                && treasonEvidence["evidenceIds"] is List<string> ids && ids.Count == 0
+                && ReadDictionaryList(treasonEvidence, "evidence").Count == 0,
+                "A generic finding or named actor supplies no public treason evidence.");
             add("evidence_espionage_requires_explicit_scope",
                 ReadString(ArrestEvidenceEvaluateApi(new Dictionary<string, object>(unsupportedEvidence)
                     { ["chargeCategory"] = "espionage", ["timelineId"] = "" }), "evidenceStatus", "") == "unsupported",

@@ -257,6 +257,7 @@ namespace ReignBetaServer
             "POST exact Ordinal /court/world-action/validate read court",
             "POST exact Ordinal /court/diplomacy/propose read court",
             "POST exact Ordinal /court/supply/validate read court",
+            "POST exact Ordinal /court/supply/validate-owned read court",
             "POST exact Ordinal /court/native/validate read court",
             "GET exact Ordinal /court/tests read court",
             "GET exact Ordinal /diplomacy/events/next read",

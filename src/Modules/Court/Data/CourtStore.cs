@@ -440,9 +440,11 @@ VALUES($id,$campaign,$timeline,$session,$source,$kind,'queued',$title,$summary,$
             ReignDatabase.ExecuteSql(connection, "UPDATE ambassador_postings SET last_report_day=$day,revision=revision+1,updated_ts=$ts WHERE posting_id=$id;", parameters, transaction);
         }
 
-        internal static List<Dictionary<string, object>> SelectCourtSessions5(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
+        internal static List<Dictionary<string, object>> SelectCourtSessions5(ReignDbConnection connection,
+            Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null, bool lockForShare = false)
         {
-            return ReignDatabase.QuerySql(connection, "SELECT * FROM court_sessions WHERE session_id=$id AND campaign_id=$campaign AND timeline_id=$timeline AND LOWER(authority)='royal' LIMIT 1;", parameters, transaction);
+            string sql = "SELECT * FROM court_sessions WHERE session_id=$id AND campaign_id=$campaign AND timeline_id=$timeline AND LOWER(authority)='royal' LIMIT 1";
+            return ReignDatabase.QuerySql(connection, sql + (lockForShare ? " FOR SHARE;" : ";"), parameters, transaction);
         }
 
         internal static List<Dictionary<string, object>> SelectCourtSessions6(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
