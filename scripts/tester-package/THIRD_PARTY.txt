@@ -5,10 +5,11 @@ install their own licensed game and the separately distributed dependency mods.
 Dependency provenance/minimums are in server-support/release/dependencies.lock.json
 and ReignBeta/SubModule.xml. Existing user dependencies are not overwritten.
 
-The server environment starts with Debian 12 (bookworm), using the official
-Debian debuerreotype image debian:bookworm-20261104. Provenance and immutable
-artifact digests are recorded in image-receipt.json. Debian component copyright
-and licensing notices are retained under /usr/share/doc in the server image.
+The server environment starts with Debian 13 (trixie), using the official
+Debian debuerreotype image debian:trixie-slim (linux/amd64), pinned by digest in
+server-support/release/release.json. Provenance and immutable artifact digests
+are recorded in image-receipt.json. Debian component copyright files are
+retained under /usr/share/doc in the server image.
 Corresponding Debian package sources are available from https://sources.debian.org/
 and https://snapshot.debian.org/ for the exact package versions recorded in
 /etc/reign-tester-image.json. Debian image/build sources:

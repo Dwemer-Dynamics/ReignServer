@@ -38,6 +38,28 @@ actual={p.relative_to(source).as_posix() for p in source.rglob('*') if p.is_file
 if actual!=expected|{'install-inputs.json'}:raise ValueError('Unexpected staged installation files')
 PY
 package=$private
+# Read-only image/database-major guard; it must refuse before any state below changes.
+pg_major=$(python3 -I - "$package/server-support/release/release.json" "$mode" <<'PY'
+import json,pathlib,sys
+lock=json.loads(pathlib.Path(sys.argv[1]).read_text())['serverImage'];major=str(lock['postgresMajor'])
+marker=json.loads(pathlib.Path('/etc/reign-tester-image.json').read_text())
+osr=dict(l.split('=',1) for l in pathlib.Path('/etc/os-release').read_text().splitlines() if '=' in l)
+legacy=sorted({p.name for root in ('/etc/postgresql','/var/lib/postgresql') if pathlib.Path(root).is_dir()
+    for p in pathlib.Path(root).iterdir() if p.is_dir() and p.name.isdigit() and p.name!=major})
+if legacy:
+    raise SystemExit('This distro holds a PostgreSQL '+', '.join(legacy)+' cluster from an older Reign image. Nothing was changed. '
+        'Keep it, export the reign database as described in INSTALL.html, then install into a new distro.')
+# An update keeps its distro: require runtime compatibility. Fresh/resume imported this package's own image.
+if (marker.get('schema')!=lock['schema'] or marker.get('debian')!=lock['os']['versionId'] or str(marker.get('postgresMajor'))!=major
+    or marker.get('icuPackage')!=lock['icuPackage'] or not str(marker.get('python','')).startswith(lock['python']+'.')
+    or (sys.argv[2]!='update' and marker.get('baseManifestDigest')!=lock['base']['manifestDigest'])
+    or osr.get('VERSION_ID','').strip('"')!=lock['os']['versionId']
+    or not pathlib.Path('/usr/lib/postgresql/'+major+'/bin/postgres').is_file()):
+    raise SystemExit('This distro was not built from the server image this package requires. Nothing was changed; install into a new distro.')
+print(major)
+PY
+)
+[[ "$pg_major" =~ ^[0-9]+$ ]] || exit 1
 python3 - "$root" "$owner" "$mode" <<'PY'
 import json,pathlib,sys
 root=pathlib.Path(sys.argv[1]); p=root/'tester-owner.json'
@@ -67,16 +89,16 @@ chown -R root:root "$root/scripts" "$root/release" "$root/services"
 chmod -R go-w "$root/scripts" "$root/release" "$root/services"
 find "$root/scripts" -maxdepth 1 -type f \( -name '*.sh' -o -name reignctl -o -name '*.service' \) -exec sed -i 's/\r$//' {} +
 systemctl unmask postgresql.service apache2.service reignserver.service
-if ! test -f /etc/postgresql/15/main/postgresql.conf; then
+if ! test -f "/etc/postgresql/$pg_major/main/postgresql.conf"; then
     test "$mode" != update || { echo 'Existing database cluster is missing; update refused.' >&2; exit 1; }
     # The image intentionally ships no database cluster or user data.
-    pg_createcluster 15 main --port=5432 --encoding=UTF8 --locale=C.UTF-8 --start-conf=auto
+    pg_createcluster "$pg_major" main --port=5432 --encoding=UTF8 --locale=C.UTF-8 --start-conf=auto
 fi
-pg_conftool 15 main set listen_addresses ''
-pg_conftool 15 main set port 5432
-printf 'auto\n' > /etc/postgresql/15/main/start.conf
+pg_conftool "$pg_major" main set listen_addresses ''
+pg_conftool "$pg_major" main set port 5432
+printf 'auto\n' > "/etc/postgresql/$pg_major/main/start.conf"
 if ! test -f /etc/ssl/private/ssl-cert-snakeoil.key; then make-ssl-cert generate-default-snakeoil; fi
-pg_ctlcluster 15 main start || pg_ctlcluster 15 main status
+pg_ctlcluster "$pg_major" main start || pg_ctlcluster "$pg_major" main status
 if test "$mode" = update; then
     test "$(runuser -u postgres -- psql -XAt -v ON_ERROR_STOP=1 -d postgres -c "SELECT COUNT(*) FROM pg_database WHERE datname='reign';")" = 1 || { echo 'Existing player database is missing; update refused.' >&2; exit 1; }
 fi
@@ -94,7 +116,7 @@ bash "$root/scripts/install-reign-control.sh" "$root/scripts/reignctl" "$root/sc
 /usr/local/bin/reignctl repair-permissions
 systemctl stop reignserver.service
 /usr/local/bin/reignctl activate "$package/server" --leave-stopped
-pg_ctlcluster 15 main stop
+pg_ctlcluster "$pg_major" main stop
 systemctl disable postgresql.service apache2.service reignserver.service >/dev/null
 rm -f /usr/sbin/policy-rc.d
 echo 'Qualified server installed; player database initialized with local peer authentication; services left stopped.'

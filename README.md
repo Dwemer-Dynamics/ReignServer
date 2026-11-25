@@ -2,7 +2,7 @@
 
 ## DwemerDistro 0.1.0
 
-ReignServer runs inside Debian 12 WSL as a self-contained .NET 10 application. Install it from the launcher's Reign page or use `sudo ddistro_server install reign --branch reign`. Choose `dev` for beta or `unstable` for development. Development flows through `unstable -> dev -> reign`; `reign` is the default production branch and replaces `main`. Promote compatible client and server revisions together through reviewed PRs.
+ReignServer runs inside its own Debian WSL distro as a self-contained .NET 10 application; the tester image uses Debian 13 with PostgreSQL 17 (see `docs/server/TesterServerImage.md`). Install it from the launcher's Reign page or use `sudo ddistro_server install reign --branch reign`. Choose `dev` for beta or `unstable` for development. Development flows through `unstable -> dev -> reign`; `reign` is the default production branch and replaces `main`. Promote compatible client and server revisions together through reviewed PRs.
 
 DwemerDistro owns startup, shutdown, PostgreSQL (`reign`, UTF-8, port 5432), and the Python vector worker. Open the Control Center on port 8089. Apache forwards to loopback port 5101; the owned worker uses 5102 so MiniMe keeps 8082. Application files live in `/var/www/html/ReignServer/runtime`, source in `/var/www/html/ReignServer`, and persistent data in `/var/www/html/ReignServer/data`. Updates retain previous executables and pin dependency/model directories by source hashes. Uninstall disables the runtime and retains the checkout, database and persistent data; Repair reinstalls the application.
 
