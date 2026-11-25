@@ -75,11 +75,10 @@ namespace ReignBetaServer
         }
 
         private static List<EditorSummaryTextEdit> ApplyEditorSummaryTextEdits(ReignDbConnection connection, string hero,
-            List<EditorSummaryTextEdit> edits, List<Dictionary<string, object>> issues, string conflictReason)
+            List<EditorSummaryTextEdit> edits, List<Dictionary<string, object>> issues, string conflictReason, ReignDbTransaction transaction)
         {
             var applied = new List<EditorSummaryTextEdit>();
             if (edits.Count == 0) return applied;
-            using var transaction = connection.BeginTransaction();
             foreach (var edit in edits.OrderBy(item => item.Id, StringComparer.Ordinal))
             {
                 var updated = CharactersStore.UpdateEditorSummaryText(connection, TestDict(
@@ -89,7 +88,6 @@ namespace ReignBetaServer
                 else
                     issues.Add(EditorSummaryTextIssue(edit.Id, conflictReason));
             }
-            transaction.Commit();
             return applied;
         }
 

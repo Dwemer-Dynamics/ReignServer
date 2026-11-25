@@ -22,7 +22,7 @@ namespace ReignBetaServer
         private static string SocialCatalogCachedPath = "";
         private static long SocialCatalogCachedWriteTicks = long.MinValue;
 
-        internal static void EnsureSocialReputationSchema(ReignDbConnection connection)
+        internal static void EnsureSocialReputationSchema(ReignDbConnection connection, bool publishCatalog = true)
         {
             CharactersService.EnsureIdentitySchema(connection);
             RelationshipsService.EnsureMbtiRelationshipSchema(connection);
@@ -50,13 +50,16 @@ namespace ReignBetaServer
             ReputationSchema.EnsureColumnRelationshipPairChemistryEffectiveAffinityAToB(connection);
             ReputationSchema.EnsureColumnRelationshipPairChemistryEffectiveAffinityBToA(connection);
 
-            Dictionary<string, object> catalog = ReadGlobalSocialCatalog();
-            int activeRevision = ReadInt(catalog, "revision", BuiltInSocialCatalogRevision);
-            ReputationStore.UpsertSocialCatalogRevisions(connection, new Dictionary<string, object>
+            if (publishCatalog)
             {
-                ["revision"] = activeRevision, ["catalog"] = Json.Serialize(catalog),
-                ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-            });
+                Dictionary<string, object> catalog = ReadGlobalSocialCatalog();
+                int activeRevision = ReadInt(catalog, "revision", BuiltInSocialCatalogRevision);
+                ReputationStore.UpsertSocialCatalogRevisions(connection, new Dictionary<string, object>
+                {
+                    ["revision"] = activeRevision, ["catalog"] = Json.Serialize(catalog),
+                    ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                });
+            }
             ReputationStore.UpsertSchemaMeta6(connection, new Dictionary<string, object> { ["version"] = SocialReputationSchemaVersion.ToString(CultureInfo.InvariantCulture) });
         }
 
@@ -229,6 +232,42 @@ namespace ReignBetaServer
                 return catalog;
             }
         }
+
+        private static Dictionary<string, object> ReadSocialCatalogProjection(string path)
+        {
+            lock (SocialCatalogLock)
+            {
+                var catalog = ReadSocialCatalog(path);
+                if (catalog.Count == 0) catalog = DefaultSocialCatalog();
+                EnsureExpandedSocialCatalog(catalog);
+                return catalog;
+            }
+        }
+
+#if !REIGN_EXCLUDE_VERIFICATION
+        internal static bool VerifySocialCatalogProjectionReadOnly()
+        {
+            string directory = Path.Combine(Program.TestsDir, "editor-catalog-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(directory, "catalog.json");
+            try
+            {
+                var missing = ReadSocialCatalogProjection(path);
+                if (File.Exists(path) || ReadDictionaryList(missing, "tags").Count == 0) return false;
+                File.WriteAllText(path, "{\"revision\":42,\"tags\":[],\"archetypes\":[]}");
+                byte[] before = File.ReadAllBytes(path);
+                var expanded = ReadSocialCatalogProjection(path);
+                return ReadInt(expanded, "revision", 0) == Math.Max(42, BuiltInSocialCatalogRevision)
+                    && ReadDictionaryList(expanded, "tags").Count > 0
+                    && File.ReadAllBytes(path).SequenceEqual(before);
+            }
+            finally
+            {
+                if (File.Exists(path)) File.Delete(path);
+                Directory.Delete(directory);
+            }
+        }
+#endif
 
         private static Dictionary<string, object> ReadSocialCatalog(string path)
         {

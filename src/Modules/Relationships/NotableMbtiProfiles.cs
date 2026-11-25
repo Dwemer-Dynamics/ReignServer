@@ -717,19 +717,19 @@ namespace ReignBetaServer
             string campaignId,
             string heroId,
             Dictionary<string, object> profile,
-            Dictionary<string, object> traitDocument)
+            Dictionary<string, object> traitDocument,
+            ReignDbConnection connection = null)
         {
             profile = profile ?? new Dictionary<string, object>();
             traitDocument = traitDocument ?? CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaignId, heroId, "traits.json"));
             Dictionary<string, object> embedded = ReadDictionary(traitDocument, "mbtiProfile") ?? new Dictionary<string, object>();
             if (ReadBool(profile, "isNotable", false))
             {
-                using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
-                {
-                    EnsureNotableMbtiSchema(connection);
-                    Dictionary<string, object> row = RelationshipsStore.SelectNotableMbtiProfiles4(connection, new Dictionary<string, object> { ["id"] = heroId }).FirstOrDefault();
-                    if (row != null) return NotableMbtiRowToProfile(row);
-                }
+                using var ownedConnection = connection == null ? ReignDatabase.OpenCampaignConnection(campaignId) : null;
+                connection ??= ownedConnection;
+                EnsureNotableMbtiSchema(connection);
+                Dictionary<string, object> row = RelationshipsStore.SelectNotableMbtiProfiles4(connection, new Dictionary<string, object> { ["id"] = heroId }).FirstOrDefault();
+                if (row != null) return NotableMbtiRowToProfile(row);
             }
             Dictionary<string, object> foundation = ReadDictionary(traitDocument, "foundationTraits") ?? new Dictionary<string, object>();
             Dictionary<string, object> percentages = ReadDictionary(traitDocument, "traitPercentages") ?? new Dictionary<string, object>();

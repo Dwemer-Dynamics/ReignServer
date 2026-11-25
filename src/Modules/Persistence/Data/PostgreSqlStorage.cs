@@ -218,12 +218,12 @@ RETURNING (xmax = 0) AS inserted;", connection, transaction))
         }
 
         internal static NpgsqlConnection TryOpenRegisteredCampaignConnection(string campaignId,
-            bool trackCampaignMutations = false, bool initializeInfrastructure = true)
+            bool trackCampaignMutations = false, bool initializeInfrastructure = true, bool allowEditorRecoveryWitness = false)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
             if (!string.Equals(campaignId, normalizedCampaignId, StringComparison.Ordinal)) return null;
-            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId);
+            PersistenceService.RequireSaveSyncCampaignAvailable(normalizedCampaignId, allowEditorRecoveryWitness);
             if (initializeInfrastructure) EnsureInfrastructure();
             else if (!System.Threading.Volatile.Read(ref InfrastructureReady)) return null;
 

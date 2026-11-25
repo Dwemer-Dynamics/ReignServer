@@ -77,7 +77,7 @@ namespace ReignBetaServer
             routes.Post("/memory/embeddings/retry-failed", request => DialogueService.SemanticMemoryRetryFailedApi(request.JsonBody));
             routes.Post("/conversation-scene/hourly-tick", request => DialogueService.ConversationSceneHourlyTickApi(request.JsonBody));
 #if !REIGN_EXCLUDE_VERIFICATION
-            routes.Post("/gossip/test", request => DialogueService.PersonalGossipTestApi(request.JsonBody));
+            routes.Post("/gossip/test", request => DialogueService.PersonalGossipTestApiWithCampaignGate(request.JsonBody)).WithoutCampaignGate();
 #endif
             routes.Post("/gossip/tick", request => DialogueService.PersonalGossipTickApi(request.JsonBody));
             routes.PostPrefix("/communications/", StringComparison.Ordinal, request => DialogueService.CommunicationApi(request.Path.Substring("/communications/".Length), request.JsonBody));

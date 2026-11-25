@@ -506,6 +506,7 @@ namespace ReignBetaServer
         {
             string directory = Path.GetDirectoryName(path);
             string serialized = Json.Serialize(value);
+            if (CharactersService.TryWriteEditorRevisionFile(path, () => Encoding.UTF8.GetBytes(serialized))) return;
             for (int attempt = 0; ; attempt++)
             {
                 Directory.CreateDirectory(directory);
@@ -591,7 +592,13 @@ namespace ReignBetaServer
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 string line = Json.Serialize(row ?? new Dictionary<string, object>()) + Environment.NewLine;
                 if (IsDialogueHistoryPath(path)) AppendDialogueHistoryLineLocked(path, line, durable: false);
-                else File.AppendAllText(path, line, Encoding.UTF8);
+                else
+                {
+                    // FileShare is cooperative on Linux. The index cannot prove
+                    // that an append left the previously validated prefix intact.
+                    StrictJsonlHistoryIndex.InvalidateLocked(path);
+                    File.AppendAllText(path, line, Encoding.UTF8);
+                }
             }
             PersistenceService.MarkSaveSyncActiveStateDirtyForPath(path);
         }

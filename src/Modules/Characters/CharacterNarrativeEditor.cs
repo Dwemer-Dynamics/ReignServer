@@ -252,27 +252,27 @@ namespace ReignBetaServer
                 != CanonicalJson(after.GetValueOrDefault(id))).ToHashSet(StringComparer.Ordinal);
         }
 
-        private static void ReconcileEditedNarrative(string campaign, string hero, HashSet<string> editedItems = null)
+        private static void ReconcileEditedNarrative(string campaign, string hero, HashSet<string> editedItems = null,
+            ReignDbConnection connection = null)
         {
             var basis = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "narrative.json"));
             if (!NarrativeDocumentReady(basis)) return;
             var items = ReadDictionaryList(basis, "items");
-            using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+            using var ownedConnection = connection == null ? ReignDatabase.OpenCampaignConnection(campaign) : null;
+            connection ??= ownedConnection;
+            if (editedItems == null || editedItems.Count > 0)
             {
-                if (editedItems == null || editedItems.Count > 0)
+                foreach (var row in CharactersStore.SelectDynamicCharacteristics3(connection, TestDict("hero", hero)))
                 {
-                    foreach (var row in CharactersStore.SelectDynamicCharacteristics3(connection, TestDict("hero", hero)))
-                    {
-                        var change = ReadDictionary(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "narrativeDevelopment");
-                        string itemId = ReadString(change, "itemId", "");
-                        if (editedItems != null && !editedItems.Contains(itemId)) continue;
-                        var item = items.FirstOrDefault(x => ReadString(x, "id", "") == itemId);
-                        if (item != null && ReadString(change, "baseItemFingerprint", "") == NarrativeItemFingerprint(item)) continue;
-                        CharactersStore.UpdateDynamicCharacteristics4(connection, TestDict("id", ReadString(row, "characteristic_id", "")));
-                    }
+                    var change = ReadDictionary(TryParseJsonObject(ReadString(row, "payload_json", "{}")), "narrativeDevelopment");
+                    string itemId = ReadString(change, "itemId", "");
+                    if (editedItems != null && !editedItems.Contains(itemId)) continue;
+                    var item = items.FirstOrDefault(x => ReadString(x, "id", "") == itemId);
+                    if (item != null && ReadString(change, "baseItemFingerprint", "") == NarrativeItemFingerprint(item)) continue;
+                    CharactersStore.UpdateDynamicCharacteristics4(connection, TestDict("id", ReadString(row, "characteristic_id", "")));
                 }
-                ProjectDynamicCharacteristicsFile(campaign, hero, connection);
             }
+            ProjectDynamicCharacteristicsFile(campaign, hero, connection);
             var stack = new Dictionary<string, object> { ["narrative"] = basis,
                 ["dynamicCharacteristics"] = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "dynamic_characteristics.json")),
                 ["background"] = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "background.json")) };
