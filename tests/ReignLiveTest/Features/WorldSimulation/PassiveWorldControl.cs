@@ -45,7 +45,7 @@ namespace ReignLiveTest
                 native.TryGetValue("snapshotReady", out object snapshot) && snapshot is bool ready ? ready : (bool?)null,
                 native.TryGetValue("mutationInFlight", out object mutation) && mutation is bool active ? active : (bool?)null,
                 Count("pendingReceipts"), Count("dueNativeRewards"), Count("dueNativePersonalTravel"),
-                Count("dueNativeMeetingRelease"));
+                Count("dueNativeMeetingRelease"), Count("dueNativeWeddingAttendanceRelease"));
         }
         private static bool _observeGovernmentNewsForPassiveWorldControl;
         private static string _checkpointPeriodicPollToken;
