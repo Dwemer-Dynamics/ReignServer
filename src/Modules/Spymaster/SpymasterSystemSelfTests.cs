@@ -488,6 +488,13 @@ namespace ReignBetaServer
                     "An unversioned client gets an explicit pause and no active rows or effects, while the exact typed tick still admits the legacy assignment.",
                     typedTickResponse);
 
+                var arrestEvidence = new Dictionary<string, object>
+                {
+                    ["schema"] = "reign-arrest-evidence-request-v2", ["campaignId"] = activationCampaign,
+                    ["timelineId"] = activationTimeline, ["accusedHeroId"] = activationAgent,
+                    ["chargeCategory"] = "espionage"
+                };
+                var hiddenArrestResult = WorldSimulationService.ArrestEvidenceEvaluateApi(arrestEvidence);
                 var receipt = SpymasterAgentExposeApi(exposure);
                 var retry = new Dictionary<string, object>(exposure) { ["worldDay"] = 15d, ["reason"] = "fixture_retry" };
                 var replay = SpymasterAgentExposeApi(retry);
@@ -512,6 +519,45 @@ namespace ReignBetaServer
                     && ReadDouble(terminal, "exposedDay", -1d) == 14d,
                     "A real legacy SQL assignment gives the same exact exposure receipt on retry, stays exposed on the next hostile tick and retains its original exposure day.",
                     nextTick);
+
+                var typedArrestResult = WorldSimulationService.ArrestEvidenceEvaluateApi(arrestEvidence);
+                var evidence = ReadDictionaryList(typedArrestResult, "evidence").SingleOrDefault();
+                var legacyRequest = new Dictionary<string, object>(arrestEvidence);
+                legacyRequest.Remove("schema");
+                var legacyArrestResult = WorldSimulationService.ArrestEvidenceEvaluateApi(legacyRequest);
+                add("arrest_evidence_v2_requires_disclosed_exact_agent",
+                    ReadBool(hiddenArrestResult, "ok", false) && !ReadBool(hiddenArrestResult, "causeEstablished", true)
+                    && ReadDictionaryList(hiddenArrestResult, "evidence").Count == 0
+                    && ReadBool(typedArrestResult, "causeEstablished", false)
+                    && ReadString(typedArrestResult, "schema", "") == "reign-arrest-evidence-response-v2"
+                    && ReadString(typedArrestResult, "campaignId", "") == activationCampaign
+                    && ReadString(typedArrestResult, "timelineId", "") == activationTimeline
+                    && ReadString(typedArrestResult, "chargeCategory", "") == "espionage"
+                    && ReadString(typedArrestResult, "accusedHeroId", "") == activationAgent
+                    && ReadString(evidence, "kind", "") == "foreign_agent_exposure"
+                    && ReadString(evidence, "subjectRole", "") == "agent"
+                    && ReadString(evidence, "subjectHeroId", "") == activationAgent
+                    && ReadString(evidence, "evidenceId", "").StartsWith("foreign_agent:" + activationAgent + ":", StringComparison.Ordinal)
+                    && ReadBool(legacyArrestResult, "causeEstablished", false)
+                    && !legacyArrestResult.ContainsKey("schema") && !legacyArrestResult.ContainsKey("evidence")
+                    && ReadStringList(legacyArrestResult, "evidenceIds").SequenceEqual(ReadStringList(typedArrestResult, "evidenceIds")),
+                    "The same scoped SQL assignment supplies typed cause only after exposure and preserves legacy caller fields.", null);
+                foreach (var change in new[] { (Field: "timelineId", Value: activationTimeline + "_other"),
+                    (Field: "accusedHeroId", Value: activationAgent + "_other"), (Field: "chargeCategory", Value: "murder") })
+                {
+                    var result = WorldSimulationService.ArrestEvidenceEvaluateApi(
+                        new Dictionary<string, object>(arrestEvidence) { [change.Field] = change.Value });
+                    add("arrest_evidence_v2_rejects_" + change.Field,
+                        ReadBool(result, "ok", false) && !ReadBool(result, "causeEstablished", true)
+                        && ReadDictionaryList(result, "evidence").Count == 0
+                        && ReadString(result, change.Field, "") == change.Value,
+                        "Another timeline, actor or charge cannot consume the exposed agent record.", null);
+                }
+                var malformedArrestRequest = WorldSimulationService.ArrestEvidenceEvaluateApi(
+                    new Dictionary<string, object>(arrestEvidence) { ["accusedHeroId"] = activationAgent + "\n" });
+                add("arrest_evidence_v2_rejects_nonexact_identity",
+                    !ReadBool(malformedArrestRequest, "ok", true),
+                    "Versioned scope rejects whitespace variants instead of silently normalizing them.", null);
             }
             finally
             {

@@ -308,9 +308,12 @@ namespace ReignBeta.Shared.Characters
         public bool NeedsHold(string heroId, double day) => NpcLivesPolicy.Finite(day) && (heroId == IssuerId || heroId == TargetId)
             && ((heroId == IssuerId && (Status == "agreed" || Status == "dispatched" || Status == "travelling"))
                 || (Status == "meeting" && ReleaseDay.HasValue && day < ReleaseDay.Value));
+        public bool CanComplete(double day) => Status == "meeting" && ReleaseDay.HasValue
+            && NpcLivesPolicy.Finite(day) && !(day < ReleaseDay.Value);
+
         public bool Complete(double day)
         {
-            if (Status != "meeting" || !ReleaseDay.HasValue || !NpcLivesPolicy.Finite(day) || day < ReleaseDay.Value) return false;
+            if (!CanComplete(day)) return false;
             Status = "completed"; return true;
         }
     }

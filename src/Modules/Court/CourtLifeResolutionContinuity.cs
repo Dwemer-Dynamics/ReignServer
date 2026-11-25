@@ -6,6 +6,27 @@ namespace ReignBetaServer
 {
     internal static partial class CourtService
     {
+        private const string DirectCourtPrisonerReceiptSchema = "reign-direct-court-prisoner-v1";
+
+        private static bool ClaimsDirectCourtPrisonerReceipt(Dictionary<string, object> receipt)
+        {
+            // A historical release used releasedHeroId, isPrisoner, ransomGold and optionally payment.
+            // The remaining custody fields require a typed receipt even when its schema was stripped.
+            return receipt != null && (ReadString(receipt, "schema", "").StartsWith("reign-direct-court-prisoner-", StringComparison.Ordinal)
+                || receipt.ContainsKey("originalCaptorId") || receipt.ContainsKey("originalRosterCountBefore")
+                || receipt.ContainsKey("originalRosterCountAfter") || receipt.ContainsKey("hasCaptor") || receipt.ContainsKey("ransom"));
+        }
+
+        private static string CourtReceiptIdentity(Dictionary<string, object> source, string key)
+            => source != null && source.TryGetValue(key, out object value) && value is string id
+                && !string.IsNullOrWhiteSpace(id) && id == id.Trim() ? id : "";
+
+        private static long CourtReceiptInteger(Dictionary<string, object> source, string key)
+        {
+            if (source == null || !source.TryGetValue(key, out object value)) return -1;
+            return value switch { int integer => integer, long wide => wide, _ => -1 };
+        }
+
         // Keep native execution evidence apart from LLM-authored plans and dialogue.
         // This existing timeline-scoped table participates in campaign Save Sync.
         private static void StoreCourtLifeResolutionContinuity(string campaign, string timeline, Dictionary<string, object> payload)
@@ -38,6 +59,48 @@ namespace ReignBetaServer
                 ["outcome"] = outcome, ["completed"] = true, ["extortion"] = ReadBool(payload, "extortion", false),
                 ["summary"] = DialogueService.LimitText(ReadString(payload, "summary", "The court decision completed."), 700) };
             var receipt = ReadDictionary(payload, "nativeReceipt");
+            if (ClaimsDirectCourtPrisonerReceipt(receipt))
+            {
+                var foreign = ReadDictionary(payload, "foreign");
+                var player = ReadDictionary(payload, "player");
+                string matter = CourtReceiptIdentity(payload, "matterId");
+                string foreignKingdom = CourtReceiptIdentity(foreign, "kingdomId"), playerKingdom = CourtReceiptIdentity(player, "kingdomId");
+                string foreignLeader = CourtReceiptIdentity(foreign, "leaderHeroId"), playerLeader = CourtReceiptIdentity(player, "leaderHeroId");
+                string released = CourtReceiptIdentity(receipt, "releasedHeroId"), captor = CourtReceiptIdentity(receipt, "originalCaptorId");
+                long ransomGold = CourtReceiptInteger(receipt, "ransomGold");
+                if (!receipt.TryGetValue("schema", out object schema) || schema is not string receiptSchema
+                    || receiptSchema != DirectCourtPrisonerReceiptSchema
+                    || CourtReceiptInteger(payload, "continuityVersion") != 1
+                    || !payload.TryGetValue("effectsCommitted", out object committed) || committed is not true
+                    || CourtReceiptIdentity(payload, "outcome") != "accept" || matter.Length == 0
+                    || CourtReceiptIdentity(payload, "receiptId") != matter + "_resolution"
+                    || CourtReceiptIdentity(payload, "campaignId").Length == 0 || CourtReceiptIdentity(payload, "timelineId").Length == 0
+                    || foreignKingdom.Length == 0 || playerKingdom.Length == 0
+                    || foreignKingdom.Equals(playerKingdom, StringComparison.OrdinalIgnoreCase)
+                    || foreignLeader.Length == 0 || playerLeader.Length == 0 || foreignLeader == playerLeader
+                    || !foreign.TryGetValue("isPlayerKingdom", out object foreignRole) || foreignRole is not false
+                    || !player.TryGetValue("isPlayerKingdom", out object playerRole) || playerRole is not true
+                    || released.Length == 0 || receipt.ContainsKey("type") || receipt.ContainsKey("gold")
+                    || !((captor.StartsWith("mobile:", StringComparison.Ordinal) && captor.Length > "mobile:".Length)
+                        || (captor.StartsWith("settlement:", StringComparison.Ordinal) && captor.Length > "settlement:".Length))
+                    || CourtReceiptInteger(receipt, "originalRosterCountBefore") <= 0 || CourtReceiptInteger(receipt, "originalRosterCountAfter") != 0
+                    || !receipt.TryGetValue("isPrisoner", out object prisonerValue) || prisonerValue is not false
+                    || !receipt.TryGetValue("hasCaptor", out object captorValue) || captorValue is not false
+                    || !receipt.TryGetValue("ransom", out object ransomValue) || ransomValue is not bool ransom
+                    || ransomGold < 0 || ransomGold > 1000000) return null;
+                var ransomPayment = ReadDictionary(receipt, "payment");
+                if (ransom)
+                {
+                    if (CourtReceiptInteger(ransomPayment, "gold") != ransomGold
+                        || CourtReceiptIdentity(ransomPayment, "payerId") != foreignLeader
+                        || CourtReceiptIdentity(ransomPayment, "recipientId") != playerLeader
+                        || CourtReceiptInteger(ransomPayment, "payerBefore") < 0 || CourtReceiptInteger(ransomPayment, "payerAfter") < 0
+                        || CourtReceiptInteger(ransomPayment, "recipientBefore") < 0 || CourtReceiptInteger(ransomPayment, "recipientAfter") < 0)
+                        return null;
+                }
+                else if (receipt.ContainsKey("payment") || ransomGold != 0) return null;
+                result["release"] = new Dictionary<string, object> { ["heroId"] = released, ["confirmed"] = true };
+            }
             if (ReadString(receipt, "type", "") == "DiplomacySignTradeAgreement")
             {
                 long days = ReadLong(ReadDictionary(receipt, "terms"), "durationDays", -1);
@@ -126,6 +189,101 @@ namespace ReignBetaServer
             add("native_trade_knowledge_is_persisted_once", tradePrompt.Contains("trade_agreement")
                 && tradePrompt.Contains("63") && tradePrompt.Contains("without asking for another authorization")
                 && tradePrompt.Split(new[] { "trade_resolution" }, StringSplitOptions.None).Length == 2);
+
+            var ransomReceipt = new Dictionary<string, object> { ["schema"] = DirectCourtPrisonerReceiptSchema,
+                ["releasedHeroId"] = "captive", ["originalCaptorId"] = "mobile:players_party",
+                ["originalRosterCountBefore"] = 1, ["originalRosterCountAfter"] = 0,
+                ["isPrisoner"] = false, ["hasCaptor"] = false, ["ransom"] = true, ["ransomGold"] = 2000, ["payment"] = receipt };
+            const string ransomTimeline = "court_ransom_admission";
+            var ransom = new Dictionary<string, object> { ["effectsCommitted"] = true, ["matterId"] = "ransom", ["receiptId"] = "ransom_resolution",
+                ["campaignId"] = campaign, ["timelineId"] = ransomTimeline, ["worldDay"] = 1d, ["continuityVersion"] = 1,
+                ["outcome"] = "accept", ["nativeReceipt"] = ransomReceipt,
+                ["witnessHeroIds"] = new[] { "ransom_envoy" },
+                ["foreign"] = TestDict("kingdomId", "ransom_foreign", "leaderHeroId", "payer", "isPlayerKingdom", false),
+                ["player"] = TestDict("kingdomId", "ransom_player", "leaderHeroId", "king", "isPlayerKingdom", true) };
+            var ransomFacts = NormalizeCourtLifeResolutionFacts(ransom);
+            add("verified_court_ransom_preserves_both_effects", ReadBool(ReadDictionary(ransomFacts, "payment"), "confirmed", false)
+                && ReadString(ReadDictionary(ransomFacts, "release"), "heroId", "") == "captive");
+            ransomReceipt["originalRosterCountAfter"] = 1;
+            add("court_ransom_flag_only_release_is_rejected", NormalizeCourtLifeResolutionFacts(ransom) == null);
+            ransomReceipt["originalRosterCountAfter"] = 0;
+            receipt["recipientAfter"] = 1000;
+            add("court_ransom_partial_payment_is_rejected", NormalizeCourtLifeResolutionFacts(ransom) == null);
+            receipt["recipientAfter"] = 3000;
+            receipt["payerId"] = "different_payer";
+            add("court_ransom_wrong_named_payer_is_rejected", NormalizeCourtLifeResolutionFacts(ransom) == null);
+            receipt["payerId"] = "payer";
+            AppendCourtPrisonerReceiptAdmissionTests(results, campaign, ransomTimeline, ransom, ransomReceipt, receipt);
+            ransomReceipt["ransom"] = false;
+            ransomReceipt["ransomGold"] = 0;
+            ransomReceipt.Remove("payment");
+            var releaseFacts = NormalizeCourtLifeResolutionFacts(ransom);
+            add("verified_unpaid_court_release_omits_payment", ReadBool(ReadDictionary(releaseFacts, "release"), "confirmed", false)
+                && ReadDictionary(releaseFacts, "payment") == null);
+        }
+
+        private static void AppendCourtPrisonerReceiptAdmissionTests(List<Dictionary<string, object>> results, string campaign,
+            string timeline, Dictionary<string, object> payload, Dictionary<string, object> custody, Dictionary<string, object> payment)
+        {
+            void Add(string id, bool passed)
+                => results.Add(TestDict("ok", true, "passed", passed, "suite", "court_life_resolution",
+                    "caseId", id, "name", id, "durationMs", 0));
+            string matter = ReadString(payload, "matterId", "");
+            var scope = TestDict("campaign", campaign, "timeline", timeline);
+            int Pressure() => DiplomacyService.ReadPoliticalPressureValue(campaign, timeline, "ransom_foreign", "ransom_player");
+            int Pending()
+            {
+                using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                return CourtStore.SelectInternationalCourtQueue(connection, scope).Count;
+            }
+            string Witness() => BuildCourtLifeResolutionContinuityPrompt(campaign, "ransom_envoy", payload);
+            StoreInternationalQueueItem(campaign, timeline, matter, "prisoner", 0, 1d, TestDict("matterId", matter));
+            int before = Pressure();
+            bool initialPending = Pending() == 1;
+            bool RejectedWithoutWrites() => !ReadBool(InternationalCourtResolutionApi(payload), "ok", false)
+                && initialPending && Pending() == 1 && Pressure() == before && Witness() == "";
+
+            payload.Remove("continuityVersion");
+            bool missingRejected = RejectedWithoutWrites();
+            payload["continuityVersion"] = 0;
+            Add("typed_court_ransom_missing_or_zero_version_cannot_resolve", RejectedWithoutWrites() && missingRejected);
+            payload["continuityVersion"] = 2;
+            bool unsupportedRejected = RejectedWithoutWrites();
+            payload["continuityVersion"] = "1";
+            Add("typed_court_ransom_requires_exact_integer_version_one", RejectedWithoutWrites() && unsupportedRejected);
+            payload["continuityVersion"] = 1;
+            custody.Remove("schema");
+            custody["originalRosterCountAfter"] = 1;
+            bool strippedRejected = RejectedWithoutWrites();
+            payload.Remove("continuityVersion");
+            Add("schema_stripped_court_ransom_cannot_resolve_as_payment", RejectedWithoutWrites() && strippedRejected);
+            payload["continuityVersion"] = 1;
+            custody["schema"] = DirectCourtPrisonerReceiptSchema;
+            custody["originalRosterCountAfter"] = 0;
+            payload["receiptId"] = "another_matter_resolution";
+            Add("wrong_matter_typed_court_ransom_cannot_resolve", RejectedWithoutWrites());
+            payload["receiptId"] = matter + "_resolution";
+
+            var typed = InternationalCourtResolutionApi(payload);
+            int afterTyped = Pressure();
+            string typedWitness = Witness();
+            Add("valid_typed_court_ransom_resolves_with_custody_and_payment", ReadBool(typed, "ok", false) && Pending() == 0
+                && afterTyped == before + ReadInt(typed, "requestedDelta", 0) && afterTyped != before
+                && typedWitness.Contains("\"release\"") && typedWitness.Contains("\"payment\""));
+
+            const string legacyMatter = "historical_court_ransom";
+            var legacy = new Dictionary<string, object>(payload)
+            {
+                ["matterId"] = legacyMatter, ["receiptId"] = legacyMatter + "_resolution",
+                ["nativeReceipt"] = TestDict("releasedHeroId", "historical_captive", "isPrisoner", false, "ransomGold", 2000, "payment", payment)
+            };
+            StoreInternationalQueueItem(campaign, timeline, legacyMatter, "prisoner", 0, 1d, TestDict("matterId", legacyMatter));
+            bool legacyPending = Pending() == 1;
+            var historical = InternationalCourtResolutionApi(legacy);
+            int afterHistorical = Pressure();
+            Add("historical_untyped_court_ransom_remains_admitted", legacyPending && ReadBool(historical, "ok", false) && Pending() == 0
+                && afterHistorical == afterTyped + ReadInt(historical, "requestedDelta", 0) && afterHistorical != afterTyped
+                && Witness().Contains(legacyMatter + "_resolution"));
         }
     }
 }
