@@ -34,7 +34,8 @@ SET native_sync_status='obsolete',updated_ts=$ts WHERE hero_id=$hero;", paramete
         internal static void UpdateCharacterEditorNativeCommands(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             ReignDatabase.ExecuteSql(connection, @"UPDATE character_editor_native_commands
-SET status='completed',resolved_ts=$ts,result_json=$result WHERE command_id=$id;", parameters, transaction);
+SET status='completed',resolved_ts=$ts,result_json=$result
+WHERE command_id=$id AND status IN ('pending','claimed');", parameters, transaction);
         }
 
         internal static void UpdateNotableMbtiProfiles2(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
