@@ -116,6 +116,10 @@ namespace ReignBetaServer
             => generation == Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
 
         internal static Dictionary<string, object> PrewarmTownNotableProfiles(Dictionary<string, object> payload)
+            => PrewarmTownNotableProfiles(payload, Program.ProviderTestGuard);
+
+        private static Dictionary<string, object> PrewarmTownNotableProfiles(Dictionary<string, object> payload,
+            NativeProviderTestGuard providerGuard)
         {
             string campaign = ReadString(payload, "campaignId", "");
             if (string.IsNullOrWhiteSpace(campaign)) return TestDict("ok", false, "error", "campaignId is required.");
@@ -130,6 +134,10 @@ namespace ReignBetaServer
             var heroes = ReadDictionaryList(payload, "heroes");
             if (string.IsNullOrWhiteSpace(town) || ReadString(payload, "settlementType", "") != "town" || heroes.Count > 128)
                 return TestDict("ok", false, "error", "One town and at most 128 notable profiles are required.");
+            // Startup can enter a town before the disposable checkpoint is armed.
+            // Defer optional prewarming for the operator-enrolled campaign.
+            if (providerGuard.ShouldDeferTownNotablePrewarm(campaign))
+                return TestDict("ok", true, "result", "provider_free_deferred", "queued", 0);
             var settings = SettingsService.LoadSettings();
             if (!ReadBool(settings, "constructCharactersWithLlm", true))
                 return TestDict("ok", true, "result", "construction_disabled", "queued", 0);
@@ -167,8 +175,12 @@ namespace ReignBetaServer
                 : CharactersService.ConstructCharacterFiles(campaign, heroId, hero, true, true, TownNotableProfileSource));
 
         private static bool RunTownProfileWorkCore(TownProfileWork work,
-            Func<string, string, Dictionary<string, object>, Dictionary<string, object>> construct)
+            Func<string, string, Dictionary<string, object>, Dictionary<string, object>> construct,
+            NativeProviderTestGuard providerGuard = null)
         {
+            if ((providerGuard ?? Program.ProviderTestGuard).ShouldDeferTownNotablePrewarm(work.Campaign))
+                return true; // Release this optional job without imposing a failure cooldown.
+
             // The body stays synchronous on this worker. HTTP-equivalent leases
             // release around provider/hero-lock waits and fence every publication
             // after restore, import or deletion, including authoring checkpoints.

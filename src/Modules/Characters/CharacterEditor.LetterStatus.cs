@@ -85,11 +85,10 @@ namespace ReignBetaServer
         }
 
         private static List<EditorLetterStatusEdit> ApplyEditorLetterStatusEdits(ReignDbConnection connection, string hero,
-            List<EditorLetterStatusEdit> edits, List<Dictionary<string, object>> issues, string conflictReason)
+            List<EditorLetterStatusEdit> edits, List<Dictionary<string, object>> issues, string conflictReason, ReignDbTransaction transaction)
         {
             var applied = new List<EditorLetterStatusEdit>();
             if (edits.Count == 0) return applied;
-            using var transaction = connection.BeginTransaction();
             foreach (var edit in edits.OrderBy(item => item.Id, StringComparer.Ordinal))
             {
                 if (string.Equals(edit.Expected, edit.Value, StringComparison.Ordinal)) continue;
@@ -102,7 +101,6 @@ namespace ReignBetaServer
                 else
                     issues.Add(EditorLetterStatusIssue(edit.Id, conflictReason));
             }
-            transaction.Commit();
             return applied;
         }
 

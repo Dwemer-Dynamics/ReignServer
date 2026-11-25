@@ -504,7 +504,11 @@ namespace ReignBetaServer
             lock (FileLock)
             {
                 if (!CampaignFileService.IsDialogueHistoryPath(path))
+                {
+                    if (StrictJsonlHistoryIndex.TryReadPhysicalTail(path, count, out var indexed))
+                        return indexed;
                     return ReadJsonLineRowsLocked(path).TakeLast(count).ToList();
+                }
 
                 using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                 return ReadTolerantDialogueHistoryTail(stream, count);
@@ -568,9 +572,10 @@ namespace ReignBetaServer
 
             lock (FileLock)
             {
-                // Both passes share the managed writer lock and the same file
-                // handle. Only the selected rows are decoded in the second pass.
-                using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1);
+                if (StrictJsonlHistoryIndex.TryReadSocialEventPrompt(stream, path, limit, out var indexed))
+                    return indexed;
+                // The legacy two-pass reader also stays on this file handle.
                 return DialogueService.BuildIndexedSocialEventPromptTranscript(
                     selected => ReadSocialEventPromptRowsLocked(stream, selected), limit);
             }
@@ -602,6 +607,8 @@ namespace ReignBetaServer
             ExceptionDispatchInfo classificationFailure = null;
             lock (FileLock)
             {
+                if (StrictJsonlHistoryIndex.TryReadRecentMemoryRows(path, limit, out var indexed))
+                    return indexed;
                 foreach (var row in ReadJsonLineRowsLocked(path))
                 {
                     long reverseOrdinal = -ordinal++;

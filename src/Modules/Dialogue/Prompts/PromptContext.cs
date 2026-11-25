@@ -386,62 +386,85 @@ namespace ReignBetaServer
                     .OrderBy(row => ReadLong(row, "ts", 0)), configuredLimit);
         }
 
-        private readonly record struct SocialEventPromptIndexRow(long Timestamp, long Ordinal, string Exchange, bool Unbound);
+        internal readonly record struct SocialEventPromptWindowRow<T>(T Position, int Rank, bool Unbound);
 
-        internal static List<Dictionary<string, object>> BuildIndexedSocialEventPromptTranscript(
-            Func<HashSet<long>, IEnumerable<(long Ordinal, Dictionary<string, object> Row)>> readRows, int configuredLimit)
+        internal static int SocialEventPromptLimit(int configuredLimit) => Math.Max(2, Math.Min(100, configuredLimit));
+
+        internal sealed class SocialEventPromptSelector<T>
         {
-            int limit = Math.Max(2, Math.Min(100, configuredLimit));
-            var winners = new Dictionary<string, SocialEventPromptIndexRow>(StringComparer.OrdinalIgnoreCase);
-            var ordered = new List<SocialEventPromptIndexRow>();
+            private readonly record struct Entry(long Timestamp, long Ordinal, string Exchange, bool Unbound, T Position);
+            private readonly Dictionary<string, Entry> winners = new(StringComparer.OrdinalIgnoreCase);
+            private readonly List<Entry> ordered = new();
 
-            // Read and parse every row before selecting the window. Only compact
-            // metadata survives this pass, including the earliest chronological row
-            // for each identity and physical order as the timestamp tie-break.
-            foreach (var (ordinal, row) in readRows(null))
+            internal void Add(long ordinal, Dictionary<string, object> row, T position)
             {
-                if (row == null || string.IsNullOrWhiteSpace(ReadString(row, "text", ""))) continue;
+                if (row == null || string.IsNullOrWhiteSpace(ReadString(row, "text", ""))) return;
                 string identity = PromptTranscriptIdentity(row);
                 long timestamp = ReadLong(row, "ts", 0);
                 if (identity.Length > 0 && winners.TryGetValue(identity, out var previous)
                     && (timestamp > previous.Timestamp || (timestamp == previous.Timestamp && ordinal > previous.Ordinal)))
-                    continue;
+                    return;
 
-                var entry = new SocialEventPromptIndexRow(timestamp, ordinal,
-                    ReadFirstString(row, "exchangeId", "exchange_id", "sceneTurnId"), identity.Length == 0);
+                var entry = new Entry(timestamp, ordinal,
+                    ReadFirstString(row, "exchangeId", "exchange_id", "sceneTurnId"), identity.Length == 0, position);
                 if (entry.Unbound) ordered.Add(entry);
                 else winners[identity] = entry;
             }
 
-            ordered.AddRange(winners.Values);
-            winners.Clear();
-            if (ordered.Count == 0) return new List<Dictionary<string, object>>();
-            ordered.Sort((left, right) =>
+            // Complete the selection after the strict physical scan. Keep the
+            // absolute chronological rank used by generated prompt-local IDs.
+            internal SocialEventPromptWindowRow<T>[] Complete(int limit, int maximumRows = int.MaxValue)
             {
-                int timestampOrder = left.Timestamp.CompareTo(right.Timestamp);
-                return timestampOrder == 0 ? left.Ordinal.CompareTo(right.Ordinal) : timestampOrder;
-            });
+                ordered.AddRange(winners.Values);
+                winners.Clear();
+                if (ordered.Count == 0) return Array.Empty<SocialEventPromptWindowRow<T>>();
+                ordered.Sort((left, right) =>
+                {
+                    int timestampOrder = left.Timestamp.CompareTo(right.Timestamp);
+                    return timestampOrder == 0 ? left.Ordinal.CompareTo(right.Ordinal) : timestampOrder;
+                });
 
-            int start = Math.Max(0, ordered.Count - limit);
-            string boundaryExchange = ordered[start].Exchange;
-            if (!string.IsNullOrWhiteSpace(boundaryExchange))
-            {
-                while (start > 0 && string.Equals(ordered[start - 1].Exchange, boundaryExchange, StringComparison.OrdinalIgnoreCase))
-                    start--;
+                int start = Math.Max(0, ordered.Count - limit);
+                string boundaryExchange = ordered[start].Exchange;
+                if (!string.IsNullOrWhiteSpace(boundaryExchange))
+                {
+                    while (start > 0 && string.Equals(ordered[start - 1].Exchange, boundaryExchange, StringComparison.OrdinalIgnoreCase))
+                        start--;
+                }
+
+                int count = ordered.Count - start;
+                if (count > maximumRows) return null;
+                var result = new SocialEventPromptWindowRow<T>[count];
+                for (int rank = start; rank < ordered.Count; rank++)
+                {
+                    var entry = ordered[rank];
+                    result[rank - start] = new SocialEventPromptWindowRow<T>(entry.Position, rank, entry.Unbound);
+                }
+                return result;
             }
+        }
 
-            var slots = new Dictionary<long, int>(ordered.Count - start);
-            for (int rank = start; rank < ordered.Count; rank++)
-                slots.Add(ordered[rank].Ordinal, rank);
-            var result = new Dictionary<string, object>[slots.Count];
+        internal static List<Dictionary<string, object>> BuildIndexedSocialEventPromptTranscript(
+            Func<HashSet<long>, IEnumerable<(long Ordinal, Dictionary<string, object> Row)>> readRows, int configuredLimit)
+        {
+            var selector = new SocialEventPromptSelector<long>();
+            foreach (var (ordinal, row) in readRows(null))
+                selector.Add(ordinal, row, ordinal);
+            var window = selector.Complete(SocialEventPromptLimit(configuredLimit));
+            if (window.Length == 0) return new List<Dictionary<string, object>>();
+
+            var slots = new Dictionary<long, int>(window.Length);
+            for (int i = 0; i < window.Length; i++)
+                slots.Add(window[i].Position, i);
+            var result = new Dictionary<string, object>[window.Length];
             foreach (var (ordinal, row) in readRows(slots.Keys.ToHashSet()))
             {
-                int rank = slots[ordinal];
+                int slot = slots[ordinal];
                 if (row == null)
                     throw new InvalidOperationException("Event transcript changed during the indexed read.");
-                if (ordered[rank].Unbound)
-                    BindUnidentifiedPromptTranscriptRow(row, rank);
-                result[rank - start] = row;
+                if (window[slot].Unbound)
+                    BindUnidentifiedPromptTranscriptRow(row, window[slot].Rank);
+                result[slot] = row;
             }
 
             if (result.Any(row => row == null))
@@ -449,7 +472,7 @@ namespace ReignBetaServer
             return result.ToList();
         }
 
-        private static void BindUnidentifiedPromptTranscriptRow(Dictionary<string, object> row, int rank)
+        internal static void BindUnidentifiedPromptTranscriptRow(Dictionary<string, object> row, int rank)
         {
             if (ReadFirstString(row, "id", "turn_id", "turnId").Length == 0)
                 row["promptLocalSourceId"] = "unbound_" + rank + "_" + PromptHash(ReadString(row, "text", "")).Substring(0, 8);

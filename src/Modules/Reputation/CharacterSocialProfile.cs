@@ -108,22 +108,27 @@ namespace ReignBetaServer
         }
 
         internal static Dictionary<string, object> CharacterSocialStandingProjection(
-            ReignDbConnection connection, string campaignId, string subjectId)
+            ReignDbConnection connection, string campaignId, string subjectId, bool refresh = true)
         {
-            EnsureSocialReputationSchema(connection);
+            if (refresh) EnsureSocialReputationSchema(connection);
             string timelineId = ResolveCharacterSocialTimeline(connection);
             double worldDay = ResolveCharacterSocialWorldDay(connection, campaignId, timelineId);
-            if (worldDay > 0d) ExpireSocialRumors(connection, campaignId, timelineId, worldDay);
-            bool popularityChanged = RecomputeCourtPopularityReputations(connection, campaignId, timelineId,
-                subjectId, worldDay, "character_profile|" + subjectId + "|"
-                    + Math.Floor(worldDay).ToString(CultureInfo.InvariantCulture));
-            if (popularityChanged)
+            if (refresh)
             {
-                ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
-                if (!campaignId.StartsWith("__", StringComparison.Ordinal))
-                    SchedulePendingReputationReasonJobs(campaignId);
+                if (worldDay > 0d) ExpireSocialRumors(connection, campaignId, timelineId, worldDay);
+                bool popularityChanged = RecomputeCourtPopularityReputations(connection, campaignId, timelineId,
+                    subjectId, worldDay, "character_profile|" + subjectId + "|"
+                        + Math.Floor(worldDay).ToString(CultureInfo.InvariantCulture));
+                if (popularityChanged)
+                {
+                    ReconcileSocialRelationshipsForSubjects(connection, campaignId, timelineId, new[] { subjectId }, worldDay);
+                    if (!campaignId.StartsWith("__", StringComparison.Ordinal))
+                        SchedulePendingReputationReasonJobs(campaignId);
+                }
             }
-            Dictionary<string, object> catalog = ReadActiveSocialCatalog(connection);
+            Dictionary<string, object> catalog = refresh
+                ? ReadActiveSocialCatalog(connection)
+                : ReadSocialCatalogProjection(SocialCatalogPath);
             Dictionary<string, Dictionary<string, object>> tags = ReadDictionaryList(catalog, "tags")
                 .Where(tag => !string.IsNullOrWhiteSpace(ReadString(tag, "id", "")))
                 .ToDictionary(tag => ReadString(tag, "id", ""), tag => tag, StringComparer.OrdinalIgnoreCase);

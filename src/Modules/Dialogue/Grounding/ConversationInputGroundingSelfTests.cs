@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 
@@ -654,7 +655,156 @@ namespace ReignBetaServer
             }
             finally { ReignPostgreSqlStorage.DropCampaign(campaign); }
             RunRecoveredOriginalBranchAssertions(Check);
+            RunAuthenticatedWindowAssertions(Check);
             return results;
+        }
+
+        private static void RunAuthenticatedWindowAssertions(Action<string, bool, object> check)
+        {
+            string campaign = "input_grounding_window_" + Guid.NewGuid().ToString("N");
+            const string eventId = "authenticated-window";
+            string session = "social_event_" + SafeMemoryKey(eventId);
+            string path = SocialEventTranscriptFile(campaign, eventId);
+            string partyPath = PartyChatSessionTranscriptFile(campaign, TestDict("conversationSessionId", session));
+            var payload = TestDict("campaignId", campaign, "eventId", eventId, "conversationSessionId", session,
+                "playerHeroStringId", "player", "timelineId", "main", "worldDay", 20d, "limit", 3);
+            var priorObserver = StrictJsonlHistoryIndex.SourceBytesReadForTests;
+            var priorCulture = CultureInfo.CurrentCulture;
+            long bytesRead = 0;
+            CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+            StrictJsonlHistoryIndex.SourceBytesReadForTests = count => bytesRead += count;
+            try
+            {
+                ConversationStartApi(TestDict("campaignId", campaign, "sessionId", session,
+                    "npcId", "npc", "playerId", "player", "timelineId", "main", "worldDay", 1d, "ts", 1L));
+                void Insert(string id, string exchange, string speaker, string text, int order, long timestamp)
+                {
+                    using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+                    InsertConversationTurn(connection, id, session, eventId, order, exchange,
+                        "npc", "npc", speaker, text, "in_person", 1d, timestamp, "", new() { "npc", "player" }, payload);
+                }
+
+                Insert("auth_initial", "initial", "Mira", "I entered the accepted words in the journal.", 0, 30L);
+                var prefix = Enumerable.Range(0, 1500).Select(i =>
+                    TestDict("id", "old-" + i, "role", "npc", "text", "Old line " + i + new string('x', 90), "ts", 1));
+                var tail = new[]
+                {
+                    TestDict("id", "first-old", "role", "npc", "text", "Shared exact wording", "turnId", "authority-x", "ts", 7),
+                    TestDict("id", "second-old", "role", "npc", "text", "Shared exact wording", "exchangeId", "legacy-y", "ts", 8),
+                    TestDict("id", "third-old", "role", "npc", "text", "This follows the old exchange", "eventId", "legacy-y", "ts", 9),
+                    TestDict("id", "alternate-branch", "role", "npc", "text", "Alternate branch only", "timelineId", "side", "ts", 50),
+                    TestDict("id", "future-day", "role", "npc", "text", "A future day only", "worldDay", 25d, "ts", 55),
+                };
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllLines(path, prefix.Concat(tail).Select(Json.Serialize).Append("null"));
+                long fileBytes = new FileInfo(path).Length;
+                List<Dictionary<string, object>> Read(Dictionary<string, object> request, int limit,
+                    Func<Dictionary<string, object>, bool> filter = null) =>
+                    ReadOriginalConversationHistoryFromFile(campaign, request, "", session, limit, path, filter);
+                bool MatchesOriginal(Dictionary<string, object> request, int limit, List<Dictionary<string, object>> result,
+                    Func<Dictionary<string, object>, bool> filter = null)
+                {
+                    var originals = Program.ReadJsonLinesFromPath(path);
+                    if (filter != null) originals = originals.Where(filter).ToList();
+                    return Json.Serialize(result) == Json.Serialize(ReadOriginalConversationHistory(
+                        campaign, request, "", session, limit, originals));
+                }
+
+                var cold = Read(payload, 3);
+                long coldBytes = bytesRead;
+                bool initial = cold.Count == 3 && ReadString(cold[0], "id", "") == "first-old"
+                    && ReadString(cold[1], "id", "") == "third-old" && MatchesOriginal(payload, 3, cold);
+                cold[0]["text"] = "caller mutation";
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                    ReignDatabase.ExecuteSql(connection, "UPDATE conversation_turns SET speaker_name=$name WHERE turn_id=$id;",
+                        TestDict("name", "Mira the Younger", "id", "auth_initial"));
+                bytesRead = 0;
+                var warm = Read(payload, 3);
+                long warmBytes = bytesRead;
+                check("authenticated_window_reuses_offsets_but_materializes_fresh_sql",
+                    initial && coldBytes >= fileBytes && warmBytes > 0 && warmBytes < fileBytes / 8
+                    && MatchesOriginal(payload, 3, warm) && ReadString(warm[0], "text", "") == "Shared exact wording"
+                    && ReadString(warm[^1], "speaker", "") == "Mira the Younger",
+                    TestDict("fileBytes", fileBytes, "coldBytesRead", coldBytes, "warmBytesRead", warmBytes));
+
+                Insert("auth_replacement", "authority-x", "Mira", "I recorded a second accepted statement.", 1, 31L);
+                bytesRead = 0;
+                var changedAuthority = Read(payload, 3);
+                check("authenticated_window_fresh_authority_changes_legacy_duplicate_membership",
+                    bytesRead >= fileBytes && MatchesOriginal(payload, 3, changedAuthority)
+                    && changedAuthority.Count == 3 && ReadString(changedAuthority[0], "id", "") == "second-old"
+                    && changedAuthority.All(row => ReadString(row, "id", "") != "first-old" && ReadString(row, "id", "") != "third-old"),
+                    null);
+
+                var side = CloneDictionary(payload); side["timelineId"] = "side";
+                var later = CloneDictionary(payload); later["worldDay"] = 30d;
+                bytesRead = 0;
+                var otherTimeline = Read(side, 3);
+                bool timelineScoped = bytesRead >= fileBytes && MatchesOriginal(side, 3, otherTimeline)
+                    && otherTimeline.Any(row => ReadString(row, "id", "") == "alternate-branch");
+                bytesRead = 0;
+                var laterDay = Read(later, 3);
+                bool dayScoped = bytesRead >= fileBytes && MatchesOriginal(later, 3, laterDay)
+                    && laterDay.Any(row => ReadString(row, "id", "") == "future-day");
+                Read(payload, 3);
+                bytesRead = 0;
+                var otherPage = Read(payload, 2);
+                bool pageScoped = bytesRead >= fileBytes && MatchesOriginal(payload, 2, otherPage);
+                bool Filter(Dictionary<string, object> row) => ReadString(row, "id", "") != "second-old";
+                bytesRead = 0;
+                var filtered = Read(payload, 3, Filter);
+                bool filterScoped = bytesRead == 0 && MatchesOriginal(payload, 3, filtered, Filter)
+                    && filtered.Any(row => ReadString(row, "id", "") == "third-old");
+                check("authenticated_window_respects_timeline_day_limit_and_opaque_legacy_filter",
+                    timelineScoped && dayScoped && pageScoped && filterScoped, null);
+
+                bytesRead = 0;
+                var uncapped = Read(payload, 101);
+                check("authenticated_window_preserves_uncapped_page_fallback",
+                    bytesRead == 0 && uncapped.Count == 101 && MatchesOriginal(payload, 101, uncapped), null);
+
+                var social = SocialEventHistory(payload);
+                Directory.CreateDirectory(Path.GetDirectoryName(partyPath));
+                File.Copy(path, partyPath);
+                PartyChatHistory(payload);
+                bytesRead = 0;
+                var party = ReadDictionaryList(PartyChatHistory(payload), "lines");
+                check("authenticated_event_and_party_use_the_same_exact_legacy_selection",
+                    bytesRead > 0 && bytesRead < fileBytes / 8
+                    && ReadDictionaryList(social, "lines").Select(row => ReadString(row, "text", ""))
+                        .SequenceEqual(party.Select(row => ReadString(row, "text", "")))
+                    && party.Select(row => ReadInt(row, "sequence", 0)).SequenceEqual(new[] { 1, 2, 3 }), null);
+
+                string corruptPrefix = "[" + File.ReadAllText(path).Substring(1);
+                DateTime priorWrite = File.GetLastWriteTimeUtc(path);
+                File.WriteAllText(path, corruptPrefix);
+                File.SetLastWriteTimeUtc(path, priorWrite);
+                bool RejectsPrefix(string owner)
+                {
+                    try { ReadOriginalConversationHistoryFromFile(owner, payload, "", session, 3, path); return false; }
+                    catch (System.Text.Json.JsonException) { return true; }
+                }
+                string coldCampaign = "input_grounding_cold_window_" + Guid.NewGuid().ToString("N");
+                try
+                {
+                    check("authenticated_window_rejects_corrupt_prefix_before_cold_sql_promotion",
+                        new FileInfo(path).Length == fileBytes && File.GetLastWriteTimeUtc(path) == priorWrite
+                        && RejectsPrefix(campaign) && RejectsPrefix(coldCampaign)
+                        && !ReignPostgreSqlStorage.CampaignExists(coldCampaign), null);
+                }
+                finally
+                {
+                    if (ReignPostgreSqlStorage.CampaignExists(coldCampaign)) ReignPostgreSqlStorage.DropCampaign(coldCampaign);
+                }
+            }
+            finally
+            {
+                StrictJsonlHistoryIndex.SourceBytesReadForTests = priorObserver;
+                CultureInfo.CurrentCulture = priorCulture;
+                File.Delete(path);
+                File.Delete(partyPath);
+                ReignPostgreSqlStorage.DropCampaign(campaign);
+            }
         }
 
         private static void RunRecoveredOriginalBranchAssertions(Action<string, bool, object> check)

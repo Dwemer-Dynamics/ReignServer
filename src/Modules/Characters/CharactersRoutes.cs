@@ -33,8 +33,8 @@ namespace ReignBetaServer
             routes.Post("/character-editor/load", request => CharactersService.CharacterEditorLoadApi(request.JsonBody));
             routes.Get("/characters/narrative", request => CharactersService.InspectCharacterNarrative(request.Query));
             routes.Post("/character-editor/construct", request => CharactersService.CharacterEditorConstructApi(request.JsonBody));
-            routes.Post("/character-editor/save", request => CharactersService.CharacterEditorSaveApi(request.JsonBody));
-            routes.Post("/character-editor/rollback", request => CharactersService.CharacterEditorRollbackApi(request.JsonBody));
+            routes.Post("/character-editor/save", request => CharactersService.CharacterEditorSaveApi(request.JsonBody)).WithoutCampaignGate();
+            routes.Post("/character-editor/rollback", request => CharactersService.CharacterEditorRollbackApi(request.JsonBody)).WithoutCampaignGate();
             routes.Post("/character-editor/portrait/upload", request => CharactersService.CharacterEditorPortraitUploadApi(request.JsonBody));
             routes.Post("/character-editor/portrait/select", request => CharactersService.CharacterEditorPortraitSelectApi(request.JsonBody));
             routes.Post("/character-editor/native/poll", request => CharactersService.CharacterEditorNativePollApi(request.JsonBody));

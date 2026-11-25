@@ -91,6 +91,7 @@ namespace ReignBetaServer
             string campaign = "town_prewarm_contract_" + Guid.NewGuid().ToString("N");
             try
             {
+                VerifyTownPrewarmDeferral(campaign, Check);
                 string hero = "notable_fixture", path = CampaignFileService.CharacterFile(campaign, hero, "constructed.json");
                 CampaignFileService.WriteJsonObject(path, TestDict("ok", true, "status", "first_contact_pending"));
                 byte[] original = File.ReadAllBytes(path);
@@ -216,6 +217,44 @@ namespace ReignBetaServer
                 && !TownNotableCandidate(TestDict("heroStringId", "dead", "isNotable", true, "isAlive", false, "homeSettlementId", "town"), "town"),
                 "Only living notables belonging to the entered town qualify; unrelated heroes do not.");
             return rows;
+        }
+
+        private static void VerifyTownPrewarmDeferral(string campaign, Action<string, bool, string> check)
+        {
+            var root = Directory.CreateTempSubdirectory("reign-town-prewarm-guard-");
+            try
+            {
+                string directory = Path.Combine(root.FullName, NativeProviderTestGuard.RelativeDirectory);
+                Directory.CreateDirectory(directory);
+                File.WriteAllText(Path.Combine(directory, "provider-free.json"),
+                    Json.Serialize(TestDict("schema", NativeProviderTestGuard.Schema, "campaignId", campaign,
+                        "runId", "town_prewarm_isolation", "timelineId", "main", "taskId", Guid.NewGuid().ToString(),
+                        "baselineSaveName", "original", "baselineSha256", new string('a', 64), "currentSaveName", "owned_Current")));
+                var guard = new NativeProviderTestGuard(root.FullName);
+                long generation = Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
+                var intake = PrewarmTownNotableProfiles(TestDict("campaignId", campaign, "generation", generation,
+                    "settlementId", "town", "settlementType", "town"), guard);
+                const string hero = "deferred_notable";
+                var work = new TownProfileWork
+                {
+                    Campaign = campaign, HeroId = hero, Generation = generation,
+                    Hero = TestDict("heroStringId", hero, "name", "Deferred notable", "isAlive", true,
+                        "isNotable", true, "homeSettlementId", "town")
+                };
+                bool authored = false;
+                bool released = RunTownProfileWorkCore(work, (_, _, _) =>
+                {
+                    authored = true;
+                    return TestDict("ok", true);
+                }, guard);
+                check("provider_free_deferral_before_writes", ReadBool(intake, "ok", false)
+                    && ReadString(intake, "result", "") == "provider_free_deferred"
+                    && ReadInt(intake, "queued", -1) == 0 && released && !authored
+                    && !Directory.Exists(CampaignFileService.CharacterDirectory(campaign, hero))
+                    && ReadBool(guard.Snapshot(), "cleanProviderFreeRun", false),
+                    "The owner-scoped test intake and queued work defer without profile writes or provider attempts.");
+            }
+            finally { root.Delete(true); }
         }
 
         private static void RunTownNotableNarrativePublicationTests(Dictionary<string, object> narrative, Action<string, bool, string> check)

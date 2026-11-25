@@ -32,7 +32,8 @@ namespace ReignBetaServer
             // saved legacy stream as the original path did. Keep no row payloads
             // from this pass, and release the writer lock before opening SQL.
             if (schemaMayNeedInitialization) _ = legacy.LongCount();
-            return MergeOriginalConversationHistory(campaign, payload, npc, session, limit, player, legacy);
+            string strictPath = legacyFilter == null && !CampaignFileService.IsDialogueHistoryPath(path) ? path : null;
+            return MergeOriginalConversationHistory(campaign, payload, npc, session, limit, player, legacy, strictPath);
         }
 
         private static List<Dictionary<string, object>> ReadAuthoritativeConversationHistory(string campaign,
@@ -129,59 +130,91 @@ namespace ReignBetaServer
 
         private static List<Dictionary<string, object>> MergeOriginalConversationHistory(string campaign,
             Dictionary<string, object> payload, string npc, string session, int limit, string player,
-            IEnumerable<Dictionary<string, object>> legacy)
+            IEnumerable<Dictionary<string, object>> legacy, string strictPath = null)
         {
             string timeline = ContinuityTimeline(payload);
             var access = new KnowledgeAccessContext { NpcId = player, TimelineId = timeline,
                 WorldDay = ReadDouble(payload, "worldDay", double.MaxValue), AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
             var authoritative = ReadAuthoritativeConversationHistory(campaign, payload, npc, session, limit, player, access);
-            var selected = new PriorityQueue<(Dictionary<string, object> Row, bool Legacy), (long Timestamp, long Ordinal)>();
-            long ordinal = 0;
-            var textKeys = new HashSet<(string Role, string Text)>();
-            var exchangeKeys = new HashSet<(string Role, string Exchange)>();
-            void IndexLine(Dictionary<string, object> line)
-            {
-                string role = ReadString(line, "role", "");
-                textKeys.Add((role, ReadString(line, "text", "")));
-                string exchange = ReadString(line, "exchangeId", "");
-                if (exchange.Length > 0) exchangeKeys.Add((role, exchange));
-            }
+            if (strictPath != null && StrictJsonlHistoryIndex.TryReadAuthenticatedWindow(
+                strictPath, timeline, access.WorldDay, limit, authoritative, out var indexed))
+                return indexed;
 
-            void SelectLine(Dictionary<string, object> line, bool isLegacy)
-            {
-                IndexLine(line);
-                // Later entries win a tied cutoff, matching stable OrderBy(...).TakeLast(limit).
-                var priority = (ReadLong(line, "ts", 0), ordinal++);
-                if (selected.Count < limit) selected.Enqueue((line, isLegacy), priority);
-                else if (limit > 0) selected.EnqueueDequeue((line, isLegacy), priority);
-            }
-
-            foreach (var line in authoritative) SelectLine(line, false);
-            // Earlier accepted rows still participate in deduplication after falling
-            // outside the window. Only selected legacy payloads need to be copied.
+            var selection = new OriginalHistorySelection<Dictionary<string, object>>(timeline, access.WorldDay, limit);
+            for (int index = 0; index < authoritative.Count; index++)
+                selection.AddAuthoritative(OriginalHistorySeed.FromRow(authoritative[index]), index);
             foreach (var old in legacy ?? Enumerable.Empty<Dictionary<string, object>>())
+                selection.AddLegacy(old, old);
+            return selection.Complete().Select(slot => slot.IsLegacy
+                ? MarkLegacyOriginal(slot.Legacy) : authoritative[slot.AuthoritativeIndex]).ToList();
+        }
+
+        internal readonly record struct OriginalHistorySeed(string Role, string Text, string Exchange, long Timestamp)
+        {
+            internal static OriginalHistorySeed FromRow(Dictionary<string, object> row) => new(
+                ReadString(row, "role", ""), ReadString(row, "text", ""), ReadString(row, "exchangeId", ""), ReadLong(row, "ts", 0));
+        }
+
+        internal readonly record struct OriginalHistorySlot<T>(int AuthoritativeIndex, T Legacy)
+        {
+            internal bool IsLegacy => AuthoritativeIndex < 0;
+        }
+
+        internal sealed class OriginalHistorySelection<T>
+        {
+            private readonly string timeline;
+            private readonly double worldDay;
+            private readonly int limit;
+            private readonly PriorityQueue<OriginalHistorySlot<T>, (long Timestamp, long Ordinal)> selected = new();
+            private readonly HashSet<(string Role, string Text)> textKeys = new();
+            private readonly HashSet<(string Role, string Exchange)> exchangeKeys = new();
+            private long ordinal;
+
+            internal OriginalHistorySelection(string timeline, double worldDay, int limit)
             {
-                if (ReadString(old, "timelineId", timeline) != timeline) continue;
-                string exchange = ReadFirstString(old, "exchangeId", "turnId", "eventId"), role = ReadString(old, "role", "");
-                if ((exchange.Length > 0 && exchangeKeys.Contains((role, exchange)))
-                    || textKeys.Contains((role, ReadString(old, "text", "")))) continue;
-                if (ReadDouble(old, "worldDay", 0d) > access.WorldDay) continue;
-                // Index the stored exchangeId, never the incoming fallback alias.
-                SelectLine(old, true);
+                this.timeline = timeline;
+                this.worldDay = worldDay;
+                this.limit = limit;
             }
 
-            var result = new List<Dictionary<string, object>>(selected.Count);
-            while (selected.TryDequeue(out var entry, out _))
+            internal void AddAuthoritative(OriginalHistorySeed seed, int slot)
+                => Select(seed, new OriginalHistorySlot<T>(slot, default));
+
+            internal void AddLegacy(Dictionary<string, object> old, T position)
             {
-                if (!entry.Legacy) result.Add(entry.Row);
-                else
-                {
-                    var retained = CloneDictionary(entry.Row);
-                    retained["sourceIntegrity"] = "legacy_original_unverified";
-                    result.Add(retained);
-                }
+                if (ReadString(old, "timelineId", timeline) != timeline) return;
+                string exchange = ReadFirstString(old, "exchangeId", "turnId", "eventId"), role = ReadString(old, "role", "");
+                if (exchange.Length > 0 && exchangeKeys.Contains((role, exchange))) return;
+                string text = ReadString(old, "text", "");
+                if (textKeys.Contains((role, text)) || ReadDouble(old, "worldDay", 0d) > worldDay) return;
+                // Remember only the stored exchangeId. A fallback alias is an
+                // incoming lookup and does not own a key for later rows.
+                Select(new OriginalHistorySeed(role, text, ReadString(old, "exchangeId", ""), ReadLong(old, "ts", 0)),
+                    new OriginalHistorySlot<T>(-1, position));
             }
-            return result;
+
+            private void Select(OriginalHistorySeed seed, OriginalHistorySlot<T> slot)
+            {
+                // All accepted rows own exact keys, including rows outside the window.
+                textKeys.Add((seed.Role, seed.Text));
+                if (seed.Exchange.Length > 0) exchangeKeys.Add((seed.Role, seed.Exchange));
+                // Later entries win a tied cutoff, matching stable OrderBy(...).TakeLast(limit).
+                var priority = (seed.Timestamp, ordinal++);
+                if (selected.Count < limit) selected.Enqueue(slot, priority);
+                else if (limit > 0) selected.EnqueueDequeue(slot, priority);
+            }
+
+            internal IEnumerable<OriginalHistorySlot<T>> Complete()
+            {
+                while (selected.TryDequeue(out var slot, out _)) yield return slot;
+            }
+        }
+
+        internal static Dictionary<string, object> MarkLegacyOriginal(Dictionary<string, object> row)
+        {
+            var retained = CloneDictionary(row);
+            retained["sourceIntegrity"] = "legacy_original_unverified";
+            return retained;
         }
 
         internal static string OriginalConversationSourceIntegrity(Dictionary<string, object> source)

@@ -318,6 +318,7 @@ namespace ReignBetaServer
                 return;
             }
 #if !REIGN_EXCLUDE_VERIFICATION
+            if (CharactersService.TryRunEditorRestartFixtureCommand(args)) return;
             if (PortraitsService.TryRunOutfitRecoveryFixtureCommand(args)) return;
             if (HasArg(args, "--cancel-verification") || (HasArg(args, "--run-verification") && HasArg(args, "--cancel")))
             {
@@ -337,8 +338,10 @@ namespace ReignBetaServer
             CampaignFileService.CompactOperationalLogsAtStartup();
             PersistenceService.PurgeLegacySaveSyncSnapshotsAtStartup();
             PortraitsService.DiscoverOutfitPublicationsAtStartup();
+            CharactersService.DiscoverEditorPublicationsAtStartup();
             PersistenceService.CleanupAllSaveSyncRecoveryAtStartup();
             PortraitsService.RecoverOutfitPublicationsAtStartup();
+            CharactersService.RecoverEditorPublicationsAtStartup();
             CampaignFileService.CleanupInternalCampaignArtifactsAtStartup();
             VerificationService.PruneTestRuns(100);
             PromptService.EnsurePromptTemplates();
@@ -1203,7 +1206,11 @@ namespace ReignBetaServer
             // Program.<Module>Routes.cs. They apply to the path for every method, registered or not.
             if (IsCampaignGateExemptPath(path))
                 return CampaignRequestAccess.None;
+            return EnterCampaignRequestReadAccess();
+        }
 
+        internal static CampaignRequestAccess EnterCampaignRequestReadAccess()
+        {
             CampaignDataGate.EnterReadLock();
             PersistenceService.CurrentCampaignRequestLease = new PersistenceService.CampaignRequestLease
             {

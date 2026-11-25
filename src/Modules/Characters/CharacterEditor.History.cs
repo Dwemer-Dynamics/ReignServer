@@ -155,13 +155,15 @@ namespace ReignBetaServer
 
         private static List<Dictionary<string, object>> ApplyEditorHistory(string campaign, string hero,
             ReignDbConnection connection, Dictionary<string, object> history, Dictionary<string, object> revisionAfter,
-            List<EditorHistoryEdit> edits, EditorHistoryEditBasis basis, EditorHistoryDelta delta, bool scopedUndo = false)
+            List<EditorHistoryEdit> edits, EditorHistoryEditBasis basis, EditorHistoryDelta delta, bool scopedUndo = false,
+            ReignDbTransaction transaction = null)
         {
             var issues = new List<Dictionary<string, object>>();
             if ((edits?.Count ?? 0) == 0 && (history?.Count ?? 0) == 0) return issues;
             var editsByGroup = edits?.ToLookup(edit => edit.Group, StringComparer.Ordinal);
 
-            using var transaction = connection.BeginTransaction();
+            using var ownedTransaction = transaction == null ? connection.BeginTransaction() : null;
+            transaction ??= ownedTransaction;
             string timeline = WorldSimulationService.ActiveWorldHistoryTimeline(connection);
             var processedTurns = new HashSet<string>(StringComparer.Ordinal);
             lock (Program.FileLock)
@@ -285,15 +287,16 @@ namespace ReignBetaServer
                     }
                 }
             }
-            transaction.Commit();
+            ownedTransaction?.Commit();
             return issues;
         }
 
         private static void WriteEditorHistoryLines(string path, byte[] bytes, int preamble, List<EditorHistoryLine> lines,
             Dictionary<int, Dictionary<string, object>> patches, List<Dictionary<string, object>> restored)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
-            string staged = path + ".editor-" + Guid.NewGuid().ToString("N") + ".tmp";
+            string stageDirectory = CurrentEditorRevisionFiles?.StagingDirectory ?? Path.GetDirectoryName(path);
+            Directory.CreateDirectory(stageDirectory);
+            string staged = Path.Combine(stageDirectory, Path.GetFileName(path) + ".editor-" + Guid.NewGuid().ToString("N") + ".tmp");
             try
             {
                 using (var stream = new FileStream(staged, FileMode.CreateNew, FileAccess.Write))
@@ -320,7 +323,8 @@ namespace ReignBetaServer
                         needsSeparator = false;
                     }
                 }
-                File.Move(staged, path, true);
+                if (!TryWriteEditorRevisionFile(path, () => File.ReadAllBytes(staged)))
+                    File.Move(staged, path, true);
             }
             finally
             {

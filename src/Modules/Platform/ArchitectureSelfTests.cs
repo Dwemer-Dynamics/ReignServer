@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -85,6 +86,380 @@ namespace ReignBetaServer
             }
         }
 
+        private static void RunStrictMemoryHistoryIndexTests(Action<string, bool, string, object> add)
+        {
+            var directory = Directory.CreateTempSubdirectory("reign-memory-index-");
+            string path = Path.Combine(directory.FullName, "memories.jsonl");
+            string replacement = Path.Combine(directory.FullName, "replacement.jsonl");
+            var culture = CultureInfo.CurrentCulture;
+            var previousObserver = StrictJsonlHistoryIndex.SourceBytesReadForTests;
+            long readBytes = 0;
+            StrictJsonlHistoryIndex.SourceBytesReadForTests = count => readBytes += count;
+            CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+            try
+            {
+                DateTime writeTime = new(2025, 6, 15, 12, 0, 0, DateTimeKind.Utc);
+                var rows = Enumerable.Range(0, 2500).Select(i =>
+                    Json.Serialize(TestDict("id", "row-" + i, "text", new string('x', 96), "ts", i % 29)));
+                string inputs = string.Join("\n", rows)
+                    + "\r\n{\"id\":\"long\",\"text\":\"" + new string('a', 22000) + "\u00E9\U0001F680\",\"ts\":22}"
+                    + "\r  \r\nnull\n"
+                    + "{\"id\":\"excluded\",\"source\":\"dialogue_llm\",\"text\":\"42\",\"ts\":30000}\n"
+                    + "{\"id\":\"first-top\",\"text\":\"Before\",\"ts\":5000}\r"
+                    + "{\"id\":\"other-top\",\"text\":\"Stable\",\"ts\":5000}\n";
+                void Assign(string contents)
+                {
+                    File.WriteAllText(path, contents, Encoding.UTF8);
+                    File.SetLastWriteTimeUtc(path, writeTime);
+                }
+                List<Dictionary<string, object>> Baseline(int take) => Program.ReadJsonLinesFromPath(path)
+                    .Where(CampaignFileService.DurableDialogueMemoryRowIsUsable)
+                    .OrderByDescending(row => ReadLong(row, "ts", 0)).Take(take).Reverse().ToList();
+                bool SameRows(int take, List<Dictionary<string, object>> actual) =>
+                    Json.Serialize(actual) == Json.Serialize(Baseline(take));
+                bool ReadFails(string expected, int take = 2)
+                {
+                    try { Program.ReadRecentDialogueMemoryRows(path, take); return false; }
+                    catch (System.Text.Json.JsonException) { return expected == "json"; }
+                    catch (ArgumentException) { return expected == "classification"; }
+                }
+
+                Assign(inputs);
+                long bytes = new FileInfo(path).Length;
+                var first = Program.ReadRecentDialogueMemoryRows(path, 2);
+                long coldRead = readBytes;
+                first[^1]["text"] = "caller mutation";
+                readBytes = 0;
+                var warm = Program.ReadRecentDialogueMemoryRows(path, 2);
+                long hotRead = readBytes;
+                add("strict_memory_index_reads_only_selected_payloads_when_warm",
+                    coldRead >= bytes && hotRead > 0 && hotRead < bytes / 8 && SameRows(2, warm)
+                    && ReadString(warm[^1], "id", "") == "first-top"
+                    && ReadString(warm[^1], "text", "") == "Before",
+                    "A new result retains physical timestamp ties, and a warm read seeks to fresh selected payloads.",
+                    TestDict("fileBytes", bytes, "coldBytesRead", coldRead, "hotBytesRead", hotRead));
+
+                byte[] beforeAppend = File.ReadAllBytes(path);
+                var appendRow = TestDict("id", "new-top", "ts", 6000);
+                byte[] expectedSuffix = Encoding.UTF8.GetBytes(Json.Serialize(appendRow) + Environment.NewLine);
+                CampaignFileService.AppendJsonLineToPath(path, appendRow);
+                byte[] afterAppend = File.ReadAllBytes(path);
+                bool appendOnly = afterAppend.AsSpan().StartsWith(beforeAppend)
+                    && afterAppend.AsSpan(beforeAppend.Length).SequenceEqual(expectedSuffix);
+                readBytes = 0;
+                var appended = Program.ReadRecentDialogueMemoryRows(path, 3);
+                long appendRead = readBytes;
+                readBytes = 0;
+                var warmAfterAppend = Program.ReadRecentDialogueMemoryRows(path, 3);
+                add("strict_memory_index_invalidates_for_exact_managed_append", appendOnly
+                    && SameRows(3, appended) && SameRows(3, warmAfterAppend)
+                    && ReadString(appended[^1], "id", "") == "new-top" && appendRead >= afterAppend.Length
+                    && readBytes > 0 && readBytes < bytes / 8,
+                    "The original append preserves the prefix and adds exact bytes. Its first read revalidates before another warm read.",
+                    TestDict("fileBytes", afterAppend.Length, "bytesReadAfterAppend", appendRead,
+                        "hotBytesReadAfterAppend", readBytes));
+
+                Assign(inputs.Replace("\"Before\"", "\"Edited\"", StringComparison.Ordinal));
+                Program.ReadRecentDialogueMemoryRows(path, 2);
+                Assign(inputs.Replace("\"Before\"", "\"Direct\"", StringComparison.Ordinal));
+                bool unchangedLengthAndMtime = new FileInfo(path).Length == bytes && File.GetLastWriteTimeUtc(path) == writeTime;
+                readBytes = 0;
+                var direct = Program.ReadRecentDialogueMemoryRows(path, 2);
+                add("strict_memory_index_invalidates_same_size_mtime_direct_edit",
+                    unchangedLengthAndMtime && readBytes >= bytes && SameRows(2, direct)
+                    && ReadString(direct[^1], "text", "") == "Direct",
+                    "An in-place edit with the original length and write time forces full validation.", null);
+
+                string atomicInputs = inputs.Replace("\"Before\"", "\"Atomic\"", StringComparison.Ordinal);
+                File.WriteAllText(replacement, atomicInputs, Encoding.UTF8);
+                File.SetLastWriteTimeUtc(replacement, writeTime);
+                File.Move(replacement, path, overwrite: true);
+                readBytes = 0;
+                var moved = Program.ReadRecentDialogueMemoryRows(path, 2);
+                add("strict_memory_index_invalidates_same_size_mtime_replacement",
+                    new FileInfo(path).Length == bytes && File.GetLastWriteTimeUtc(path) == writeTime
+                    && readBytes >= bytes && SameRows(2, moved) && ReadString(moved[^1], "text", "") == "Atomic",
+                    "A new file identity forces full validation even with the same size and write time.", null);
+
+                PersistenceService.InvalidateWaitingCampaignRequests();
+                readBytes = 0;
+                bool revalidated = SameRows(2, Program.ReadRecentDialogueMemoryRows(path, 2)) && readBytes >= bytes;
+                add("strict_memory_index_invalidates_campaign_replacement_epoch", revalidated,
+                    "The campaign replacement boundary drops cached proof even if the history bytes are identical.", null);
+
+                Assign("[" + atomicInputs.Substring(1));
+                bool earlyCorruptionSeen = new FileInfo(path).Length == bytes
+                    && File.GetLastWriteTimeUtc(path) == writeTime && ReadFails("json");
+                Assign(inputs + "{\"id\":\"unterminated\",\"ts\":6001}");
+                Program.ReadRecentDialogueMemoryRows(path, 2);
+                CampaignFileService.AppendJsonLineToPath(path, TestDict("id", "following", "ts", 6002));
+                bool incompleteAppendFailed = ReadFails("json");
+                Assign("{\"source\":\"\\uFFFE\",\"ts\":999}\n");
+                bool classificationFailed = ReadFails("classification");
+                File.AppendAllText(path, "{malformed");
+                add("strict_memory_index_preserves_incomplete_append_and_error_precedence",
+                    earlyCorruptionSeen && incompleteAppendFailed && classificationFailed && ReadFails("json") && ReadFails("json", 0),
+                    "Changed unselected rows still fail strict reads, and an unterminated line is never a verified append boundary.", null);
+
+                File.WriteAllText(path, inputs, Encoding.BigEndianUnicode);
+                readBytes = 0;
+                bool wideParity = SameRows(2, Program.ReadRecentDialogueMemoryRows(path, 2));
+                add("strict_memory_index_preserves_utf16_reader_fallback", wideParity && readBytes < 8,
+                    "Legacy wide-encoded history uses the original reader.", null);
+
+                Assign("{\"id\":\"leading-dash\",\"ts\":\"-4\"}\n{\"id\":\"leading-tilde\",\"ts\":\"~2\"}\n");
+                var invariantRows = Program.ReadRecentDialogueMemoryRows(path, 1);
+                var customCulture = (CultureInfo)CultureInfo.InvariantCulture.Clone();
+                customCulture.NumberFormat.NegativeSign = "~";
+                CultureInfo.CurrentCulture = CultureInfo.ReadOnly(customCulture);
+                readBytes = 0;
+                var cultureRows = Program.ReadRecentDialogueMemoryRows(path, 1);
+                add("strict_memory_index_invalidates_changed_timestamp_culture",
+                    invariantRows.Count == 1 && ReadString(invariantRows[0], "id", "") == "leading-tilde"
+                    && cultureRows.Count == 1 && ReadString(cultureRows[0], "id", "") == "leading-dash"
+                    && readBytes >= new FileInfo(path).Length && SameRows(1, cultureRows),
+                    "A changed number format with the same culture name cannot reuse the prior timestamp ordering.", null);
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = culture;
+                StrictJsonlHistoryIndex.SourceBytesReadForTests = previousObserver;
+                Directory.Delete(directory.FullName, recursive: true);
+            }
+        }
+
+        private static void RunStrictSocialEventPromptIndexTests(Action<string, bool, string, object> add)
+        {
+            var directory = Directory.CreateTempSubdirectory("reign-social-prompt-index-");
+            string path = Path.Combine(directory.FullName, "transcript.jsonl");
+            string replacement = Path.Combine(directory.FullName, "replacement.jsonl");
+            var previousObserver = StrictJsonlHistoryIndex.SourceBytesReadForTests;
+            var previousCulture = CultureInfo.CurrentCulture;
+            long readBytes = 0;
+            StrictJsonlHistoryIndex.SourceBytesReadForTests = count => readBytes += count;
+            CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+            try
+            {
+                var prefix = Enumerable.Range(0, 2200).Select(i =>
+                    TestDict("id", "ordinary-" + i, "text", new string('x', 96), "ts", i));
+                var tail = new[]
+                {
+                    TestDict("id", "turn-only", "text", "Previous beat", "ts", 8999, "turnId", "Beat"),
+                    TestDict("id", "beat-head", "text", "I opened the group beat.", "ts", 9000, "sceneTurnId", "Beat"),
+                    TestDict("id", "later-time-replay", "sourceTurnId", "shared-turn", "role", "npc",
+                        "speakerHeroStringId", "speaker-a", "text", "Same durable contribution", "ts", 9200, "exchangeId", "outside"),
+                    TestDict("id", "durable-winner", "sourceTurnId", "shared-turn", "role", "npc",
+                        "speakerHeroStringId", "speaker-a", "text", "Same durable contribution", "ts", 9000, "exchange_id", "BEAT"),
+                    TestDict("text", "Unidentified witness", "ts", 9000, "exchangeId", "beat"),
+                    TestDict("id", "same-time-replay", "sourceTurnId", "shared-turn", "role", "npc",
+                        "speakerHeroStringId", "speaker-a", "text", "Same durable contribution", "ts", 9000, "exchangeId", "outside"),
+                    TestDict("id", "beat-last", "sourceTurnId", "speaker-b-turn", "role", "npc",
+                        "speakerHeroStringId", "speaker-b", "text", "Original words", "ts", 9000, "exchangeId", "beat"),
+                };
+                string inputs = string.Join("\n", prefix.Select(row => Json.Serialize(row))) + "\r\nnull\r \n"
+                    + string.Join("\r", tail.Select(row => Json.Serialize(row))) + "\n";
+                File.WriteAllText(path, inputs, Encoding.UTF8);
+                long fileBytes = new FileInfo(path).Length;
+                List<Dictionary<string, object>> Original(int limit) =>
+                    DialogueService.BuildSocialEventPromptTranscript(Program.ReadJsonLinesFromPath(path), limit);
+                bool SameRows(int limit, List<Dictionary<string, object>> rows) =>
+                    Json.Serialize(Original(limit)) == Json.Serialize(rows);
+                string PrefixFailure(Func<List<Dictionary<string, object>>> read)
+                {
+                    try { read(); return ""; }
+                    catch (System.Text.Json.JsonException ex) { return ex.Message; }
+                }
+
+                var cold = Program.ReadIndexedSocialEventPromptTranscript(path, 2);
+                long coldReads = readBytes;
+                cold[1]["text"] = "caller mutation";
+                readBytes = 0;
+                var warm = Program.ReadIndexedSocialEventPromptTranscript(path, 1);
+                long warmReads = readBytes;
+                bool firstWindow = SameRows(2, warm) && warm.Count == 4
+                    && ReadString(warm[0], "id", "") == "beat-head"
+                    && ReadString(warm[1], "id", "") == "durable-winner"
+                    && ReadString(warm[2], "promptLocalSourceId", "").StartsWith("unbound_2203_", StringComparison.Ordinal)
+                    && ReadString(warm[3], "id", "") == "beat-last";
+                var outer = DialogueService.CanonicalizePromptTranscript(warm, 2);
+                var expectedOuter = DialogueService.CanonicalizePromptTranscript(Original(2), 2);
+                add("strict_social_prompt_warm_preserves_earliest_winner_absolute_rank_and_outer_context",
+                    coldReads >= fileBytes && warmReads > 0 && warmReads < fileBytes / 8 && firstWindow
+                    && Json.Serialize(outer) == Json.Serialize(expectedOuter)
+                    && ReadString(outer[2], "promptLocalSourceId", "").StartsWith("unbound_2_", StringComparison.Ordinal),
+                    "The exact earliest contribution and complete outer exchange survive both canonical passes and fresh bounded payload reads.",
+                    TestDict("fileBytes", fileBytes, "coldBytesRead", coldReads, "warmBytesRead", warmReads));
+
+                readBytes = 0;
+                var maximum = Program.ReadIndexedSocialEventPromptTranscript(path, 1000);
+                long changedLimitRead = readBytes;
+                readBytes = 0;
+                var alreadyMaximum = Program.ReadIndexedSocialEventPromptTranscript(path, 100);
+                add("strict_social_prompt_cache_keys_the_normalized_limit",
+                    changedLimitRead >= fileBytes && readBytes > 0 && readBytes < fileBytes / 8
+                    && SameRows(1000, maximum) && SameRows(100, alreadyMaximum),
+                    "A new effective limit rebuilds the window and equivalent upper limits reuse the exact same scope.", null);
+
+                CampaignFileService.AppendJsonLineToPath(path, TestDict("id", "just-appended", "text", "New exchange", "ts", 9300));
+                readBytes = 0;
+                var appended = Program.ReadIndexedSocialEventPromptTranscript(path, 2);
+                long appendFileBytes = new FileInfo(path).Length;
+                bool appendRevalidated = readBytes >= appendFileBytes && SameRows(2, appended)
+                    && ReadString(appended[^1], "id", "") == "just-appended";
+                PersistenceService.InvalidateWaitingCampaignRequests();
+                readBytes = 0;
+                bool generationRevalidated = SameRows(2, Program.ReadIndexedSocialEventPromptTranscript(path, 2))
+                    && readBytes >= appendFileBytes;
+                DateTime lastWrite = File.GetLastWriteTimeUtc(path);
+                string current = File.ReadAllText(path, Encoding.UTF8);
+                File.WriteAllText(replacement, current.Replace("Original words", "Replaced words", StringComparison.Ordinal), Encoding.UTF8);
+                File.SetLastWriteTimeUtc(replacement, lastWrite);
+                File.Move(replacement, path, overwrite: true);
+                readBytes = 0;
+                var replaced = Program.ReadIndexedSocialEventPromptTranscript(path, 2);
+                add("strict_social_prompt_revalidates_append_restore_and_file_replacement",
+                    appendRevalidated && generationRevalidated && new FileInfo(path).Length == appendFileBytes
+                    && File.GetLastWriteTimeUtc(path) == lastWrite && readBytes >= appendFileBytes && SameRows(2, replaced)
+                    && replaced.Any(row => ReadString(row, "text", "") == "Replaced words"),
+                    "Managed append, generation changes and a same-size, same-modification-time replacement each invalidate the reused view.", null);
+
+                string replacedBody = File.ReadAllText(path, Encoding.UTF8);
+                File.WriteAllText(path, "[" + replacedBody.Substring(1), Encoding.UTF8);
+                File.SetLastWriteTimeUtc(path, lastWrite);
+                string originalFailure = PrefixFailure(() => Original(2));
+                string observedFailure = PrefixFailure(() => Program.ReadIndexedSocialEventPromptTranscript(path, 2));
+                add("strict_social_prompt_reports_unselected_prefix_errors",
+                    new FileInfo(path).Length == appendFileBytes && File.GetLastWriteTimeUtc(path) == lastWrite
+                    && originalFailure.Length > 0 && observedFailure == originalFailure,
+                    "A warm view cannot hide the original error from a corrupt row outside the requested exchange.", null);
+
+                string longExchange = string.Join("\n", Enumerable.Range(0, 513).Select(i =>
+                    Json.Serialize(TestDict("id", "large-" + i, "text", "Boundary contribution", "ts", i, "exchangeId", "large"))));
+                File.WriteAllText(path, longExchange, Encoding.UTF8);
+                var oversized = Program.ReadIndexedSocialEventPromptTranscript(path, 2);
+                readBytes = 0;
+                var oversizedAgain = Program.ReadIndexedSocialEventPromptTranscript(path, 2);
+                add("strict_social_prompt_oversized_exchange_uses_complete_legacy_view",
+                    oversized.Count == 513 && SameRows(2, oversized) && SameRows(2, oversizedAgain)
+                    && readBytes >= new FileInfo(path).Length,
+                    "The cache budget leaves an oversized contiguous exchange available through the full strict legacy reader.", null);
+
+                File.WriteAllText(path, inputs, Encoding.BigEndianUnicode);
+                readBytes = 0;
+                var wide = Program.ReadIndexedSocialEventPromptTranscript(path, 2);
+                add("strict_social_prompt_preserves_wide_bom_fallback",
+                    readBytes < 8 && SameRows(2, wide),
+                    "Legacy wide-encoded social history keeps its original strict ordering and complete exchange.", null);
+
+                File.WriteAllText(path, "{\"id\":\"dash\",\"text\":\"dash\",\"ts\":\"-4\"}\n"
+                    + "{\"id\":\"tilde\",\"text\":\"tilde\",\"ts\":\"~2\"}\n"
+                    + "{\"id\":\"latest\",\"text\":\"latest\",\"ts\":1}\n", Encoding.UTF8);
+                var invariant = Program.ReadIndexedSocialEventPromptTranscript(path, 2);
+                var custom = (CultureInfo)CultureInfo.InvariantCulture.Clone();
+                custom.NumberFormat.NegativeSign = "~";
+                CultureInfo.CurrentCulture = CultureInfo.ReadOnly(custom);
+                readBytes = 0;
+                var customRows = Program.ReadIndexedSocialEventPromptTranscript(path, 2);
+                add("strict_social_prompt_invalidates_changed_numeric_culture",
+                    readBytes >= new FileInfo(path).Length && SameRows(2, customRows)
+                    && ReadString(invariant[0], "id", "") == "tilde" && ReadString(customRows[0], "id", "") == "dash",
+                    "A same-name culture with changed timestamp parsing rebuilds the original chronological selection.", null);
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = previousCulture;
+                StrictJsonlHistoryIndex.SourceBytesReadForTests = previousObserver;
+                Directory.Delete(directory.FullName, recursive: true);
+            }
+        }
+
+        private static void RunStrictRawHistoryTailIndexTests(Action<string, bool, string, object> add)
+        {
+            var directory = Directory.CreateTempSubdirectory("reign-raw-history-index-");
+            string path = Path.Combine(directory.FullName, "social-event.jsonl");
+            var previousObserver = StrictJsonlHistoryIndex.SourceBytesReadForTests;
+            long readBytes = 0;
+            StrictJsonlHistoryIndex.SourceBytesReadForTests = count => readBytes += count;
+            try
+            {
+                string inputs = string.Concat(Enumerable.Range(0, 2200).Select(i =>
+                    Json.Serialize(TestDict("id", "row-" + i, "ts", 10, "text", new string('x', 110))) + "\n"))
+                    + "{\"id\":\"physical-earlier\",\"ts\":50000,\"text\":\"Original\"}\r  \r\n"
+                    + "null\r{\"id\":\"physical-last\",\"ts\":-90,\"text\":\"\u00E9\U0001F680\"}\n";
+                File.WriteAllText(path, inputs, Encoding.UTF8);
+                long fileBytes = new FileInfo(path).Length;
+                List<Dictionary<string, object>> Baseline(int count) =>
+                    Program.ReadJsonLinesFromPath(path).TakeLast(Math.Max(1, count)).ToList();
+                bool Matches(int count, List<Dictionary<string, object>> actual) =>
+                    Json.Serialize(actual) == Json.Serialize(Baseline(count));
+                string RawFailure(Func<List<Dictionary<string, object>>> read)
+                {
+                    try { read(); return ""; }
+                    catch (System.Text.Json.JsonException ex) { return ex.Message; }
+                }
+
+                var cold = Program.ReadDialogueHistoryTail(path, 3);
+                long coldBytes = readBytes;
+                var ranked = Program.ReadRecentDialogueMemoryRows(path, 1);
+                cold[0]["text"] = "caller mutation";
+                readBytes = 0;
+                var warm = Program.ReadDialogueHistoryTail(path, 3);
+                long warmBytes = readBytes;
+                add("strict_raw_history_tail_preserves_physical_order_and_null_on_warm_read",
+                    coldBytes >= fileBytes && warmBytes > 0 && warmBytes < fileBytes / 8
+                    && Matches(3, warm) && warm.Count == 3 && warm[1] == null
+                    && ReadString(warm[0], "text", "") == "Original"
+                    && ReadString(warm[2], "id", "") == "physical-last"
+                    && ReadString(ranked[0], "id", "") == "physical-earlier",
+                    "Raw and ranked readers of the same file keep distinct selection, and reparse selected payloads on reuse.",
+                    TestDict("fileBytes", fileBytes, "coldBytesRead", coldBytes, "warmBytesRead", warmBytes));
+
+                var clamped = Program.ReadDialogueHistoryTail(path, 0);
+                readBytes = 0;
+                var large = Program.ReadDialogueHistoryTail(path, 101);
+                add("strict_raw_history_tail_preserves_uncapped_caller_limit",
+                    Matches(0, clamped) && Matches(101, large) && clamped.Count == 1
+                    && large.Count == 101 && readBytes == 0,
+                    "The default count floor and arbitrary caller limits retain their original results.", null);
+
+                CampaignFileService.AppendJsonLineToPath(path, TestDict("id", "physically-appended", "ts", -100));
+                readBytes = 0;
+                var afterAppend = Program.ReadDialogueHistoryTail(path, 3);
+                long appendFileBytes = new FileInfo(path).Length;
+                long appendRead = readBytes;
+                readBytes = 0;
+                var warmAfterAppend = Program.ReadDialogueHistoryTail(path, 3);
+                add("strict_raw_history_tail_revalidates_after_managed_append",
+                    appendRead >= appendFileBytes && readBytes > 0 && readBytes < fileBytes / 8
+                    && Matches(3, afterAppend) && Matches(3, warmAfterAppend)
+                    && afterAppend[0] == null && ReadString(afterAppend[2], "id", "") == "physically-appended",
+                    "A managed append forces full validation once and keeps the result in physical input order.", null);
+
+                string beforeCorruption = File.ReadAllText(path, Encoding.UTF8);
+                DateTime lastWrite = File.GetLastWriteTimeUtc(path);
+                File.WriteAllText(path, "[" + beforeCorruption.Substring(1), Encoding.UTF8);
+                File.SetLastWriteTimeUtc(path, lastWrite);
+                string originalFailure = RawFailure(() => Baseline(1));
+                string indexedFailure = RawFailure(() => Program.ReadDialogueHistoryTail(path, 1));
+                add("strict_raw_history_tail_reports_unselected_prefix_error",
+                    new FileInfo(path).Length == appendFileBytes && File.GetLastWriteTimeUtc(path) == lastWrite
+                    && originalFailure.Length > 0 && indexedFailure == originalFailure,
+                    "A same-length edit that restores the prior modification time still exposes the original first-row error.", null);
+
+                File.WriteAllText(path, inputs, Encoding.BigEndianUnicode);
+                readBytes = 0;
+                var wide = Program.ReadDialogueHistoryTail(path, 3);
+                add("strict_raw_history_tail_preserves_wide_bom_fallback",
+                    readBytes < 8 && Matches(3, wide) && wide[1] == null,
+                    "Legacy wide-encoded files still use strict decoding and preserve literal null slots.", null);
+            }
+            finally
+            {
+                StrictJsonlHistoryIndex.SourceBytesReadForTests = previousObserver;
+                Directory.Delete(directory.FullName, recursive: true);
+            }
+        }
+
         private static void RunLegacyDialogueSuffixTests(Action<string, bool, string, object> add)
         {
             var directory = Directory.CreateTempSubdirectory("reign-short-dialogue-");
@@ -150,6 +525,9 @@ namespace ReignBetaServer
             { ["caseId"] = id, ["suite"] = "interaction_architecture", ["passed"] = passed, ["summary"] = summary, ["data"] = data });
             RunRecentDialogueMemoryReadTests(add);
             RunLegacyDialogueSuffixTests(add);
+            RunStrictMemoryHistoryIndexTests(add);
+            RunStrictRawHistoryTailIndexTests(add);
+            RunStrictSocialEventPromptIndexTests(add);
             var providerChoice = new Dictionary<string, object> {
                 ["message"] = new Dictionary<string, object> { ["content"] = "{\"reply\":\"Hello.\"}" },
                 ["finish_reason"] = "stop"
@@ -505,6 +883,33 @@ namespace ReignBetaServer
                         && ReadString(recoveredPartyLines[1], "text", "") == "Newest recovery line.",
                         "An empty save-local castle transcript can recover the bounded durable party-chat tail in stable order.",
                         partyHistory);
+
+                    const string rawLimitEvent = "strict_raw_limit_event";
+                    const string rawLimitParty = "strict_raw_limit_party";
+                    var socialLimitPayload = TestDict("campaignId", campaignId, "eventId", rawLimitEvent);
+                    var partyLimitPayload = TestDict("campaignId", campaignId, "conversationSessionId", rawLimitParty);
+                    string[] limitFixture = Enumerable.Range(1, 101).Select(i =>
+                        Json.Serialize(TestDict("id", "physical-" + i, "role", "player", "text", "Line " + i, "ts", -i)))
+                        .ToArray();
+                    foreach (string limitPath in new[] { DialogueService.SocialEventTranscriptFile(campaignId, rawLimitEvent),
+                        DialogueService.PartyChatSessionTranscriptFile(campaignId, partyLimitPayload) })
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(limitPath));
+                        File.WriteAllLines(limitPath, limitFixture, Encoding.UTF8);
+                    }
+                    var socialDefault = ReadDictionaryList(DialogueService.SocialEventHistory(socialLimitPayload), "lines");
+                    var partyDefault = ReadDictionaryList(DialogueService.PartyChatHistory(partyLimitPayload), "lines");
+                    socialLimitPayload["limit"] = 101;
+                    partyLimitPayload["limit"] = 101;
+                    var socialRequested = ReadDictionaryList(DialogueService.SocialEventHistory(socialLimitPayload), "lines");
+                    var partyCapped = ReadDictionaryList(DialogueService.PartyChatHistory(partyLimitPayload), "lines");
+                    add("anonymous_durable_history_preserves_event_and_party_limit_contracts",
+                        socialDefault.Count == 80 && ReadString(socialDefault[0], "id", "") == "physical-22"
+                        && partyDefault.Count == 36 && ReadString(partyDefault[0], "id", "") == "physical-66"
+                        && socialRequested.Count == 101 && ReadString(socialRequested[0], "id", "") == "physical-1"
+                        && partyCapped.Count == 100 && ReadString(partyCapped[0], "id", "") == "physical-2"
+                        && ReadInt(partyCapped[^1], "sequence", 0) == 100,
+                        "The anonymous event and party routes keep their own defaults and the existing party-only upper limit.", null);
 
                     List<Dictionary<string, object>> addressedProfiles = new List<Dictionary<string, object>>
                     {

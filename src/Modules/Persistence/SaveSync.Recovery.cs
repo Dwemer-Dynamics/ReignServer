@@ -93,7 +93,7 @@ namespace ReignBetaServer
 
         private static List<string> FencedSaveSyncCampaignIds() => SaveSyncRecoveryFences.Keys
             .Where(path => Path.GetDirectoryName(path) == SaveSyncJournalDirectory(""))
-            .Select(Path.GetFileName).Concat(PortraitsService.FencedOutfitCampaigns())
+            .Select(Path.GetFileName).Concat(PortraitsService.FencedOutfitCampaigns()).Concat(CharactersService.FencedEditorCampaigns())
             .Distinct(StringComparer.Ordinal).ToList();
 
         private static SaveSyncFence FindSaveSyncFence(string campaignId)
@@ -106,26 +106,30 @@ namespace ReignBetaServer
         internal static bool HasSaveSyncJournalFence(string campaignId) => FindSaveSyncFence(campaignId) != null;
 
         private static string FencedSaveSyncOperation(string campaignId) => FindSaveSyncFence(campaignId)?.Id
-            ?? ReadString(PortraitsService.OutfitRecoveryStatus(campaignId), "operationId", null);
+            ?? ReadString(PortraitsService.OutfitRecoveryStatus(campaignId), "operationId", null)
+            ?? ReadString(CharactersService.EditorRecoveryStatus(campaignId), "operationId", null);
 
-        internal static void RequireSaveSyncCampaignAvailable(string campaignId)
+        internal static void RequireSaveSyncCampaignAvailable(string campaignId, bool allowEditorRecoveryWitness = false)
         {
             var fence = FindSaveSyncFence(campaignId);
             if (fence != null && fence.Id != SaveSyncOperationOwner)
                 throw new SaveSyncCampaignFencedException(campaignId, fence.Id, fence.Applying);
             var outfit = PortraitsService.OutfitRecoveryStatus(campaignId);
             if (outfit != null) throw new SaveSyncCampaignFencedException(outfit);
+            var editor = allowEditorRecoveryWitness ? null : CharactersService.EditorRecoveryStatus(campaignId);
+            if (editor != null) throw new SaveSyncCampaignFencedException(editor);
         }
 
         internal static void RequireSaveSyncConnectionAvailable(System.Data.Common.DbConnection connection)
         {
-            if (!SaveSyncRecoveryFences.IsEmpty || PortraitsService.HasOutfitRecoveryFences)
+            if (!SaveSyncRecoveryFences.IsEmpty || PortraitsService.HasOutfitRecoveryFences || CharactersService.HasEditorRecoveryFences)
                 RequireSaveSyncCampaignAvailable(ReignPostgreSqlStorage.CampaignIdForConnection(connection));
         }
 
         internal static void RequireSaveSyncPathAvailable(string path)
         {
-            if ((SaveSyncRecoveryFences.IsEmpty && !PortraitsService.HasOutfitRecoveryFences) || string.IsNullOrEmpty(path)) return;
+            if ((SaveSyncRecoveryFences.IsEmpty && !PortraitsService.HasOutfitRecoveryFences && !CharactersService.HasEditorRecoveryFences)
+                || string.IsNullOrEmpty(path)) return;
             string relative = Path.GetRelativePath(CampaignFileService.CampaignsRoot(), path);
             int separator = relative.IndexOf(Path.DirectorySeparatorChar);
             if (separator > 0) RequireSaveSyncCampaignAvailable(relative.Substring(0, separator));
@@ -137,6 +141,8 @@ namespace ReignBetaServer
             {
                 var outfit = PortraitsService.OutfitRecoveryStatus(campaignId);
                 if (outfit != null && ReadString(outfit, "operationId", "") == operation) return outfit;
+                var editor = CharactersService.EditorRecoveryStatus(campaignId);
+                if (editor != null && ReadString(editor, "operationId", "") == operation) return editor;
             }
             bool applying = applyingAtRead ?? (FindSaveSyncFence(campaignId) is { Applying: true } fence && fence.Id == operation);
             string outcome = applying ? "apply_in_progress" : "recovery_required";
@@ -159,10 +165,13 @@ namespace ReignBetaServer
             ImmutableInterlocked.Update(ref recoveryFences, current =>
                 current.TryGetValue(key, out var fence) && fence.Id == operation ? current.Remove(key) : current);
 
-        internal static void WriteRecoveryFile(string path, byte[] bytes, bool replace = true, UnixFileMode? mode = null)
+        internal static void WriteRecoveryFile(string path, byte[] bytes, bool replace = true, UnixFileMode? mode = null,
+            string temporaryDirectory = null)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path));
-            string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            temporaryDirectory ??= Path.GetDirectoryName(path);
+            Directory.CreateDirectory(temporaryDirectory);
+            string temp = Path.Combine(temporaryDirectory, Path.GetFileName(path) + "." + Guid.NewGuid().ToString("N") + ".tmp");
             try
             {
                 using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
@@ -485,6 +494,7 @@ namespace ReignBetaServer
         internal static void RequireOfflineSaveSyncCampaignAvailable(string campaignId, string campaignsRoot)
         {
             RequireSaveSyncJournalCampaign(campaignId);
+            CharactersService.RequireOfflineEditorCampaignAvailable(campaignsRoot, campaignId);
             PortraitsService.RequireOfflineOutfitCampaignAvailable(campaignsRoot, campaignId);
             string journals = SaveSyncJournalDirectory(campaignId, campaignsRoot);
             string directory = Path.GetDirectoryName(campaignsRoot);
@@ -542,6 +552,8 @@ namespace ReignBetaServer
             {
                 if (PortraitsService.AnyOfflineOutfitPublication(CampaignFileService.CampaignsRoot()))
                     return "Campaign deletion is blocked by an interrupted outfit publication.";
+                if (CharactersService.AnyOfflineEditorPublication(CampaignFileService.CampaignsRoot()))
+                    return "Campaign deletion is blocked by an interrupted Character Editor revision.";
                 foreach (string directory in SaveSyncJournalDirectories())
                     ReadSaveSyncOperations(Path.GetFileName(directory));
             }

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -59,6 +60,19 @@ namespace ReignBetaServer
             {
                 _latched = true;
                 _error = ex.GetType().Name + ": provider test guard could not be verified.";
+            }
+        }
+
+        internal bool ShouldDeferTownNotablePrewarm(string campaignId)
+        {
+            lock (_gate)
+            {
+                ObserveMarker();
+                return _manifest != null
+                    && string.Equals(_manifest["campaignId"], campaignId, StringComparison.Ordinal)
+                    && !string.Equals(_manifest["baselineSaveName"], _manifest["currentSaveName"], StringComparison.OrdinalIgnoreCase)
+                    && _manifest.TryGetValue("baselineSha256", out string? hash)
+                    && hash is { Length: 64 } && hash.All(Uri.IsHexDigit);
             }
         }
 

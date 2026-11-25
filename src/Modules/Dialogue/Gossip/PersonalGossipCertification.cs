@@ -83,9 +83,32 @@ namespace ReignBetaServer
         private static void EnsureGossipTestSchema(ReignDbConnection c) => DialogueSchema.CreatePersonalGossipTestFixtures(c);
 
 #if !REIGN_EXCLUDE_VERIFICATION
-        internal static Dictionary<string, object> PersonalGossipTestApi(Dictionary<string, object> p)
+        internal static Dictionary<string, object> PersonalGossipTestApiWithCampaignGate(Dictionary<string, object> payload)
         {
-            if (!GossipTestAuthorized(p)) throw new InvalidOperationException("An exact armed gossip command lease, paused Current and aligned recovery checkpoint are required.");
+            bool prepare = ReadString(ReadDictionary(payload, "testCase"), "phase", "") == "prepare";
+            var access = Program.EnterCampaignRequestReadAccess();
+            try
+            {
+                if (!prepare) return PersonalGossipTestApi(payload);
+                RequireAuthorizedGossipTest(payload);
+            }
+            finally { Program.ExitCampaignRequestAccess(access); }
+
+            // A suspended gossip provider can hold GossipGate while it reacquires
+            // campaign read access. Wait for GossipGate with no campaign lease.
+            using var gossip = PersistenceService.EnterCampaignWorkLock(GossipGate(ReadString(payload, "campaignId", "")));
+            return CharactersService.OwnEditorCampaignWrite(() => PersonalGossipTestApi(payload, gossipGateOwned: true));
+        }
+
+        private static void RequireAuthorizedGossipTest(Dictionary<string, object> payload)
+        {
+            if (!GossipTestAuthorized(payload))
+                throw new InvalidOperationException("An exact armed gossip command lease, paused Current and aligned recovery checkpoint are required.");
+        }
+
+        private static Dictionary<string, object> PersonalGossipTestApi(Dictionary<string, object> p, bool gossipGateOwned = false)
+        {
+            RequireAuthorizedGossipTest(p);
             string campaign = ReadString(p, "campaignId", ""), timeline = ReadString(p, "timelineId", "");
             var test = ReadDictionary(p, "testCase"); string phase = ReadString(test, "phase", "");
             ValidatePersonalGossipTestCase(test);
@@ -101,7 +124,7 @@ namespace ReignBetaServer
             if (!new[] { "catalog", "snapshot", "presence_contract", "prepare", "policy_probe", "tick", "conversation", "composition_probe" }.Contains(phase))
                 throw new ArgumentException("Unknown gossip test phase.");
             if (phase == "composition_probe") return PersonalGossipCompositionProbe(campaign, timeline, p, test);
-            using (PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
+            using (gossipGateOwned ? null : PersistenceService.EnterCampaignWorkLock(GossipGate(campaign)))
             using (var c = ReignDatabase.OpenCampaignConnection(campaign))
             {
                 EnsurePersonalGossipSchema(c); RelationshipsService.EnsureMbtiRelationshipSchema(c);
