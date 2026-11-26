@@ -84,7 +84,7 @@ namespace ReignBetaServer
                 string response = contentDelta != null ? PostStreamingProviderJson(apiUrl, apiKey, requestJson, settings, contentDelta, canceled)
                     : PostJsonToLlmWithTransientRetry(
                     apiUrl, apiKey, requestJson, settings, diagnostics,
-                    correlationId, requestType, model);
+                    correlationId, requestType, model, responseKey);
                 timer.Stop();
                 lock (ProviderMiddlewareLock)
                 {

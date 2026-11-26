@@ -375,6 +375,21 @@ namespace ReignBetaServer
             ConfigureReasoningRouting(reasoningSettings, TestDict("reasoningDisabled", true), unsupportedBody,
                 "https://example.invalid/v1/chat/completions", "fixture", "repair");
             add("reasoning_unrelated_provider_contract_unchanged", !unsupportedBody.ContainsKey("reasoning"), "Nano/OpenRouter controls are not added to unrelated providers.", null);
+            const string deskUrl = "http://127.0.0.1:18500/v1/chat/completions";
+            const string orionModel = "orion-26b-a4b-v1.1";
+            var groundingBody = TestDict("reasoning_effort", "high", "reasoning", TestDict("effort", "high"));
+            var groundingRoute = ConfigureReasoningRouting(reasoningSettings, TestDict("reasoningDisabled", true),
+                groundingBody, deskUrl, orionModel, "conversation_input_grounding");
+            var orionDialogueBody = TestDict();
+            ConfigureReasoningRouting(reasoningSettings, TestDict(), orionDialogueBody, deskUrl, orionModel, "dialogue");
+            var otherEndpointBody = TestDict();
+            ConfigureReasoningRouting(reasoningSettings, TestDict("reasoningDisabled", true), otherEndpointBody,
+                "http://127.0.0.1:18501/v1/chat/completions", orionModel, "conversation_input_grounding");
+            add("reasoning_local_orion_grounding_disabled",
+                ReadBool(groundingRoute, "providerControlsApplied", false)
+                && ReadString(groundingBody, "reasoning_effort", "") == "none" && !groundingBody.ContainsKey("reasoning")
+                && !orionDialogueBody.ContainsKey("reasoning_effort") && !otherEndpointBody.ContainsKey("reasoning_effort"),
+                "Orion grounding receives reasoning off on the Desk route while dialogue and other endpoints keep their defaults.", groundingRoute);
             string disabledCooldownKey = ReasoningRouteKey(PortraitsService.NanoGptChatCompletionsUrl, "fixture-disabled-cooldown");
             try
             {
