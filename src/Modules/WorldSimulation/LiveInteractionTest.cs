@@ -4,6 +4,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace ReignBetaServer
@@ -147,12 +150,26 @@ namespace ReignBetaServer
                 }
 
                 Dictionary<string, object> active = FindActiveLiveTestRun(campaignId);
+                if (active != null && ExpirePaidCourtLease(active, DateTimeOffset.UtcNow)) active = null;
                 string activeInstance = ReadString(active, "gameInstanceId", "");
-                if (ShouldInterruptLiveTestRunForInstance(active, gameInstanceId))
+                var paid = active == null ? null : GetPaidCourtCommand(active);
+                string paidProcess = ReadString(paid, "paidCourtLeasedProcessId", "");
+                bool paidOwnerReplaced = paid != null && (activeInstance != gameInstanceId
+                    || (paidProcess.Length > 0 && paidProcess != ReadString(ReadLiveTestExecutionIdentity(payload), "clientProcessInstanceId", "")));
+                if (paidOwnerReplaced && PaidCourtNativeDispatchAdmitted(paid))
                 {
-                    InterruptLiveTestRun(active,
-                        "The run belonged to game instance " + activeInstance
-                        + ", but the loaded campaign is now " + gameInstanceId + ".");
+                    var currentArm = CampaignFileService.ReadJsonObject(LiveTestArmPath());
+                    return TestDict("ok", false, "error", "The admitted paid Court owner retains the original lease until result or expiry.",
+                        "paidCourtDispatchHeld", true, "activeRunId", ReadString(active, "runId", ""),
+                        "authoritativeGameInstanceId", activeInstance, "armed", IsLiveTestArmed(currentArm),
+                        "armExpiresUtc", ReadString(currentArm, "expiresUtc", ""));
+                }
+                if (paidOwnerReplaced || ShouldInterruptLiveTestRunForInstance(active, gameInstanceId))
+                {
+                    InterruptLiveTestRun(active, paidOwnerReplaced
+                        ? "The paid Court owner changed before dispatch. A new paid Court run is required."
+                        : "The run belonged to game instance " + activeInstance
+                            + ", but the loaded campaign is now " + gameInstanceId + ".");
                 }
 
                 payload["schemaVersion"] = LiveTestSchemaVersion;
@@ -302,6 +319,7 @@ namespace ReignBetaServer
                         LoadLiveTestRun(campaignId, requestedRunId);
                     if (existing.Count > 0)
                     {
+                        ExpirePaidCourtLease(existing, DateTimeOffset.UtcNow);
                         string requestedQualificationId =
                             ReadString(payload, "qualificationId", "");
                         string requestedLabel =
@@ -325,7 +343,8 @@ namespace ReignBetaServer
                     }
                 }
                 Dictionary<string, object> active = FindActiveLiveTestRun(campaignId);
-                if (active != null) return new Dictionary<string, object>
+                if (active != null && !ExpirePaidCourtLease(active, DateTimeOffset.UtcNow))
+                    return new Dictionary<string, object>
                 {
                     ["ok"] = false, ["error"] = "A live interaction run is already active for this campaign.", ["activeRunId"] = ReadString(active, "runId", "")
                 };
@@ -388,6 +407,14 @@ namespace ReignBetaServer
                     run["executionObservationVersion"] = LiveTestExecutionObservationVersion;
                 }
                 run["commands"] = NormalizeLiveTestScenarioCommands(run, payload);
+                var normalized = ReadDictionaryList(run, "commands");
+                var requestedSteps = ReadDictionaryList(payload, "steps");
+                if (requestedSteps.Any(IsPaidCourtFixtureCommand) || normalized.Any(IsPaidCourtFixtureCommand))
+                {
+                    if (normalized.Count != 1 || requestedSteps.Count != 1 || GetPaidCourtCommand(run) == null
+                        || requestedInstance != liveInstance || !ReadBool(run, "autoCompleteWhenIdle", false))
+                        return LiveTestError("Paid Court acceptance requires one bound command in its own active run.");
+                }
                 if (ReadDictionaryList(payload, "steps").Any(step =>
                         string.Equals(ReadString(step, "operation", ReadString(step, "op", "")).Trim(),
                             "world_economy_test", StringComparison.OrdinalIgnoreCase))
@@ -440,6 +467,8 @@ namespace ReignBetaServer
                 Dictionary<string, object> command = NormalizeLiveTestCommand(run, payload);
                 if (command == null) return LiveTestError("Unsupported or invalid live-test command.");
                 List<Dictionary<string, object>> commands = ReadDictionaryList(run, "commands");
+                if (IsPaidCourtFixtureCommand(command) || commands.Any(IsPaidCourtFixtureCommand))
+                    return LiveTestError("Paid Court acceptance cannot enqueue additional commands.");
                 string commandId = ReadString(command, "commandId", "");
                 Dictionary<string, object> existing = commands.FirstOrDefault(x => string.Equals(ReadString(x, "commandId", ""), commandId, StringComparison.OrdinalIgnoreCase));
                 if (existing == null) commands.Add(command); else command = existing;
@@ -459,6 +488,16 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> run = LoadLiveTestRun(ReadString(payload, "campaignId", ""), ReadString(payload, "runId", ""));
                 if (run.Count == 0) return LiveTestError("Live interaction run was not found.");
+                if (GetPaidCourtCommand(run) is { } paid && !LiveTestTerminalRunStates.Contains(ReadString(run, "status", "")))
+                {
+                    if (ExpirePaidCourtLease(run, DateTimeOffset.UtcNow)) return LiveTestRunSummary(run, true);
+                    if (PaidCourtNativeDispatchAdmitted(paid))
+                        return LiveTestError("Paid Court native dispatch has already been admitted; await its receipt or expiry.");
+                    if (resume) return LiveTestError("A paid Court command cannot resume an earlier lease.");
+                    var now = DateTimeOffset.UtcNow;
+                    InterruptPaidCourtRun(run, paid, now, "Paused before native dispatch. A new paid Court run is required.");
+                    return LiveTestRunSummary(run, true);
+                }
                 string status = ReadString(run, "status", "");
                 if (resume && !status.Equals("paused", StringComparison.OrdinalIgnoreCase)) return LiveTestError("Only a paused run can resume.");
                 if (!resume && LiveTestTerminalRunStates.Contains(status)) return LiveTestError("A terminal run cannot be paused.");
@@ -512,6 +551,13 @@ namespace ReignBetaServer
             {
                 Dictionary<string, object> run = LoadLiveTestRun(ReadString(payload, "campaignId", ""), ReadString(payload, "runId", ""));
                 if (run.Count == 0) return LiveTestError("Live interaction run was not found.");
+                if (GetPaidCourtCommand(run) is { } paid)
+                {
+                    if (LiveTestTerminalRunStates.Contains(ReadString(run, "status", "")) || ExpirePaidCourtLease(run, DateTimeOffset.UtcNow))
+                        return LiveTestRunSummary(run, true);
+                    if (PaidCourtNativeDispatchAdmitted(paid))
+                        return LiveTestError("Paid Court native dispatch has already been admitted; await its receipt or expiry.");
+                }
                 run["status"] = "cancelled";
                 run["cancelRequested"] = true;
                 run["cancelledUtc"] = DateTimeOffset.UtcNow.ToString("o");
@@ -529,12 +575,24 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> LiveTestRunStatusApi(Dictionary<string, string> query, bool includeEvidence)
         {
             query = query ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            string campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : ReadString(LoadLiveTestRuntime(""), "campaignId", "");
+            string campaignId;
             string runId = query.TryGetValue("runId", out string requestedRun) ? requestedRun : "";
-            Dictionary<string, object> run = string.IsNullOrWhiteSpace(runId) ? FindLatestLiveTestRun(campaignId) : LoadLiveTestRun(campaignId, runId);
-            if (run == null || run.Count == 0) return new Dictionary<string, object> { ["ok"] = true, ["found"] = false, ["campaignId"] = campaignId };
-            Dictionary<string, object> response = LiveTestRunSummary(run, true);
-            response["found"] = true;
+            Dictionary<string, object> run;
+            Dictionary<string, object> response;
+            lock (LiveTestLock)
+            {
+                campaignId = query.TryGetValue("campaignId", out string campaign) ? campaign : ReadString(LoadLiveTestRuntime(""), "campaignId", "");
+                run = string.IsNullOrWhiteSpace(runId) ? FindLatestLiveTestRun(campaignId) : LoadLiveTestRun(campaignId, runId);
+                if (run == null || run.Count == 0)
+                    return new Dictionary<string, object> { ["ok"] = true, ["found"] = false, ["campaignId"] = campaignId };
+                // Read and classify expiry against the same snapshot as dispatch, without writing from GET.
+                var paid = GetPaidCourtCommand(run);
+                var now = DateTimeOffset.UtcNow;
+                string expiry = PaidCourtExpiryReason(run, paid, now);
+                if (expiry != null) SetPaidCourtInterrupted(run, paid, now, expiry);
+                response = LiveTestRunSummary(run, true);
+                response["found"] = true;
+            }
             if (includeEvidence)
             {
                 response["auditEvidence"] = CollectLiveTestAuditEvidence(run);
@@ -560,6 +618,8 @@ namespace ReignBetaServer
                     return LiveTestError("The polling game instance does not own this run.");
 
                 DateTimeOffset now = DateTimeOffset.UtcNow;
+                if (ExpirePaidCourtLease(run, now))
+                    return new Dictionary<string, object> { ["ok"] = true, ["found"] = false, ["armed"] = true };
                 bool conditionalCommandsSkipped =
                     SkipConditionalLiveTestCommandsWithSatisfiedDialogueActions(run, now);
                 Dictionary<string, object> command = FirstLiveTestCommandInSequence(run);
@@ -578,6 +638,22 @@ namespace ReignBetaServer
                     run["updatedUtc"] = now.ToString("o");
                     SaveLiveTestRun(run);
                     return new Dictionary<string, object> { ["ok"] = true, ["found"] = false, ["armed"] = true, ["runId"] = ReadString(run, "runId", ""), ["needsInput"] = true, ["command"] = command };
+                }
+                if (IsPaidCourtFixtureCommand(command))
+                {
+                    var arm = CampaignFileService.ReadJsonObject(LiveTestArmPath());
+                    var runtime = LoadLiveTestRuntime(campaignId);
+                    string armId = ReadString(arm, "armId", "");
+                    string process = ReadString(ReadLiveTestExecutionIdentity(runtime), "clientProcessInstanceId", "");
+                    if (!ReferenceEquals(GetPaidCourtCommand(run), command) || !IsLiveTestArmed(arm) || armId.Length == 0
+                        || !IsFreshLiveTestRuntime(runtime) || ReadString(runtime, "campaignId", "") != campaignId
+                        || ReadString(runtime, "gameInstanceId", "") != instanceId || !Guid.TryParseExact(process, "N", out _)
+                        || !PaidCourtMatchesLoadedScope(command, runtime)
+                        || PaidCourtString(runtime, "playerHeroId").Length == 0)
+                        return LiveTestError("The paid Court lease requires the exact armed native runtime.");
+                    command["paidCourtLeasedProcessId"] = process;
+                    command["paidCourtLeasedPayerId"] = PaidCourtString(runtime, "playerHeroId");
+                    command["paidCourtArmId"] = armId;
                 }
                 command["status"] = "leased";
                 command["leaseId"] = Guid.NewGuid().ToString("N");
@@ -685,6 +761,365 @@ namespace ReignBetaServer
             command["executionObservationVersion"] = LiveTestExecutionObservationVersion;
         }
 
+        private static bool IsPaidCourtFixtureCommand(Dictionary<string, object> command) =>
+            string.Equals(ReadString(command, "operation", ReadString(command, "op", "")).Trim(), "ruler_docket_test",
+                StringComparison.OrdinalIgnoreCase)
+            && (ReadString(command, "phase", "") is "court_life_paid_supply_preflight"
+                or "court_life_paid_supply_apply" or "court_life_paid_supply_verify");
+
+        private static bool IsPaidCourtRunIdentifier(string value) =>
+            value.Length == 43 && value.StartsWith("court_paid_", StringComparison.Ordinal)
+            && Guid.TryParseExact(value.Substring(11), "N", out _);
+
+        private static Dictionary<string, object> GetPaidCourtCommand(Dictionary<string, object> run)
+        {
+            var commands = ReadDictionaryList(run, "commands");
+            return commands.Count == 1 && IsPaidCourtFixtureCommand(commands[0])
+                && ReadString(run, "mode", "") == "spymaster" && ReadString(commands[0], "mode", "") == "spymaster"
+                && IsPaidCourtRunIdentifier(ReadString(run, "runId", ""))
+                && IsPaidCourtRunIdentifier(ReadString(commands[0], "commandId", ""))
+                && HasPaidCourtFixtureScope(commands[0]) ? commands[0] : null;
+        }
+
+        private static bool PaidCourtNativeDispatchAdmitted(Dictionary<string, object> command) =>
+            ReadString(command, "status", "") == "running" && HasPaidCourtDispatchRecord(command);
+
+        private static bool HasPaidCourtDispatchRecord(Dictionary<string, object> command)
+        {
+            if (command == null || !command.TryGetValue("paidCourtNativeDispatch", out object admitted) || admitted is not true
+                || !command.TryGetValue("paidCourtAuthorityVersion", out object version) || version is not 1)
+                return false;
+            string lease = ReadString(command, "leaseId", "");
+            var dispatchUtc = ParseLiveTestUtc(ReadString(command, "paidCourtNativeDispatchUtc", ""));
+            var started = ParseLiveTestUtc(ReadString(command, "leaseStartedUtc", ""));
+            return Guid.TryParseExact(lease, "N", out _)
+                && ReadString(command, "paidCourtNativeDispatchLeaseId", "") == lease
+                && started != DateTimeOffset.MinValue && dispatchUtc >= started
+                && dispatchUtc < ParseLiveTestUtc(ReadString(command, "leaseExpiresUtc", ""));
+        }
+
+        private static bool ExpirePaidCourtLease(Dictionary<string, object> run, DateTimeOffset now)
+        {
+            var command = GetPaidCourtCommand(run);
+            string expiry = PaidCourtExpiryReason(run, command, now);
+            if (expiry == null) return false;
+            InterruptPaidCourtRun(run, command, now, expiry);
+            return true;
+        }
+
+        private static string PaidCourtExpiryReason(Dictionary<string, object> run, Dictionary<string, object> command,
+            DateTimeOffset now)
+        {
+            if (command == null || LiveTestTerminalRunStates.Contains(ReadString(run, "status", ""))
+                || ReadString(command, "status", "") is not ("leased" or "accepted" or "running")
+                || ParseLiveTestUtc(ReadString(command, "leaseExpiresUtc", "")) > now)
+                return null;
+            return PaidCourtNativeDispatchAdmitted(command)
+                ? "Paid Court dispatch expired after admission. Reconcile the original native receipt before any retry."
+                : "Paid Court lease expired before native dispatch. No native dispatch was admitted.";
+        }
+
+        private static void InterruptPaidCourtRun(Dictionary<string, object> run, Dictionary<string, object> command,
+            DateTimeOffset now, string message)
+        {
+            SetPaidCourtInterrupted(run, command, now, message);
+            SaveLiveTestRun(run);
+        }
+
+        private static void SetPaidCourtInterrupted(Dictionary<string, object> run, Dictionary<string, object> command,
+            DateTimeOffset now, string message)
+        {
+            string stamp = now.ToString("o");
+            run["status"] = command["status"] = "interrupted";
+            run["message"] = command["message"] = message;
+            run["completedUtc"] = command["completedUtc"] = stamp;
+            run["updatedUtc"] = command["updatedUtc"] = stamp;
+        }
+
+        private static bool AdmitPaidCourtTransport(Dictionary<string, object> run, Dictionary<string, object> command,
+            Dictionary<string, object> payload, bool result)
+        {
+            // Caller holds LiveTestLock, including the durable ACK/result write below.
+            string campaign = ReadString(run, "campaignId", "");
+            var active = FindActiveLiveTestRun(campaign);
+            if (active == null || ReadString(active, "runId", "") != ReadString(run, "runId", ""))
+                return false;
+            var arm = CampaignFileService.ReadJsonObject(LiveTestArmPath());
+            var runtime = LoadLiveTestRuntime(campaign);
+            var now = DateTimeOffset.UtcNow;
+            return IsLiveTestArmed(arm) && IsFreshLiveTestRuntime(runtime)
+                && ApplyPaidCourtTransport(run, command, payload, runtime, ReadString(arm, "armId", ""), result, now);
+        }
+
+        private static bool ApplyPaidCourtTransport(Dictionary<string, object> run, Dictionary<string, object> command,
+            Dictionary<string, object> payload, Dictionary<string, object> runtime, string armId, bool result, DateTimeOffset now)
+        {
+            string requested = ReadString(payload, "status", "");
+            string phase = ReadString(command, "phase", "");
+            string process = ReadString(payload, "clientProcessInstanceId", "");
+            string state = ReadString(command, "status", "");
+            bool dispatched = PaidCourtNativeDispatchAdmitted(command);
+            if (!ReferenceEquals(GetPaidCourtCommand(run), command) || ReadString(run, "status", "") != "running"
+                || ReadBool(run, "cancelRequested", false) || !MatchesLiveTestCommandTransport(run, command, payload)
+                || ReadString(payload, "phase", "") != phase || string.IsNullOrWhiteSpace(armId)
+                || ReadString(runtime, "campaignId", "") != ReadString(run, "campaignId", "")
+                || ReadString(runtime, "gameInstanceId", "") != ReadString(run, "gameInstanceId", "")
+                || !PaidCourtMatchesLoadedScope(command, runtime)
+                || !PaidCourtMatches(command, "paidCourtLeasedPayerId", runtime, "playerHeroId")
+                || !Guid.TryParseExact(ReadString(command, "leaseId", ""), "N", out _)
+                || !Guid.TryParseExact(process, "N", out _)
+                || ReadString(ReadLiveTestExecutionIdentity(runtime), "clientProcessInstanceId", "") != process
+                || ReadString(command, "paidCourtLeasedProcessId", "") != process
+                || ReadString(command, "paidCourtArmId", "") != armId
+                || ParseLiveTestUtc(ReadString(command, "leaseExpiresUtc", "")) <= now)
+                return false;
+
+            if (!result && requested == "accepted" && state == "leased")
+            {
+                command["paidCourtAuthorityVersion"] = 1;
+                command["paidCourtAcceptedProcessId"] = process;
+                command["paidCourtNativeDispatch"] = false;
+                return true;
+            }
+
+            if (ReadString(command, "paidCourtAcceptedProcessId", "") != process)
+                return false;
+            if (!result && requested == "running" && state == "accepted" && !dispatched
+                && phase == "court_life_paid_supply_apply")
+            {
+                var terms = ReadDictionary(payload, "nativeTerms");
+                if (ReadPaidCourtFixtureTerms(command, terms) == null) return false;
+                command["paidCourtNativeDispatchTerms"] = terms;
+                command["paidCourtNativeDispatch"] = true;
+                command["paidCourtNativeDispatchLeaseId"] = ReadString(command, "leaseId", "");
+                command["paidCourtNativeDispatchUtc"] = now.ToString("o");
+                return true;
+            }
+            return result && (requested == "failed" || (requested == "completed" && PaidCourtCompletedEvidenceMatches(command, payload)))
+                && ((state == "running" && dispatched)
+                    || (state == "accepted" && !dispatched && (requested == "failed" || phase != "court_life_paid_supply_apply")));
+        }
+
+        private static bool PaidCourtCompletedEvidenceMatches(Dictionary<string, object> command, Dictionary<string, object> payload)
+        {
+            // Structural corroboration only. The diagnostic transport does not authenticate native origin.
+            var evidence = ReadDictionary(payload, "result");
+            string phase = ReadString(command, "phase", "");
+            if (!PaidCourtCompletionScopeMatches(command, evidence, out long revision, out long revisionAfter))
+                return false;
+
+            if (phase == "court_life_paid_supply_preflight")
+            {
+                if (revisionAfter != revision || PaidCourtString(evidence, "sourceSettlementId").Length == 0
+                    || !PaidCourtMatches(evidence, "payerHeroId", command, "paidCourtLeasedPayerId")
+                    || PaidCourtString(evidence, "itemId") != "grain"
+                    || !PaidCourtNumberIs(evidence, "itemAmount", 1) || !PaidCourtNumberIs(evidence, "goldAmount", 1)
+                    || !TryPaidCourtNumber(evidence, "sourceStock", out _) || !TryPaidCourtNumber(evidence, "payerGold", out _)
+                    || !evidence.TryGetValue("eligibleTargets", out object targets) || targets is not IList rows || rows.Count > 32)
+                    return false;
+                return rows.Cast<object>().All(row => row is Dictionary<string, object> target
+                    && PaidCourtString(target, "settlementId").Length > 0
+                    && TryPaidCourtNumber(target, "stock", out _) && TryPaidCourtNumber(target, "gold", out _));
+            }
+
+            var transfer = ReadPaidCourtTransferProof(command, evidence);
+            if (transfer == null) return false;
+            if (phase == "court_life_paid_supply_verify")
+                return revisionAfter == revision && transfer.Before == transfer.Journal.AfterPayment
+                    && PaidCourtTrue(evidence, "exactReloadReplay")
+                    && PaidCourtOriginalDispatchMatches(command, evidence, transfer);
+            return PaidCourtApplyCompletionMatches(command, evidence, transfer, revision, revisionAfter);
+        }
+
+        private static bool PaidCourtCompletionScopeMatches(Dictionary<string, object> command, Dictionary<string, object> evidence,
+            out long revision, out long revisionAfter)
+        {
+            revision = revisionAfter = default;
+            return PaidCourtTrue(evidence, "ok") && PaidCourtString(evidence, "schema") == "reign-court-life-paid-supply-v1"
+                && PaidCourtMatches(evidence, "runId", command, "fixtureRunId")
+                && PaidCourtMatches(evidence, "phase", command, "phase")
+                && PaidCourtMatches(evidence, "campaignTestRunId", command, "campaignTestRunId")
+                && PaidCourtMatches(evidence, "saveName", command, "expectedSaveName")
+                && PaidCourtMatches(evidence, "campaignId", command, "campaignId")
+                && PaidCourtMatches(evidence, "gameInstanceId", command, "gameInstanceId")
+                && PaidCourtMatches(evidence, "dispatchRunId", command, "runId")
+                && PaidCourtMatches(evidence, "savePointId", command, "expectedPaidSavePointId")
+                && PaidCourtMatches(evidence, "timelineId", command, "expectedPaidTimelineId")
+                && PaidCourtString(evidence, "sessionId").Length > 0
+                && TryPaidCourtNumber(evidence, "nativeProcessId", out long process) && process > 0 && process <= int.MaxValue
+                && PaidCourtLeasedProcessDigestMatches(command, PaidCourtString(evidence, "clientProcessInstanceSha256"))
+                && TryPaidCourtNumber(evidence, "sessionRevisionBefore", out revision)
+                && TryPaidCourtNumber(evidence, "sessionRevisionAfter", out revisionAfter);
+        }
+
+        private readonly record struct PaidCourtBalances(long Source, long Target, long Payer, long Recipient);
+        private sealed record PaidCourtJournal(string ReceiptId, PaidCourtBalances Before, PaidCourtBalances AfterRemoval,
+            PaidCourtBalances AfterDelivery, PaidCourtBalances AfterPayment);
+        private sealed record PaidCourtTransferProof(PaidCourtFixtureTerms Terms, PaidCourtBalances Before, PaidCourtJournal Journal);
+
+        private static PaidCourtTransferProof ReadPaidCourtTransferProof(Dictionary<string, object> command,
+            Dictionary<string, object> evidence)
+        {
+            var terms = ReadPaidCourtFixtureTerms(command, ReadDictionary(evidence, "terms"));
+            var receipt = ReadDictionary(evidence, "receipt");
+            var observations = ReadDictionary(receipt, "observations");
+            string receiptId = PaidCourtString(receipt, "receiptId");
+            if (terms == null || receiptId != "supply_receipt_" + terms.CommandId
+                || PaidCourtString(receipt, "phase") != "Verified" || !PaidCourtTrue(receipt, "exactVerifiedReceipt")
+                || !PaidCourtJournalBindingMatches(command, terms, PaidCourtString(observations, "Binding"))
+                || !PaidCourtNumberIs(observations, "Phase", 4)
+                || !PaidCourtHoldings(evidence, "before", out var before) || !PaidCourtHoldings(evidence, "after", out var after)
+                || !PaidCourtHoldings(observations, "Before", out var journalBefore)
+                || !PaidCourtHoldings(observations, "AfterRemoval", out var removed)
+                || !PaidCourtHoldings(observations, "AfterDelivery", out var delivered)
+                || !PaidCourtHoldings(observations, "AfterPayment", out var journalAfter)
+                || removed != new PaidCourtBalances(journalBefore.Source - 1, journalBefore.Target, journalBefore.Payer, journalBefore.Recipient)
+                || delivered != new PaidCourtBalances(journalBefore.Source - 1, journalBefore.Target + 1, journalBefore.Payer, journalBefore.Recipient)
+                || journalAfter != new PaidCourtBalances(journalBefore.Source - 1, journalBefore.Target + 1, journalBefore.Payer - 1, journalBefore.Recipient + 1)
+                || after != journalAfter)
+                return null;
+            return new PaidCourtTransferProof(terms, before, new PaidCourtJournal(receiptId, journalBefore, removed, delivered, journalAfter));
+        }
+
+        private static bool PaidCourtApplyCompletionMatches(Dictionary<string, object> command, Dictionary<string, object> evidence,
+            PaidCourtTransferProof transfer, long revision, long revisionAfter) =>
+            revision < long.MaxValue && revisionAfter == revision + 1 && transfer.Journal.Before == transfer.Before
+            && PaidCourtString(evidence, "state") == "verified"
+            && transfer.Terms == ReadPaidCourtFixtureTerms(command, ReadDictionary(command, "paidCourtNativeDispatchTerms"));
+
+        private static bool PaidCourtMatchesLoadedScope(Dictionary<string, object> command, Dictionary<string, object> runtime) =>
+            PaidCourtMatches(runtime, "activeSaveName", command, "expectedSaveName")
+            && PaidCourtMatches(ReadDictionary(runtime, "saveSync"), "timelineId", command, "expectedPaidTimelineId");
+
+        private static bool HasPaidCourtFixtureScope(Dictionary<string, object> command) =>
+            new[] { "campaignId", "fixtureRunId", "campaignTestRunId", "expectedPaidTimelineId" }.All(key =>
+                PaidCourtString(command, key) is { Length: > 0 and <= 160 } value
+                && value.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' or '.' or ':'))
+            && Guid.TryParseExact(PaidCourtString(command, "expectedPaidSavePointId"), "N", out _)
+            && PaidCourtString(command, "expectedSaveName").Length > 0;
+
+        // The diagnostic fixture reproduces the native formula for its four ASCII scope identifiers.
+        // It does not change how ordinary Court commands or native receipts are constructed.
+        private static string PaidCourtFixtureCommandId(Dictionary<string, object> command)
+        {
+            string campaign = PaidCourtString(command, "campaignId"), fixture = PaidCourtString(command, "fixtureRunId");
+            string owner = PaidCourtString(command, "campaignTestRunId"), timeline = PaidCourtString(command, "expectedPaidTimelineId");
+            return "court_paid_supply_" + Convert.ToHexString(SHA256.HashData(
+                JsonSerializer.SerializeToUtf8Bytes(new { campaign, fixture, owner, timeline }))).ToLowerInvariant();
+        }
+
+        private sealed record PaidCourtFixtureTerms(string CommandId, string Source, string Target, string Payer);
+
+        private static PaidCourtFixtureTerms ReadPaidCourtFixtureTerms(Dictionary<string, object> command, Dictionary<string, object> terms)
+        {
+            if (!HasPaidCourtFixtureScope(command) || terms == null)
+                return null;
+            var shape = new PaidCourtFixtureTerms(PaidCourtString(terms, "CommandId"), PaidCourtString(terms, "SourceSettlementStringId"),
+                PaidCourtString(terms, "TargetSettlementStringId"), PaidCourtString(terms, "GoldPayerStringId"));
+            return shape.CommandId == PaidCourtFixtureCommandId(command) && shape.Source.Length > 0 && shape.Source != shape.Target
+                && shape.Target.Length > 0 && PaidCourtMatches(terms, "TargetSettlementStringId", command, "paidSupplyTargetSettlementId")
+                && PaidCourtMatches(terms, "GoldPayerStringId", command, "paidCourtLeasedPayerId")
+                && PaidCourtString(terms, "GoldRecipientStringId") == shape.Target && PaidCourtString(terms, "GoldRecipientKind") == "settlement"
+                && PaidCourtString(terms, "GoldPayerKind") == "hero" && PaidCourtString(terms, "ItemStringId") == "grain"
+                && PaidCourtNumberIs(terms, "ItemAmount", 1) && PaidCourtNumberIs(terms, "GoldAmount", 1)
+                && terms.TryGetValue("VassalConsentGranted", out object consent) && consent is false ? shape : null;
+        }
+
+        private static bool PaidCourtJournalBindingMatches(Dictionary<string, object> command, PaidCourtFixtureTerms terms, string binding)
+        {
+            if (binding.Length == 0 || binding.Length > 4096) return false;
+            try
+            {
+                using var doc = JsonDocument.Parse(binding, new JsonDocumentOptions { MaxDepth = 3 });
+                var row = doc.RootElement;
+                return row.ValueKind == JsonValueKind.Array && row.GetArrayLength() == 12
+                    && JsonStringIs(row[0], PaidCourtString(command, "campaignId"))
+                    && JsonStringIs(row[1], PaidCourtString(command, "expectedPaidTimelineId"))
+                    && JsonStringIs(row[2], terms.Source) && JsonStringIs(row[3], terms.Target) && JsonStringIs(row[4], "grain")
+                    && JsonOne(row[5]) && JsonOne(row[6]) && JsonStringIs(row[7], "hero") && JsonStringIs(row[8], terms.Payer)
+                    && JsonStringIs(row[9], "settlement") && JsonStringIs(row[10], terms.Target) && row[11].ValueKind == JsonValueKind.False;
+            }
+            catch (JsonException) { return false; }
+
+            static bool JsonStringIs(JsonElement item, string expected) => item.ValueKind == JsonValueKind.String && item.GetString() == expected;
+            static bool JsonOne(JsonElement item) => item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out int value) && value == 1;
+        }
+
+        private static bool PaidCourtLeasedProcessDigestMatches(Dictionary<string, object> command, string digest)
+        {
+            string leaseProcess = PaidCourtString(command, "paidCourtLeasedProcessId");
+            return Guid.TryParseExact(leaseProcess, "N", out _)
+                && digest == Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(leaseProcess)));
+        }
+
+        private static bool PaidCourtOriginalDispatchMatches(Dictionary<string, object> command,
+            Dictionary<string, object> evidence, PaidCourtTransferProof transfer)
+        {
+            string originalRunId = PaidCourtString(evidence, "originalDispatchRunId");
+            if (!IsPaidCourtRunIdentifier(originalRunId) || originalRunId == PaidCourtString(command, "runId")) return false;
+            string campaign = PaidCourtString(command, "campaignId");
+            var originalRun = LoadLiveTestRun(campaign, originalRunId);
+            var original = GetPaidCourtCommand(originalRun);
+            if (original == null || !HasPaidCourtDispatchRecord(original)
+                || !PaidCourtMatches(originalRun, "runId", evidence, "originalDispatchRunId")
+                || ReadString(originalRun, "status", "") is not ("completed" or "failed" or "interrupted")
+                || !PaidCourtMatches(original, "campaignId", command, "campaignId")
+                || PaidCourtString(original, "phase") != "court_life_paid_supply_apply"
+                || !PaidCourtMatches(evidence, "originalGameInstanceId", original, "gameInstanceId")
+                || !PaidCourtMatches(evidence, "originalSavePointId", original, "expectedPaidSavePointId")
+                || PaidCourtString(evidence, "originalGameInstanceId") == PaidCourtString(evidence, "gameInstanceId")
+                || PaidCourtString(evidence, "originalSavePointId") == PaidCourtString(evidence, "savePointId")
+                || !PaidCourtLeasedProcessDigestMatches(original, PaidCourtString(evidence, "originalClientProcessInstanceSha256"))
+                || PaidCourtString(evidence, "originalClientProcessInstanceSha256") == PaidCourtString(evidence, "clientProcessInstanceSha256"))
+                return false;
+            if (transfer.Terms != ReadPaidCourtFixtureTerms(original, ReadDictionary(original, "paidCourtNativeDispatchTerms")))
+                return false;
+
+            string runStatus = ReadString(originalRun, "status", ""), resultStatus = ReadString(original, "status", "");
+            if (runStatus != "completed" && resultStatus != "completed")
+                return true; // Failed or interrupted dispatch still permits locally observed reconciliation.
+            if (runStatus != "completed" || resultStatus != "completed")
+                return false;
+
+            var originalEvidence = ReadDictionary(original, "result");
+            if (!PaidCourtCompletionScopeMatches(original, originalEvidence, out long revision, out long revisionAfter))
+                return false;
+            var originalTransfer = ReadPaidCourtTransferProof(original, originalEvidence);
+            return originalTransfer != null && PaidCourtApplyCompletionMatches(original, originalEvidence, originalTransfer, revision, revisionAfter)
+                && originalTransfer.Terms == transfer.Terms && originalTransfer.Journal == transfer.Journal;
+        }
+
+        private static string PaidCourtString(Dictionary<string, object> data, string key) =>
+            data != null && data.TryGetValue(key, out object raw) && raw is string value ? value : "";
+
+        private static bool PaidCourtMatches(Dictionary<string, object> data, string key, Dictionary<string, object> expected, string expectedKey) =>
+            PaidCourtString(data, key) is { Length: > 0 } actual && actual == PaidCourtString(expected, expectedKey);
+
+        private static bool PaidCourtTrue(Dictionary<string, object> data, string key) =>
+            data != null && data.TryGetValue(key, out object raw) && raw is true;
+
+        private static bool TryPaidCourtNumber(Dictionary<string, object> data, string key, out long value)
+        {
+            value = data != null && data.TryGetValue(key, out object raw) ? raw switch { int i => i, long l => l, _ => -1 } : -1;
+            return value >= 0;
+        }
+
+        private static bool PaidCourtNumberIs(Dictionary<string, object> data, string key, long expected) =>
+            TryPaidCourtNumber(data, key, out long actual) && actual == expected;
+
+        private static bool PaidCourtHoldings(Dictionary<string, object> root, string key,
+            out PaidCourtBalances holdings)
+        {
+            holdings = default;
+            var balances = ReadDictionary(root, key);
+            if (!TryPaidCourtNumber(balances, "Source", out long source) || !TryPaidCourtNumber(balances, "Target", out long target)
+                || !TryPaidCourtNumber(balances, "Payer", out long payer) || !TryPaidCourtNumber(balances, "Recipient", out long recipient)
+                || Math.Max(Math.Max(source, target), Math.Max(payer, recipient)) > int.MaxValue)
+                return false;
+            holdings = new PaidCourtBalances(source, target, payer, recipient);
+            return true;
+        }
+
         private static bool MatchesLiveTestCommandTransport(Dictionary<string, object> run,
             Dictionary<string, object> command, Dictionary<string, object> report)
         {
@@ -772,6 +1207,7 @@ namespace ReignBetaServer
         {
             string state = ReadString(command, "status", "");
             if (state.Equals("queued", StringComparison.OrdinalIgnoreCase)) return true;
+            if (IsPaidCourtFixtureCommand(command)) return false;
             if (!state.Equals("leased", StringComparison.OrdinalIgnoreCase)
                 && !state.Equals("accepted", StringComparison.OrdinalIgnoreCase)
                 && !state.Equals("running", StringComparison.OrdinalIgnoreCase))
@@ -865,6 +1301,9 @@ namespace ReignBetaServer
                 if (run.Count == 0) return LiveTestError("Live interaction run was not found.");
                 Dictionary<string, object> command = ReadDictionaryList(run, "commands").FirstOrDefault(x => string.Equals(ReadString(x, "commandId", ""), commandId, StringComparison.OrdinalIgnoreCase));
                 if (command == null) return LiveTestError("Live interaction command was not found.");
+                bool paidCourt = IsPaidCourtFixtureCommand(command);
+                if (paidCourt && !AdmitPaidCourtTransport(run, command, payload, result))
+                    return LiveTestError("The paid Court command no longer has an active authority for this operation.");
                 bool observesExecution = IsLiveTestExecutionEvidenceRun(run);
                 Dictionary<string, object> observation = null;
                 if (observesExecution)
@@ -898,7 +1337,9 @@ namespace ReignBetaServer
                 if (!new[] { "accepted", "running", "needs_input", "completed", "failed", "cancelled", "interrupted" }.Contains(status))
                     status = result ? "failed" : "accepted";
                 string reportedError = ReadString(payload, "error", ReadString(payload, "message", "Command failed."));
-                bool fatalInfrastructureFailure = result && status == "failed" && IsFatalLiveTestInfrastructureFailure(reportedError);
+                bool infrastructureFailure = result && status == "failed" && IsFatalLiveTestInfrastructureFailure(reportedError);
+                bool fatalInfrastructureFailure = !paidCourt && infrastructureFailure;
+                bool paidDispatchAdmitted = paidCourt && PaidCourtNativeDispatchAdmitted(command);
                 if (fatalInfrastructureFailure) status = "needs_input";
                 if (observesExecution && !result && (status is "accepted" or "running")
                     && ReadString(command, "operation", "") == "send")
@@ -918,6 +1359,15 @@ namespace ReignBetaServer
                         : ReadDictionary(payload, "result") ?? new Dictionary<string, object>();
                     command["error"] = fatalInfrastructureFailure ? DialogueService.LimitText(reportedError, 2000) : ReadString(payload, "error", "");
                     command["correlationIds"] = ReadStringList(payload, "correlationIds");
+                    if (paidCourt && status == "failed")
+                    {
+                        var failure = ReadDictionary(command, "result");
+                        failure["terminalInfrastructureFailure"] = infrastructureFailure;
+                        failure["nativeDispatchAdmitted"] = paidDispatchAdmitted;
+                        failure["reconciliationRequired"] = paidDispatchAdmitted;
+                        failure["error"] = DialogueService.LimitText(reportedError, 2000);
+                        command["result"] = failure;
+                    }
                     if (fatalInfrastructureFailure)
                     {
                         command["pauseReason"] = "fatal_infrastructure_failure";

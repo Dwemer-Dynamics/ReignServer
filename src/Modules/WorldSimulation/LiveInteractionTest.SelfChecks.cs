@@ -4,7 +4,12 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ReignBetaServer
 {
@@ -309,6 +314,458 @@ namespace ReignBetaServer
                 "Party results select each exact accepted speaker unit, independent of the shared group exchange.");
         }
 
+        private static void AddPaidCourtDispatchAuthorityChecks(Action<string, bool, string> add)
+        {
+            const string process = "00000000000000000000000000000005";
+            const string arm = "armed";
+            const string phase = "court_life_paid_supply_apply";
+            const string lease = "00000000000000000000000000000006";
+            var now = new DateTimeOffset(2026, 11, 25, 0, 0, 0, TimeSpan.Zero);
+            var expires = now.AddSeconds(LiveTestLeaseSeconds);
+            var run = TestDict("campaignId", "owned", "gameInstanceId", "loaded-game", "status", "running",
+                "mode", "spymaster", "runId", "court_paid_00000000000000000000000000000001");
+            var command = TestDict("campaignId", "owned", "gameInstanceId", "loaded-game", "runId", run["runId"],
+                "commandId", "court_paid_00000000000000000000000000000002", "mode", "spymaster",
+                "operation", "ruler_docket_test", "phase", phase, "status", "leased", "leaseId", lease,
+                "leaseStartedUtc", now.ToString("o"), "leaseExpiresUtc", expires.ToString("o"),
+                "paidCourtLeasedProcessId", process, "paidCourtArmId", arm, "fixtureRunId", "fixture",
+                "campaignTestRunId", "owner", "expectedSaveName", "ReignTest_Court_Current", "paidSupplyTargetSettlementId", "fort",
+                "expectedPaidTimelineId", "main", "expectedPaidSavePointId", "10000000000000000000000000000001",
+                "paidCourtLeasedPayerId", "ruler");
+            run["commands"] = new List<Dictionary<string, object>> { command };
+            var runtime = TestDict("campaignId", "owned", "gameInstanceId", "loaded-game", "activeSaveName", "ReignTest_Court_Current",
+                "playerHeroId", "ruler", "saveSync", TestDict("timelineId", "main"), "executionIdentity",
+                TestDict("schemaVersion", LiveTestExecutionObservationVersion, "clientProcessInstanceId", process,
+                    "moduleIds", TestDict("ReignBeta", "00000000-0000-0000-0000-000000000001")));
+            var wire = TestDict("campaignId", "owned", "gameInstanceId", "loaded-game", "runId", run["runId"],
+                "commandId", command["commandId"], "phase", phase, "leaseId", lease, "clientProcessInstanceId", process);
+            bool Allows(string status, bool result = false, DateTimeOffset? at = null, string observedArm = arm)
+            {
+                wire["status"] = status;
+                return ApplyPaidCourtTransport(run, command, wire, runtime, observedArm, result, at ?? now);
+            }
+
+            wire["leaseId"] = "00000000000000000000000000000007";
+            bool wrongLeaseRejected = !Allows("accepted");
+            wire["leaseId"] = lease;
+            wire["clientProcessInstanceId"] = "00000000000000000000000000000008";
+            bool wrongProcessRejected = !Allows("accepted");
+            wire["clientProcessInstanceId"] = process;
+            wire["gameInstanceId"] = "new-game";
+            bool wrongGameRejected = !Allows("accepted");
+            wire["gameInstanceId"] = "loaded-game";
+            wire["runId"] = "replacement";
+            bool wrongRunRejected = !Allows("accepted");
+            wire["runId"] = run["runId"];
+            add("paid_court_transport_exact_actor_and_lease", wrongLeaseRejected && wrongProcessRejected
+                && wrongGameRejected && wrongRunRejected && !Allows("accepted", observedArm: "rearmed")
+                && !Allows("accepted", at: expires) && Allows("accepted") && !PaidCourtNativeDispatchAdmitted(command),
+                "Initial acceptance requires the original armed actor, active scope and live lease and gives no native authority.");
+
+            command["status"] = "accepted";
+            run["status"] = "cancelled";
+            bool cancelWon = !Allows("running") && !Allows("completed", true);
+            run["status"] = "paused";
+            bool pauseWon = !Allows("running");
+            run["status"] = "running";
+            run["cancelRequested"] = true;
+            bool cancellationCannotResume = !Allows("running");
+            run.Remove("cancelRequested");
+            var observedActor = ReadDictionary(runtime, "executionIdentity");
+            observedActor["clientProcessInstanceId"] = "00000000000000000000000000000009";
+            bool replacedActorRejected = !Allows("running");
+            observedActor["clientProcessInstanceId"] = process;
+            bool beforeDispatch = !Allows("completed", true) && !Allows("running", at: expires)
+                && PaidCourtExpiryReason(run, command, expires)?.Contains("No native dispatch was admitted", StringComparison.Ordinal) == true;
+            var terms = PaidCourtTestTerms(command);
+            bool knownCommand = ReadString(terms, "CommandId", "") ==
+                "court_paid_supply_006e0548c957ece0742e4b9ead3c8c683e5482d3c08f9f0a3ca47f1cd59126cd";
+            bool missingTermsRejected = !Allows("running");
+            wire["nativeTerms"] = terms;
+            bool committed = Allows("running", at: expires.AddTicks(-1));
+            command["status"] = "running";
+            bool unprovenCompletionRejected = !Allows("completed", true);
+            wire["result"] = PaidCourtTestCompletion(command);
+            add("paid_court_dispatch_orders_cancel_and_completion",
+                knownCommand && missingTermsRejected && cancelWon && pauseWon && cancellationCannotResume
+                && replacedActorRejected && beforeDispatch && committed
+                && PaidCourtNativeDispatchAdmitted(command) && !Allows("running") && unprovenCompletionRejected
+                && Allows("completed", true) && !Allows("completed", true, expires)
+                && !IsLiveTestCommandLeaseEligible(command, expires.AddSeconds(1))
+                && PaidCourtExpiryReason(run, command, expires)?.Contains("Reconcile the original native receipt", StringComparison.Ordinal) == true,
+                "Cancellation or pause before commit defeats dispatch. The exact one-time commit alone can finish before expiry, with no expired redelivery.");
+        }
+
+        private static Dictionary<string, object> PaidCourtTestTerms(Dictionary<string, object> command, string source = "capital")
+        {
+            return TestDict("CommandId", PaidCourtFixtureCommandId(command), "TargetSettlementStringId", command["paidSupplyTargetSettlementId"],
+                "GoldRecipientStringId", command["paidSupplyTargetSettlementId"], "SourceSettlementStringId", source,
+                "GoldRecipientKind", "settlement", "GoldPayerKind", "hero", "GoldPayerStringId", "ruler",
+                "ItemStringId", "grain", "ItemAmount", 1, "GoldAmount", 1, "VassalConsentGranted", false);
+        }
+
+        private static Dictionary<string, object> PaidCourtTestCompletion(Dictionary<string, object> command, string source = "capital",
+            int sourceBalanceOffset = 0)
+        {
+            static Dictionary<string, object> Balances(int stock, int target, int payer, int recipient) =>
+                TestDict("Source", stock, "Target", target, "Payer", payer, "Recipient", recipient);
+            var before = Balances(5 + sourceBalanceOffset, 10, 20, 30);
+            var after = Balances(4 + sourceBalanceOffset, 11, 19, 31);
+            var terms = PaidCourtTestTerms(command, source);
+            string binding = JsonSerializer.Serialize(new object[] { command["campaignId"], command["expectedPaidTimelineId"],
+                source, terms["TargetSettlementStringId"], "grain", 1, 1, "hero", "ruler", "settlement", terms["TargetSettlementStringId"], false });
+            string process = ReadString(command, "paidCourtLeasedProcessId", "");
+            return TestDict("ok", true, "schema", "reign-court-life-paid-supply-v1", "runId", command["fixtureRunId"], "dispatchRunId", command["runId"],
+                "phase", command["phase"], "campaignTestRunId", command["campaignTestRunId"], "saveName", command["expectedSaveName"],
+                "campaignId", command["campaignId"], "gameInstanceId", command["gameInstanceId"],
+                "savePointId", command["expectedPaidSavePointId"], "timelineId", command["expectedPaidTimelineId"], "sessionId", "sitting",
+                "nativeProcessId", 45, "clientProcessInstanceSha256", Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(process))),
+                "sessionRevisionBefore", 10, "sessionRevisionAfter", 11, "state", "verified", "terms", terms,
+                "before", before, "after", after,
+                "receipt", TestDict("receiptId", "supply_receipt_" + terms["CommandId"], "phase", "Verified", "exactVerifiedReceipt", true,
+                    "observations", TestDict("Binding", binding, "Phase", 4, "Before", before,
+                        "AfterRemoval", Balances(4 + sourceBalanceOffset, 10, 20, 30),
+                        "AfterDelivery", Balances(4 + sourceBalanceOffset, 11, 20, 30), "AfterPayment", after)));
+        }
+
+        private static void AddPaidCourtResultRouteChecks(Action<string, bool, string> add)
+        {
+            const string campaign = "paid_court_contract";
+            const string game = "game-20261125000001-first", replacement = "game-20261125000002-replacement";
+            const string next = "game-20261125000003-next", last = "game-20261125000004-last";
+            const string process = "10000000000000000000000000000002", replacementProcess = "10000000000000000000000000000003";
+            const string nextProcess = "10000000000000000000000000000004", lastProcess = "10000000000000000000000000000005";
+            const string phase = "court_life_paid_supply_apply";
+            const string point = "10000000000000000000000000000001", postPoint = "10000000000000000000000000000006";
+            string fixture = Path.Combine(Path.GetTempPath(), "reign-d54-live-result-" + Guid.NewGuid().ToString("N"));
+            string priorLive = LiveTestFixtureRoot.Value, priorCampaigns = Program.CampaignsRootOverride.Value;
+            try
+            {
+                LiveTestFixtureRoot.Value = Path.Combine(fixture, "live");
+                Program.CampaignsRootOverride.Value = Path.Combine(fixture, "campaigns");
+                LiveTestArmApi(TestDict("confirmation", "arm", "minutes", 2));
+                Dictionary<string, object> Pulse(string instance, string actor) =>
+                    LiveTestHeartbeatApi(TestDict("campaignId", campaign, "gameInstanceId", instance,
+                        "playerHeroId", "ruler", "activeSaveName", "ReignTest_Court_Current", "saveSync", TestDict("timelineId", "main"),
+                        "characterInitialization", TestDict("notableBackgroundReady", true),
+                        "executionIdentity", TestDict("schemaVersion", LiveTestExecutionObservationVersion, "clientProcessInstanceId", actor,
+                            "moduleIds", TestDict("ReignBeta", "10000000-0000-0000-0000-000000000001"))));
+                Pulse(game, process);
+
+                string Start(string instance = game, string paidPhase = phase, string savePoint = point)
+                {
+                    string id = "court_paid_" + Guid.NewGuid().ToString("N");
+                    var step = TestDict("operation", "ruler_docket_test", "phase", paidPhase, "commandId", "court_paid_" + Guid.NewGuid().ToString("N"),
+                        "fixtureRunId", "fixture", "campaignTestRunId", "owner", "expectedSaveName", "ReignTest_Court_Current",
+                        "expectedPaidTimelineId", "main", "expectedPaidSavePointId", savePoint,
+                        "paidSupplyTargetSettlementId", paidPhase == "court_life_paid_supply_preflight" ? "" : "fort",
+                        "PAIDCOURTNATIVEDISPATCH", true, "paidCourtAuthorityVersion", 1,
+                        "paidCourtNativeDispatchUtc", DateTimeOffset.UtcNow.ToString("o"), "leaseId", Guid.NewGuid().ToString("N"),
+                        "leaseExpiresUtc", DateTimeOffset.UtcNow.AddMinutes(10).ToString("o"), "result", TestDict("ok", true));
+                    var started = LiveTestRunStartApi(TestDict("mode", "spymaster", "runId", id, "campaignId", campaign,
+                        "gameInstanceId", instance, "steps", new[] { step }));
+                    return ReadBool(started, "ok", false) ? id : "";
+                }
+
+                Dictionary<string, object> Address(string id) => TestDict("campaignId", campaign, "runId", id);
+                Dictionary<string, object> Status(string id) => LiveTestRunStatusApi(new Dictionary<string, string>
+                { ["campaignId"] = campaign, ["runId"] = id }, false);
+                Dictionary<string, object> Wire(Dictionary<string, object> poll, string instance = game, string actor = process)
+                {
+                    var command = ReadDictionary(poll, "command");
+                    return TestDict("campaignId", campaign, "gameInstanceId", instance, "runId", ReadString(command, "runId", ""),
+                        "commandId", ReadString(command, "commandId", ""), "leaseId", ReadString(command, "leaseId", ""),
+                        "phase", ReadString(command, "phase", ""), "clientProcessInstanceId", actor);
+                }
+
+                bool Begin(string id, Dictionary<string, object> call)
+                {
+                    call["status"] = "running";
+                    call["nativeTerms"] = PaidCourtTestTerms(GetPaidCourtCommand(LoadLiveTestRun(campaign, id)));
+                    return ReadBool(LiveTestGameAckApi(call), "ok", false);
+                }
+
+                void AgeDispatch(string id)
+                {
+                    var run = LoadLiveTestRun(campaign, id);
+                    var paid = GetPaidCourtCommand(run);
+                    // Keep the admitted witness internally consistent while simulating the passage of the whole lease.
+                    foreach (string stamp in new[] { "leaseStartedUtc", "paidCourtNativeDispatchUtc", "leaseExpiresUtc" })
+                        paid[stamp] = ParseLiveTestUtc(ReadString(paid, stamp, "")).AddSeconds(-60).ToString("o");
+                    SaveLiveTestRun(run);
+                }
+
+                var queued = Start();
+                var raw = GetPaidCourtCommand(LoadLiveTestRun(campaign, queued));
+                bool clean = raw != null && !raw.Keys.Any(key => key.StartsWith("paidCourt", StringComparison.OrdinalIgnoreCase))
+                    && !raw.ContainsKey("leaseId") && !raw.ContainsKey("result");
+                bool cancelWon = ReadString(LiveTestRunCancelApi(Address(queued)), "status", "") == "cancelled";
+                var pauseId = Start();
+                bool pauseWon = ReadString(LiveTestRunPauseApi(Address(pauseId), false), "status", "") == "interrupted";
+                add("paid_court_route_discards_caller_authority", clean && cancelWon && pauseWon,
+                    "Reserved fields supplied through run start cannot manufacture a dispatch or wedge actual cancel and pause routes.");
+
+                foreach (string code in new[] { "401", "402" })
+                {
+                    string id = Start();
+                    var lease = Wire(LiveTestGamePollApi(TestDict("campaignId", campaign, "gameInstanceId", game)));
+                    lease["status"] = "accepted";
+                    bool ack = ReadBool(LiveTestGameAckApi(lease), "ok", false);
+                    if (code == "402")
+                    {
+                        ack &= Begin(id, lease);
+                    }
+                    lease["status"] = "failed";
+                    lease["error"] = "HTTP " + code + " while validating paid terms";
+                    lease["result"] = TestDict("fixtureField", "retained");
+                    bool saved = ReadBool(LiveTestGameResultApi(lease), "ok", false);
+                    var report = Status(id);
+                    var result = ReadDictionary(GetPaidCourtCommand(report), "result");
+                    add("paid_court_route_terminal_http_" + code, ack && saved && ReadString(report, "status", "") == "failed"
+                        && ReadBool(result, "terminalInfrastructureFailure", false)
+                        && ReadBool(result, "reconciliationRequired", false) == (code == "402")
+                        && ReadString(result, "fixtureField", "") == "retained" && ReadString(result, "error", "").Contains(code),
+                        "The actual result and status routes retain HTTP infrastructure evidence in a terminal paid run.");
+                }
+
+                string successId = Start();
+                var success = Wire(LiveTestGamePollApi(TestDict("campaignId", campaign, "gameInstanceId", game)));
+                success["status"] = "accepted";
+                bool valid = ReadBool(LiveTestGameAckApi(success), "ok", false);
+                valid &= Begin(successId, success);
+                success["status"] = "completed";
+                var paidSuccess = GetPaidCourtCommand(LoadLiveTestRun(campaign, successId));
+                bool RejectResult(Action<Dictionary<string, object>> alter, string source = "capital")
+                {
+                    var altered = PaidCourtTestCompletion(paidSuccess, source);
+                    alter(altered);
+                    success["result"] = altered;
+                    return !ReadBool(LiveTestGameResultApi(success), "ok", false);
+                }
+
+                bool wrongScopeRejected = RejectResult(row => row["runId"] = "other-fixture")
+                    && RejectResult(row => row["campaignId"] = "other_campaign")
+                    && RejectResult(row => row["campaignTestRunId"] = "other_owner")
+                    && RejectResult(row => row["timelineId"] = "other_timeline")
+                    && RejectResult(row => row["savePointId"] = postPoint)
+                    && RejectResult(row => row["dispatchRunId"] = "court_paid_00000000000000000000000000000009");
+                bool wrongTermsRejected = RejectResult(row => ReadDictionary(row, "terms")["CommandId"] = "court_paid_supply_other")
+                    && RejectResult(row => ReadDictionary(row, "terms")["VassalConsentGranted"] = true)
+                    && RejectResult(row => ReadDictionary(row, "terms").Remove("VassalConsentGranted"))
+                    && RejectResult(_ => { }, "other_capital");
+                bool wrongJournalRejected = RejectResult(row => ReadDictionary(row, "receipt")["receiptId"] = "supply_receipt_other")
+                    && RejectResult(row => ReadDictionary(ReadDictionary(row, "receipt"), "observations")["Binding"] = "[]")
+                    && RejectResult(row => ReadDictionary(ReadDictionary(row, "receipt"), "observations").Remove("AfterRemoval"))
+                    && RejectResult(row => ReadDictionary(ReadDictionary(row, "receipt"), "observations").Remove("AfterDelivery"))
+                    && RejectResult(row =>
+                        ReadDictionary(ReadDictionary(ReadDictionary(row, "receipt"), "observations"), "AfterRemoval")["Payer"] = 19)
+                    && RejectResult(row =>
+                        ReadDictionary(ReadDictionary(ReadDictionary(row, "receipt"), "observations"), "AfterDelivery")["Target"] = 12)
+                    && RejectResult(row => row["clientProcessInstanceSha256"] = new string('F', 64));
+                success["result"] = PaidCourtTestCompletion(paidSuccess);
+                valid &= ReadBool(LiveTestGameResultApi(success), "ok", false);
+                add("paid_court_route_completed_requires_local_receipt_shape", wrongScopeRejected && wrongTermsRejected
+                    && wrongJournalRejected && valid && ReadString(Status(successId), "status", "") == "completed",
+                    "The real result route rejects substituted scope, consent, actor, terms and journal stages before accepting production-shaped evidence.");
+
+                string dispatchedId = Start();
+                var call = Wire(LiveTestGamePollApi(TestDict("campaignId", campaign, "gameInstanceId", game)));
+                call["status"] = "accepted";
+                bool accepted = ReadBool(LiveTestGameAckApi(call), "ok", false);
+                call["status"] = "completed";
+                bool emptyReject = !ReadBool(LiveTestGameResultApi(call), "ok", false);
+                Task<Dictionary<string, object>> statusReader;
+                bool blockedBeforeAck;
+                bool commit;
+                bool cancelAfterCommitRefused;
+                bool missingReceiptRejected;
+                using (var started = new ManualResetEventSlim())
+                {
+                    lock (LiveTestLock)
+                    {
+                        var run = LoadLiveTestRun(campaign, dispatchedId);
+                        var paid = GetPaidCourtCommand(run);
+                        string future = ReadString(paid, "leaseExpiresUtc", "");
+                        paid["leaseExpiresUtc"] = DateTimeOffset.UtcNow.AddSeconds(-1).ToString("o");
+                        SaveLiveTestRun(run);
+                        statusReader = Task.Run(() => { started.Set(); return Status(dispatchedId); });
+                        blockedBeforeAck = started.Wait(TimeSpan.FromSeconds(3)) && !statusReader.Wait(TimeSpan.FromMilliseconds(80));
+                        paid["leaseExpiresUtc"] = future;
+                        SaveLiveTestRun(run);
+                        commit = Begin(dispatchedId, call);
+                        cancelAfterCommitRefused = !ReadBool(LiveTestRunCancelApi(Address(dispatchedId)), "ok", false);
+                        run = LoadLiveTestRun(campaign, dispatchedId);
+                        paid = GetPaidCourtCommand(run);
+                        call["status"] = "completed";
+                        var malformed = PaidCourtTestCompletion(paid);
+                        malformed.Remove("receipt");
+                        call["result"] = malformed;
+                        missingReceiptRejected = !ReadBool(LiveTestGameResultApi(call), "ok", false);
+                        AgeDispatch(dispatchedId);
+                    }
+                    var status = statusReader.GetAwaiter().GetResult();
+                    var statusPaid = GetPaidCourtCommand(status);
+                    add("paid_court_route_status_reads_committed_expiry", accepted && emptyReject && blockedBeforeAck && commit
+                        && cancelAfterCommitRefused && missingReceiptRejected && ReadString(status, "status", "") == "interrupted"
+                        && ReadString(statusPaid, "message", "").Contains("Reconcile the original native receipt", StringComparison.Ordinal),
+                        "A status read queued before the controlling ACK classifies the committed lease after the lock releases.");
+                }
+
+                string replacedId = Start();
+                var replaced = Wire(LiveTestGamePollApi(TestDict("campaignId", campaign, "gameInstanceId", game)));
+                replaced["status"] = "accepted";
+                bool replacedAccepted = ReadBool(LiveTestGameAckApi(replaced), "ok", false);
+                var beforePulse = Pulse(replacement, replacementProcess);
+                bool interrupted = ReadString(Status(replacedId), "status", "") == "interrupted";
+                bool delayedBeginDenied = !Begin(replacedId, replaced);
+                add("paid_court_route_heartbeat_replacement_before_dispatch", replacedAccepted && ReadBool(beforePulse, "ok", false)
+                    && interrupted && delayedBeginDenied
+                    && ReadString(LoadLiveTestRuntime(campaign), "gameInstanceId", "") == replacement,
+                    "A new native owner before paid dispatch interrupts the lease and a delayed original dispatch cannot commit.");
+
+                string heldId = Start(replacement);
+                var held = Wire(LiveTestGamePollApi(TestDict("campaignId", campaign, "gameInstanceId", replacement)), replacement, replacementProcess);
+                held["status"] = "accepted";
+                bool originalAdmitted = ReadBool(LiveTestGameAckApi(held), "ok", false) && Begin(heldId, held);
+                var sameGameNewProcess = Pulse(replacement, nextProcess);
+                var newGame = Pulse(next, nextProcess);
+                bool replacementBlocked = ReadBool(sameGameNewProcess, "paidCourtDispatchHeld", false)
+                    && ReadBool(newGame, "paidCourtDispatchHeld", false)
+                    && ReadString(LoadLiveTestRuntime(campaign), "gameInstanceId", "") == replacement
+                    && Start(replacement).Length == 0;
+                held["status"] = "completed";
+                held["result"] = PaidCourtTestCompletion(GetPaidCourtCommand(LoadLiveTestRun(campaign, heldId)));
+                bool originalResultStillAccepted = ReadBool(LiveTestGameResultApi(held), "ok", false);
+                add("paid_court_route_heartbeat_preserves_original_result", originalAdmitted && replacementBlocked && originalResultStillAccepted,
+                    "Replacing the game or process cannot displace an admitted paid owner; its exact result can still close the live lease.");
+
+                string expireId = Start(replacement);
+                var expiring = Wire(LiveTestGamePollApi(TestDict("campaignId", campaign, "gameInstanceId", replacement)), replacement, replacementProcess);
+                expiring["status"] = "accepted";
+                bool expiryAdmitted = ReadBool(LiveTestGameAckApi(expiring), "ok", false) && Begin(expireId, expiring);
+                bool holdBeforeExpiry = ReadBool(Pulse(next, nextProcess), "paidCourtDispatchHeld", false);
+                AgeDispatch(expireId);
+                bool replacementAfterExpiry = ReadBool(Pulse(next, nextProcess), "ok", false);
+                var oldRun = LoadLiveTestRun(campaign, expireId);
+                var oldPaid = GetPaidCourtCommand(oldRun);
+                expiring["status"] = "completed";
+                expiring["result"] = PaidCourtTestCompletion(oldPaid);
+                bool lateResultDenied = !ReadBool(LiveTestGameResultApi(expiring), "ok", false);
+                add("paid_court_route_heartbeat_replacement_after_expiry", expiryAdmitted && holdBeforeExpiry && replacementAfterExpiry
+                    && lateResultDenied && ReadString(oldRun, "status", "") == "interrupted"
+                    && ReadString(oldPaid, "message", "").Contains("Reconcile the original native receipt", StringComparison.Ordinal)
+                    && ReadString(LoadLiveTestRuntime(campaign), "gameInstanceId", "") == next,
+                    "Only after expiry does replacement resume. The admitted row is interrupted for reconciliation instead of accepting a late result.");
+
+                string verifyId = Start(next, "court_life_paid_supply_verify", postPoint);
+                var verification = Wire(LiveTestGamePollApi(TestDict("campaignId", campaign, "gameInstanceId", next)), next, nextProcess);
+                verification["status"] = "accepted";
+                bool verifyAccepted = ReadBool(LiveTestGameAckApi(verification), "ok", false);
+                bool verifyCannotDispatch = !Begin(verifyId, verification);
+                verification["status"] = "completed";
+                var verified = PaidCourtTestCompletion(GetPaidCourtCommand(LoadLiveTestRun(campaign, verifyId)));
+                verified["before"] = verified["after"];
+                verified["sessionRevisionAfter"] = verified["sessionRevisionBefore"];
+                verified["exactReloadReplay"] = true;
+                verified["originalDispatchRunId"] = expireId;
+                verified["originalGameInstanceId"] = replacement;
+                verified["originalSavePointId"] = point;
+                string priorDigest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(replacementProcess)));
+                verified["originalClientProcessInstanceSha256"] = new string('F', 64);
+                verification["result"] = verified;
+                bool falseOriginalDigestDenied = !ReadBool(LiveTestGameResultApi(verification), "ok", false);
+                verified["originalClientProcessInstanceSha256"] = priorDigest;
+                verified["originalDispatchRunId"] = replacedId;
+                bool unadmittedOriginalDenied = !ReadBool(LiveTestGameResultApi(verification), "ok", false);
+                verified["originalDispatchRunId"] = expireId;
+                bool verifiesExactOriginal = ReadBool(LiveTestGameResultApi(verification), "ok", false);
+                add("paid_court_route_verify_only_original_admitted_journal", verifyAccepted && verifyCannotDispatch
+                    && falseOriginalDigestDenied && unadmittedOriginalDenied && verifiesExactOriginal,
+                    "Verify cannot dispatch or substitute the original leased process and admits exact retained journal reconciliation.");
+
+                string replayId = Start(next, "court_life_paid_supply_verify", postPoint);
+                var replay = Wire(LiveTestGamePollApi(TestDict("campaignId", campaign, "gameInstanceId", next)), next, nextProcess);
+                replay["status"] = "accepted";
+                bool replayAccepted = ReadBool(LiveTestGameAckApi(replay), "ok", false);
+                replay["status"] = "completed";
+                var applyRun = LoadLiveTestRun(campaign, successId);
+                var completedApply = GetPaidCourtCommand(applyRun);
+                var replayCommand = GetPaidCourtCommand(LoadLiveTestRun(campaign, replayId));
+                Dictionary<string, object> CompletedOriginalClaim(int balanceOffset = 0)
+                {
+                    var claim = PaidCourtTestCompletion(replayCommand, sourceBalanceOffset: balanceOffset);
+                    claim["before"] = claim["after"];
+                    claim["sessionRevisionAfter"] = claim["sessionRevisionBefore"];
+                    claim["exactReloadReplay"] = true;
+                    claim["originalDispatchRunId"] = successId;
+                    claim["originalGameInstanceId"] = game;
+                    claim["originalSavePointId"] = point;
+                    claim["originalClientProcessInstanceSha256"] = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(process)));
+                    return claim;
+                }
+                // The offset alters every source-stock observation consistently. The command, receipt ID and legs still validate.
+                replay["result"] = CompletedOriginalClaim(balanceOffset: 7);
+                bool substitutedJournalDenied = !ReadBool(LiveTestGameResultApi(replay), "ok", false);
+                replay["result"] = CompletedOriginalClaim();
+
+                bool missingOriginalDenied, malformedOriginalDenied;
+                var originalResult = ReadDictionary(completedApply, "result");
+                try
+                {
+                    completedApply.Remove("result");
+                    SaveLiveTestRun(applyRun);
+                    missingOriginalDenied = !ReadBool(LiveTestGameResultApi(replay), "ok", false);
+
+                    var corrupt = PaidCourtTestCompletion(completedApply);
+                    ReadDictionary(ReadDictionary(corrupt, "receipt"), "observations").Remove("AfterDelivery");
+                    completedApply["result"] = corrupt;
+                    SaveLiveTestRun(applyRun);
+                    malformedOriginalDenied = !ReadBool(LiveTestGameResultApi(replay), "ok", false);
+                }
+                finally
+                {
+                    completedApply["result"] = originalResult;
+                    SaveLiveTestRun(applyRun);
+                }
+
+                bool exactCompletedReplay = ReadBool(LiveTestGameResultApi(replay), "ok", false);
+                add("paid_court_route_verify_replays_completed_apply_receipt", replayAccepted && substitutedJournalDenied
+                    && missingOriginalDenied && malformedOriginalDenied && exactCompletedReplay
+                    && ReadString(Status(replayId), "status", "") == "completed",
+                    "Verify requires the completed Apply's durable journal, rejects a coherent substitute and fails closed on missing or malformed evidence.");
+
+                bool lastOwnerReady = ReadBool(Pulse(last, lastProcess), "ok", false);
+                string preflightId = Start(last, "court_life_paid_supply_preflight", postPoint);
+                var preflight = Wire(LiveTestGamePollApi(TestDict("campaignId", campaign, "gameInstanceId", last)), last, lastProcess);
+                preflight["status"] = "accepted";
+                bool preflightAccepted = ReadBool(LiveTestGameAckApi(preflight), "ok", false);
+                preflight["status"] = "running";
+                bool preflightCannotDispatch = !ReadBool(LiveTestGameAckApi(preflight), "ok", false);
+                preflight["status"] = "completed";
+                var inventory = PaidCourtTestCompletion(GetPaidCourtCommand(LoadLiveTestRun(campaign, preflightId)));
+                inventory["sessionRevisionAfter"] = inventory["sessionRevisionBefore"];
+                inventory.Remove("receipt");
+                inventory.Remove("terms");
+                inventory["sourceSettlementId"] = "capital";
+                inventory["payerHeroId"] = "ruler";
+                inventory["itemId"] = "grain";
+                inventory["itemAmount"] = inventory["goldAmount"] = 1;
+                inventory["sourceStock"] = 5;
+                inventory["payerGold"] = 20;
+                inventory["eligibleTargets"] = new List<Dictionary<string, object>> { TestDict("settlementId", "fort", "stock", 10, "gold", 30) };
+                preflight["result"] = inventory;
+                add("paid_court_route_preflight_stays_observational", lastOwnerReady && preflightAccepted && preflightCannotDispatch
+                    && ReadBool(LiveTestGameResultApi(preflight), "ok", false),
+                    "Preflight can return inventory from the accepted lease without a native journal or dispatch admission.");
+            }
+            finally
+            {
+                LiveTestFixtureRoot.Value = priorLive;
+                Program.CampaignsRootOverride.Value = priorCampaigns;
+                if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+            }
+        }
+
         internal static List<Dictionary<string, object>> RunLiveInteractionTestSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -327,6 +784,8 @@ namespace ReignBetaServer
             AddLiveTestExecutionObservationChecks(add);
             OperatorCurrentAdmissionEvidence.VerifyFormat(add);
             AddPartyAgencySendAuthorityChecks(add);
+            AddPaidCourtDispatchAuthorityChecks(add);
+            AddPaidCourtResultRouteChecks(add);
             AddCompletedPartyAgencySendEvidenceChecks(add);
             var economyRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "passive_world" };
             foreach (string profile in new[] { "civilian_crew_probe", "production_probe", "relief_probe", "market_food_probe", "household_probe" })

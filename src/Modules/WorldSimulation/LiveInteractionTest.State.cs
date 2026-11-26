@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace ReignBetaServer
 {
@@ -44,7 +45,8 @@ namespace ReignBetaServer
         }
         internal static bool IsFreshLiveTestRuntime(Dictionary<string, object> runtime) { return runtime != null && runtime.Count > 0 && ParseLiveTestUtc(ReadString(runtime, "receivedUtc", "")) >= DateTimeOffset.UtcNow.AddSeconds(-LiveTestHeartbeatFreshSeconds); }
         internal static DateTimeOffset ParseLiveTestUtc(string value) { return DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset parsed) ? parsed.ToUniversalTime() : DateTimeOffset.MinValue; }
-        private static string LiveTestRoot() { return Path.Combine(Program.TestsDir, "live-interaction"); }
+        private static readonly AsyncLocal<string> LiveTestFixtureRoot = new AsyncLocal<string>();
+        private static string LiveTestRoot() => LiveTestFixtureRoot.Value ?? Path.Combine(Program.TestsDir, "live-interaction");
         internal static string LiveTestArmPath() { return Path.Combine(LiveTestRoot(), "arm.json"); }
         private static string LiveTestLatestRuntimePath() { return Path.Combine(LiveTestRoot(), "runtime-latest.json"); }
         private static string LiveTestRuntimePath(string campaignId) { return Path.Combine(LiveTestRoot(), "runtime", CampaignFileService.SafePathSegment(campaignId, "unknown") + ".json"); }
@@ -54,6 +56,11 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> LoadLiveTestRuntime(string campaignId) { return string.IsNullOrWhiteSpace(campaignId) ? CampaignFileService.ReadJsonObject(LiveTestLatestRuntimePath()) : CampaignFileService.ReadJsonObject(LiveTestRuntimePath(campaignId)); }
         internal static Dictionary<string, object> LoadLiveTestRun(string campaignId, string runId) { return string.IsNullOrWhiteSpace(campaignId) || string.IsNullOrWhiteSpace(runId) ? new Dictionary<string, object>() : CampaignFileService.ReadJsonObject(LiveTestRunPath(campaignId, runId)); }
         internal static void SaveLiveTestRun(Dictionary<string, object> run)
+        {
+            lock (LiveTestLock) SaveLiveTestRunLocked(run);
+        }
+
+        private static void SaveLiveTestRunLocked(Dictionary<string, object> run)
         {
             string campaignId = ReadString(run, "campaignId", "");
             string runId = ReadString(run, "runId", "");
@@ -86,6 +93,11 @@ namespace ReignBetaServer
         }
 
         private static Dictionary<string, object> FindActiveLiveTestRun(string campaignId)
+        {
+            lock (LiveTestLock) return FindActiveLiveTestRunLocked(campaignId);
+        }
+
+        private static Dictionary<string, object> FindActiveLiveTestRunLocked(string campaignId)
         {
             string indexPath = LiveTestActiveRunPath(campaignId);
             Dictionary<string, object> indexed = CampaignFileService.ReadJsonObject(indexPath);
