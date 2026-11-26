@@ -341,6 +341,14 @@ namespace ReignBetaServer
             command.Remove("executionObservation");
             command.Remove("executionStartIdentity");
             command.Remove("partyAgencyAcceptedSendExecution");
+            if (IsPaidCourtFixtureCommand(command))
+            {
+                foreach (string key in command.Keys.Where(key => key.StartsWith("paidCourt", StringComparison.OrdinalIgnoreCase)).ToArray())
+                    command.Remove(key);
+                foreach (string key in new[] { "leaseId", "leaseStartedUtc", "leaseExpiresUtc", "attempt",
+                    "completedUtc", "result", "error", "message", "pauseReason", "lastFailureUtc", "correlationIds" })
+                    command.Remove(key);
+            }
             if (mode.Equals("social_balance", StringComparison.OrdinalIgnoreCase))
             {
                 Dictionary<string, object> enrollment = ReadDictionary(input, "enrollment");
