@@ -375,6 +375,8 @@ namespace ReignBetaServer
                     ["reasoning"] = reasoningRouting,
                     ["error"] = ex.Message
                 };
+                if (ex is ProviderQueueTimeoutException)
+                    failedResult["errorCode"] = ProviderQueueTimeoutCode;
                 if (codexSubscription)
                 {
                     failedResult["codexDiagnostics"] = ex.Data["codexDiagnostics"] as Dictionary<string, object> ?? new Dictionary<string, object>();
