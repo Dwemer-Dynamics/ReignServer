@@ -1280,7 +1280,7 @@ namespace ReignBetaServer
                 ReadInt(socialProfileTimeout, "timeoutSeconds", 0) == 3600
                 && ReadInt(unrelatedSocialTimeout, "timeoutSeconds", 0) == 1800,
                 "Only a Social Reputation profile command may retain the one-hour deadline; unrelated social commands keep the ordinary thirty-minute ceiling.");
-            add("modes", LiveTestModes.SetEquals(new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions", "npc_lives", "personal_gossip" }), "Only implemented production interaction adapters and isolated deterministic harness adapters are registered in the transport contract.");
+            add("modes", LiveTestModes.SetEquals(new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions", "npc_lives", "personal_gossip", "notable_startup_observation" }), "Only implemented production interaction adapters and isolated deterministic harness adapters are registered in the transport contract.");
             string retrievalFixtureText = LiveTestRetrievedEvidenceText(
                 new[]
                 {
