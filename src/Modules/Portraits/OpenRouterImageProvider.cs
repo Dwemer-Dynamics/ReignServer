@@ -17,7 +17,8 @@ namespace ReignBetaServer
 
         private static string ImageProfileModel(ImageGenerationProfile profile)
         {
-            return profile.Provider == "OpenRouter" ? profile.OpenRouterModel
+            return profile.Provider == LocalModelImageProviderId ? profile.LocalModel?.Model ?? DefaultLocalModelImageModel
+                : profile.Provider == "OpenRouter" ? profile.OpenRouterModel
                 : IsCodexImageProvider(profile.Provider) ? CodexImageModel
                 : IsAtlasProvider(profile.Provider) ? profile.AtlasModel : profile.NanoGptModel;
         }

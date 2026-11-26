@@ -107,7 +107,27 @@ namespace ReignBetaServer
             && text.Length <= 8192 && text == text.Trim() && !text.Any(char.IsControl) ? text : null;
 
         internal static Dictionary<string, object> ArrestCaseApplyApi(
-            Dictionary<string, object> payload)
+            Dictionary<string, object> payload) => ApplyArrestCaseEffect(payload, expectedPredecessor: null);
+
+#if !REIGN_EXCLUDE_VERIFICATION
+        // Deliberately has no production caller. A measured predecessor does not prove a durable native intent.
+        internal static Dictionary<string, object> VerifyCompareAndApplyArrestCase(
+            Dictionary<string, object> payload, string expectedPredecessor)
+        {
+            const string fixturePrefix = "arrest_owner_";
+            string campaign = ReadString(payload, "campaignId", "");
+            if (!ReignPostgreSqlStorage.Options.IsValidation || !campaign.StartsWith(fixturePrefix, StringComparison.Ordinal)
+                || !Guid.TryParseExact(campaign.Substring(fixturePrefix.Length), "N", out Guid fixture)
+                || campaign != fixturePrefix + fixture.ToString("N"))
+                throw new InvalidOperationException("Compare-and-apply verification requires the isolated arrest owner fixture.");
+            if (expectedPredecessor?.Length != 64 || expectedPredecessor.Any(c => !Uri.IsHexDigit(c) || char.IsUpper(c)))
+                return ArrestEffectOwnerFailure("invalid_effect_intent", "An exact measured predecessor digest is required.");
+            return ApplyArrestCaseEffect(payload, expectedPredecessor);
+        }
+#endif
+
+        private static Dictionary<string, object> ApplyArrestCaseEffect(
+            Dictionary<string, object> payload, string expectedPredecessor)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -133,7 +153,10 @@ namespace ReignBetaServer
                 || !ExactArrestEffectField(payload, "reputationTagId", tagId)))
                 return ArrestEffectOwnerFailure("ownership_mismatch", "The arrest effect requires its exact campaign, timeline, case, and restore owner.");
 
-            bool requestReceipt = payload.Keys.Any(IsArrestEffectReceiptField);
+            const string predecessorField = "observePredecessorVersion";
+            bool observePredecessor = payload.Keys.Any(key =>
+                string.Equals(key, predecessorField, StringComparison.OrdinalIgnoreCase));
+            bool requestReceipt = observePredecessor || payload.Keys.Any(IsArrestEffectReceiptField);
             if (requestReceipt && !requireOwner)
                 return ArrestEffectOwnerFailure("ownership_mismatch", "A versioned arrest effect requires a current restore owner.");
             bool inspect = requestReceipt && operation == "inspect";
@@ -142,11 +165,22 @@ namespace ReignBetaServer
             {
                 if (!ExactArrestIntentValue(payload, "arrestEffectVersion", out int version) || version != 2
                     || payload.Keys.Any(key => !string.Equals(key, "arrestEffectVersion", StringComparison.Ordinal) && IsArrestEffectReceiptField(key))
+                    || observePredecessor && (!ExactArrestIntentValue(payload, predecessorField, out int observationVersion)
+                        || observationVersion != 1)
                     || !TryReadArrestEffectMaterial(payload, out _, out _))
                     return ArrestEffectOwnerFailure("invalid_effect_intent", "An arrest inspection requires exact v2 material with no proposed write intent.");
             }
-            else if (requestReceipt && (operation != "apply" || !TryReadArrestEffectIntent(payload, out intent)))
+            else if (requestReceipt && (observePredecessor || operation != "apply" || !TryReadArrestEffectIntent(payload, out intent)))
                 return ArrestEffectOwnerFailure("invalid_effect_intent", "A versioned arrest apply requires an exact intent, revision and material.");
+
+            if (expectedPredecessor != null)
+            {
+                if (intent == null || intent.ExpectedRevision <= 0)
+                    return ArrestEffectOwnerFailure("invalid_effect_intent", "Compare-and-apply requires an owned intent and a positive predecessor revision.");
+                // Bind the predecessor to idempotency. An exact committed retry may be answered
+                // after the prior revision no longer exists, but a changed digest cannot reuse the nonce.
+                intent = intent with { Material = Json.Serialize(new[] { "arrest-predecessor-v1", expectedPredecessor, intent.Material }) };
+            }
 
             if (caseId.Length == 0 || accusedId.Length == 0 || playerId.Length == 0
                 || tagId.Length == 0)
@@ -181,6 +215,10 @@ namespace ReignBetaServer
                     RelationshipsService.EnsureRelationshipDirectorSchema(connection);
                     WorldSimulationStore.EnsureArrestCaseEffects(connection);
                 }
+                // A contention error poisons the compare transaction. Re-enter the complete
+                // owner and predecessor check on a fresh request instead of retrying its SQL.
+                using var suppressCompareRetries = expectedPredecessor != null
+                    ? new ReignDatabase.SqlStatementRetrySuppression(connection) : null;
                 using var typedTransaction = requireOwner ? connection.BeginTransaction() : null;
                 if (requireOwner)
                     AcquirePostgreSqlTransactionMutationLock(connection, typedTransaction);
@@ -237,10 +275,14 @@ namespace ReignBetaServer
                         ["campaign"] = campaignId, ["timeline"] = timelineId, ["case"] = caseId,
                         ["subject"] = accusedId, ["player"] = playerId, ["tag"] = tagId
                     };
-                    var states = WorldSimulationStore.SelectArrestCaseEffects(connection, key, receiptSchema);
+                    bool comparePredecessor = expectedPredecessor != null;
+                    var comparisonTransaction = comparePredecessor ? typedTransaction : null;
+                    var states = WorldSimulationStore.SelectArrestCaseEffects(connection, key, receiptSchema,
+                        comparisonTransaction, lockRows: comparePredecessor);
                     var effectState = states.FirstOrDefault();
                     Dictionary<string, object> existing =
-                        WorldSimulationStore.SelectCharacterReputations(connection, key).FirstOrDefault();
+                        WorldSimulationStore.SelectCharacterReputations(connection, key,
+                            comparisonTransaction, lockRows: comparePredecessor).FirstOrDefault();
                     Dictionary<string, object> priorSnapshot = TryParseJsonObject(
                         ReadString(existing, "snapshot_json", "{}"));
                     if (states.Any(state => ReadString(state, "case_id", "") != caseId
@@ -298,12 +340,18 @@ namespace ReignBetaServer
                     }
                     if (inspect)
                     {
-                        RollbackEffect();
                         bool matching = measured && requested == desiredDelta
                             && ArrestEffectMaterialMatches(payload, existing, priorSnapshot, description, reputationValue);
                         string status = terminal ? "terminal_rescinded" : effectState == null && existing == null ? "ready"
                             : matching ? "settled" : "material_mismatch";
-                        return ArrestEffectInspection(payload, revision, status, status == "settled" ? applied : (int?)null);
+                        var inspectionResult = ArrestEffectInspection(payload, revision, status, status == "settled" ? applied : (int?)null);
+                        if (observePredecessor && !terminal && measured && revision > 0)
+                        {
+                            var predecessor = ReadArrestEffectPredecessor(existing, priorSnapshot, requested, applied);
+                            if (predecessor != null) inspectionResult["predecessor"] = predecessor;
+                        }
+                        RollbackEffect();
+                        return inspectionResult;
                     }
                     if (intent != null && terminal)
                     {
@@ -326,12 +374,26 @@ namespace ReignBetaServer
                             || ReadString(receipt, "effectIntentId", "") != intent.Id
                             || ReadLong(receipt, "materialRevision", -1) != revision)
                             return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "receipt_unavailable");
+                        if (comparePredecessor && (!ExactArrestIntentValue(receipt, "predecessorMaterialSha256", out string priorDigest)
+                            || priorDigest != expectedPredecessor
+                            || !ExactArrestIntentValue(receipt, "committedMaterialSha256", out string committedDigest)
+                            || committedDigest.Length == 0
+                            || committedDigest != ReadString(ReadArrestEffectPredecessor(existing, priorSnapshot, requested, applied),
+                                "materialSha256", "")))
+                            return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "receipt_unavailable");
                         return receipt;
                     }
                     if (intent != null && revision != intent.ExpectedRevision)
                     {
                         RollbackEffect();
                         return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "stale_material");
+                    }
+                    if (comparePredecessor && (!measured || ReadString(
+                            ReadArrestEffectPredecessor(existing, priorSnapshot, requested, applied),
+                            "materialSha256", "") != expectedPredecessor))
+                    {
+                        RollbackEffect();
+                        return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "predecessor_mismatch");
                     }
                     if (recordedRescission)
                     {
@@ -424,6 +486,17 @@ namespace ReignBetaServer
                             response["materialRevision"] = nextRevision;
                             response["status"] = "committed";
                         }
+                        if (comparePredecessor)
+                        {
+                            var committed = WorldSimulationStore.SelectCharacterReputations(connection, key,
+                                comparisonTransaction, lockRows: true).Single();
+                            var committedSnapshot = TryParseStrictJsonObject(ReadString(committed, "snapshot_json", ""));
+                            var witness = ReadArrestEffectPredecessor(committed, committedSnapshot, desiredDelta, applied);
+                            if (witness == null)
+                                throw new InvalidOperationException("The committed arrest material could not be measured exactly.");
+                            response["predecessorMaterialSha256"] = expectedPredecessor;
+                            response["committedMaterialSha256"] = witness["materialSha256"];
+                        }
                         key["rescinded"] = rescind;
                         key["revision"] = nextRevision;
                         key["intent"] = intent?.Id ?? "";
@@ -513,6 +586,32 @@ namespace ReignBetaServer
             material = Json.Serialize(new object[] { delta, value, day, description, category, severity,
                 established, evidenceStatus, evidenceIds });
             return true;
+        }
+
+        private static Dictionary<string, object> ReadArrestEffectPredecessor(Dictionary<string, object> reputation,
+            Dictionary<string, object> snapshot, int requested, int applied)
+        {
+            if (snapshot == null || ReadString(reputation, "status", "") != "active"
+                || !ExactArrestIntentValue(snapshot, "arrestRequestedRelationshipDelta", out int storedRequested)
+                || !ExactArrestIntentValue(snapshot, "arrestAppliedRelationshipDelta", out int storedApplied)
+                || storedRequested != requested || storedApplied != applied) return null;
+            // PostgreSQL returns the stored integer column as Int64.
+            object rawValue = reputation.GetValueOrDefault("reputation_value");
+            if (rawValue is not (int or long)) return null;
+            long storedValue = Convert.ToInt64(rawValue, CultureInfo.InvariantCulture);
+            if (storedValue is < -100 or > 100) return null;
+
+            var stored = TestDict("worldDay", reputation.GetValueOrDefault("acquired_day"),
+                "relationshipDelta", requested, "reputationValue", (int)storedValue,
+                "description", reputation.GetValueOrDefault("description"),
+                "chargeCategory", snapshot.GetValueOrDefault("chargeCategory"),
+                "severity", snapshot.GetValueOrDefault("severity"),
+                "causeEstablished", snapshot.GetValueOrDefault("causeEstablished"),
+                "evidenceStatus", snapshot.GetValueOrDefault("evidenceStatus"),
+                "evidenceIds", snapshot.GetValueOrDefault("evidenceIds"));
+            if (!TryReadArrestEffectMaterial(stored, out double acquiredDay, out string material)) return null;
+            return TestDict("version", 1, "acquiredDay", acquiredDay, "appliedRelationshipDelta", applied,
+                "materialSha256", Sha256Hex(Json.Serialize(new object[] { material, applied })));
         }
 
         private static bool ArrestEffectMaterialMatches(Dictionary<string, object> payload,

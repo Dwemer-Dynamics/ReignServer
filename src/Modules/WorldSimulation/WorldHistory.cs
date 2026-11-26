@@ -19,11 +19,15 @@ namespace ReignBetaServer
 
         // Acquire before relationship ownership, database transactions or FileLock.
         // Save Sync takes the campaign data write gate outside these scopes.
-        internal static PersistenceService.CampaignWorkLock EnterWorldHistoryTimelineScope(string campaignId)
-        {
-            string key = string.IsNullOrWhiteSpace(campaignId) ? "default" : campaignId.Trim();
-            return PersistenceService.EnterCampaignWorkLock(WorldHistoryTimelineLocks.GetOrAdd(key, _ => new object()));
-        }
+        internal static PersistenceService.CampaignWorkLock EnterWorldHistoryTimelineScope(string campaignId) =>
+            PersistenceService.EnterCampaignWorkLock(WorldHistoryTimelineLocks.GetOrAdd(WorldHistoryTimelineScopeKey(campaignId), _ => new object()));
+
+        internal static bool OwnsWorldHistoryTimelineScope(string campaignId) =>
+            WorldHistoryTimelineLocks.TryGetValue(WorldHistoryTimelineScopeKey(campaignId), out object gate)
+            && System.Threading.Monitor.IsEntered(gate);
+
+        private static string WorldHistoryTimelineScopeKey(string campaignId) =>
+            string.IsNullOrWhiteSpace(campaignId) ? "default" : campaignId.Trim();
 
         // Callers hold the timeline scope and use an exact registered campaign connection.
         internal static bool NoticeAcknowledgementOwnerMatches(ReignDbConnection connection,

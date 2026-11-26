@@ -21,9 +21,11 @@ namespace ReignBetaServer
             byte[] sourceImagePng,
             string outputSizeOverride)
         {
-            string apiKey = SettingsService.ProviderSecret(settings, "portraitNanoGptApiKey", ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl),
-                ReadString(settings, "portraitNanoGptChatCompletionsUrl", NanoGptChatCompletionsUrl));
             string model = imageProfile.NanoGptModel;
+            string url = NanoGptImageRequestUrl(settings, model);
+            if (!IsNanoGptImageCredentialDestination(url))
+                return PortraitImageCallResult.Fail("NanoGPT", model, NanoGptImageDestinationError);
+            string apiKey = SettingsService.ProviderSecret(settings, "portraitNanoGptApiKey", url);
             if (string.IsNullOrWhiteSpace(apiKey))
             {
                 return PortraitImageCallResult.Fail("NanoGPT", model, SettingsService.ProviderKeyUnavailable(settings, "portraitNanoGptApiKey", apiKey) ? SettingsService.GlobalKeyUnavailableError : "No NanoGPT image API key is set in the server AI Image Generation tab.");
@@ -31,24 +33,38 @@ namespace ReignBetaServer
 
             if (UsesGeminiChatImageAdapter(model))
             {
-                return GenerateNanoGptGeminiChatImage(settings, apiKey, model, prompt, sourceImagePng);
+                return GenerateNanoGptGeminiChatImage(settings, url, apiKey, model, prompt, sourceImagePng);
             }
 
             if (sourceImagePng == null) return PostImageJson(
-                ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl), apiKey,
+                url, apiKey,
                 BuildNanoPortraitTextPayload(model, prompt, outputSizeOverride), settings, "NanoGPT", model, "text image generation");
 
             if (UsesImageReferenceAdapter(model))
             {
-                return GenerateNanoGptImageReference(settings, apiKey, model, prompt, sourceImagePng, outputSizeOverride, imageProfile.ChatView);
+                return GenerateNanoGptImageReference(settings, url, apiKey, model, prompt, sourceImagePng, outputSizeOverride, imageProfile.ChatView);
             }
 
-            return GenerateNanoGptFluxKontext(settings, imageProfile, apiKey, model, prompt, sourceImagePng, outputSizeOverride);
+            return GenerateNanoGptFluxKontext(settings, imageProfile, url, apiKey, model, prompt, sourceImagePng, outputSizeOverride);
         }
+
+        private const string NanoGptImageDestinationError =
+            "The NanoGPT image API key is restricted to a NanoGPT HTTPS endpoint. Select Local Model for Local Model Desk.";
+
+        internal static bool IsNanoGptImageCredentialDestination(string url) =>
+            Uri.TryCreate(url, UriKind.Absolute, out Uri uri) && uri.Scheme == Uri.UriSchemeHttps
+            && uri.IsDefaultPort && uri.UserInfo.Length == 0 && !url.Contains('@') && uri.Fragment.Length == 0
+            && DialogueService.IsNanoGptApiUrl(url);
+
+        internal static string NanoGptImageRequestUrl(Dictionary<string, object> settings, string model) =>
+            UsesGeminiChatImageAdapter(model)
+                ? ReadString(settings, "portraitNanoGptChatCompletionsUrl", NanoGptChatCompletionsUrl)
+                : ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl);
 
         private static PortraitImageCallResult GenerateNanoGptFluxKontext(
             Dictionary<string, object> settings,
             ImageGenerationProfile imageProfile,
+            string url,
             string apiKey,
             string model,
             string prompt,
@@ -56,7 +72,6 @@ namespace ReignBetaServer
             string outputSizeOverride)
         {
             string outputSize = NanoFluxSize(outputSizeOverride);
-            string url = ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl);
             Dictionary<string, object> body = new Dictionary<string, object>
             {
                 ["model"] = model,
@@ -74,6 +89,7 @@ namespace ReignBetaServer
 
         private static PortraitImageCallResult GenerateNanoGptImageReference(
             Dictionary<string, object> settings,
+            string url,
             string apiKey,
             string model,
             string prompt,
@@ -81,7 +97,6 @@ namespace ReignBetaServer
             string outputSizeOverride, bool chatView = false)
         {
             string outputSize = NanoGptReferenceSize(outputSizeOverride);
-            string url = ReadString(settings, "portraitNanoGptImageGenerationsUrl", NanoGptImageGenerationsUrl);
             Dictionary<string, object> body = new Dictionary<string, object>
             {
                 ["model"] = model,
@@ -97,12 +112,12 @@ namespace ReignBetaServer
 
         private static PortraitImageCallResult GenerateNanoGptGeminiChatImage(
             Dictionary<string, object> settings,
+            string url,
             string apiKey,
             string model,
             string prompt,
             byte[] sourceImagePng)
         {
-            string url = ReadString(settings, "portraitNanoGptChatCompletionsUrl", NanoGptChatCompletionsUrl);
             ArrayList content = new ArrayList
             {
                 new Dictionary<string, object> { ["type"] = "text", ["text"] = prompt ?? "" },
@@ -946,6 +961,7 @@ namespace ReignBetaServer
             if (string.Equals(provider, "OpenRouter", StringComparison.OrdinalIgnoreCase)) return "OpenRouter";
             if (IsCodexImageProvider(provider)) return CodexImageProvider;
             string value = (provider ?? "").Replace(" ", "").Replace("-", "").Trim();
+            if (value.Equals(LocalModelImageProviderId, StringComparison.OrdinalIgnoreCase)) return LocalModelImageProviderId;
             if (value.Equals("AtlasCloud", StringComparison.OrdinalIgnoreCase)
                 || value.Equals("Atlas", StringComparison.OrdinalIgnoreCase))
             {

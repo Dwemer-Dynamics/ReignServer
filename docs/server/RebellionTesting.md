@@ -27,6 +27,14 @@ production plot before `reign_checkpoint_campaign_test`; `travel_verify`
 proves the same identities after guarded restart. `cleanup` removes only the
 exact run-owned fixture namespace.
 
+`RB-NATIVE-004` is optional and preparation is held pending independent
+operator authority. A public live-command enrollment cannot grant the native
+founder mutation. Future authorization must bind the actual registered
+checkpoint, native process and load session before the fixture can prepare the
+interruption. Verification requires a fresh registered load of the exact Current
+and guarded evidence that retry leaves the same held movement, native founder,
+and allegiance intact. The case requires no provider calls.
+
 Secret recruitment closes when a report is dispatched or a ruler summons is
 in flight. The reporting and summons profiles explicitly prove that production
 gate, named informer/ruler ids, travel timing, idempotence, and the seven-day

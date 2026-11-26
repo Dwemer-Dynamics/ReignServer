@@ -289,7 +289,11 @@ namespace ReignBetaServer
                 DialogueService.AdvanceMemoryRestoreGeneration(campaignId, point, "", loadSessionId);
                 MarkSaveSyncActiveStateClean(campaignId, point);
                 string generation = DialogueService.TerminalReportLoadProofGeneration(campaignId, savePointId, loadSessionId);
-                if (generation.Length > 0) result["restoreGeneration"] = generation;
+                if (generation.Length > 0)
+                {
+                    result["restoreGeneration"] = generation;
+                    CompleteEditorNativeOwnerLoad(ledger, point, loadSessionId, generation);
+                }
                 result["result"] = "rolled_back";
                 result["outcome"] = "committed";
                 result["durationMs"] = timer.ElapsedMilliseconds;

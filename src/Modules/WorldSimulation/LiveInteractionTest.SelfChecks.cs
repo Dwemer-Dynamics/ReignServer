@@ -325,6 +325,7 @@ namespace ReignBetaServer
             Dictionary<string, object> wrongVersion = NormalizeLiveTestCommand(fakeRun, new Dictionary<string, object> { ["schemaVersion"] = 999, ["operation"] = "open" });
             add("command_schema", first != null && ReadString(first, "status", "") == "queued" && invalid == null && wrongVersion == null, "Command normalization requires the supported schema, valid operations, and non-empty dialogue text.");
             AddLiveTestExecutionObservationChecks(add);
+            OperatorCurrentAdmissionEvidence.VerifyFormat(add);
             AddPartyAgencySendAuthorityChecks(add);
             AddCompletedPartyAgencySendEvidenceChecks(add);
             var economyRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "passive_world" };
@@ -477,6 +478,29 @@ namespace ReignBetaServer
             structuredEnrollment["disposableSaveName"] = "Baseline";
             add("structured_action_baseline_protected", NormalizeLiveTestCommand(structuredRun, structuredInput) == null,
                 "A structured test cannot target its protected baseline even with a valid run identity.");
+            var outbreakEnrollment = TestDict("campaignId", ReadString(fakeRun, "campaignId", ""), "campaignTestRunId", "continuity",
+                "certificationRunId", "outbreak", "timelineId", "observed-timeline", "source", "reign_mcp_rebellion_outbreak_reload",
+                "disposableSaveName", "ReignTest_Outbreak_Current", "protectedBaselineSaveName", "ProtectedBaseline",
+                "recoveryCheckpointVerified", true, "checkpointSavePointId", "owned-point", "checkpointSha256", new string('A', 64));
+            var outbreakRun = new Dictionary<string, object>(fakeRun) { ["mode"] = "individual_chat", ["enrollment"] = outbreakEnrollment };
+            var outbreakInput = TestDict("operation", "rebellion_test", "profile", "outbreak_reload_verify",
+                "fixtureRunId", "outbreak", "caseId", "RB-NATIVE-004", "disposableSaveName", "ReignTest_Outbreak_Current",
+                "enrollment", TestDict("source", "forged"));
+            var outbreakCommand = NormalizeLiveTestCommand(outbreakRun, outbreakInput);
+            bool rejectsUnownedOutbreak = NormalizeLiveTestCommand(fakeRun, outbreakInput) == null;
+            outbreakInput["profile"] = "OUTBREAK_RELOAD_PREPARE";
+            bool rejectsPastedPrepare = NormalizeLiveTestCommand(outbreakRun, outbreakInput) == null;
+            outbreakInput["profile"] = " OUTBREAK_RELOAD_VERIFY ";
+            bool rejectsUnownedAlias = NormalizeLiveTestCommand(fakeRun, outbreakInput) == null;
+            outbreakInput["effects"] = "full";
+            bool rejectsFullEffects = NormalizeLiveTestCommand(outbreakRun, outbreakInput) == null;
+            outbreakInput.Remove("effects");
+            outbreakEnrollment["protectedBaselineSaveName"] = "ReignTest_Outbreak_Current";
+            add("rebellion_outbreak_reload_inherits_guarded_current_enrollment",
+                outbreakCommand != null && ReferenceEquals(outbreakCommand["enrollment"], outbreakEnrollment)
+                && rejectsUnownedOutbreak && rejectsUnownedAlias && rejectsFullEffects && rejectsPastedPrepare
+                && NormalizeLiveTestCommand(outbreakRun, outbreakInput) == null,
+                "Reload observation uses its run-owned Current. A pasted enrollment cannot start preparation, and generic, full-effects and baseline requests are refused.");
             Dictionary<string, object> correspondenceQuiescence = NormalizeLiveTestCommand(
                 fakeRun,
                 new Dictionary<string, object>

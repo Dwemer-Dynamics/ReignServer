@@ -398,6 +398,99 @@ VALUES(@campaign_id,@schema_name,now(),now());", other))
             }
         }
 
+        private static void VerifyNativeEditorOwnershipMigration(Action<string, bool, string> add, string token)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation)
+                throw new InvalidOperationException("The Editor ownership migration fixture requires the isolated validation PostgreSQL database.");
+            string campaign = "__postgres_editor_ownership_" + token;
+            string campaignRoot = StrictCampaignDirectory(campaign);
+            string ledgerRoot = SaveSyncCampaignRoot(campaign);
+            string older = "native_editor_old_" + token;
+            string current = "native_editor_current_" + token;
+            const string rawChanges = "{\"traits\":{\"valor\":0}}";
+            const string command = "legacy_editor_migration_fixture";
+            using (var occupied = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign,
+                trackCampaignMutations: false, initializeInfrastructure: false))
+                if (occupied != null || System.IO.Path.Exists(campaignRoot) || System.IO.Path.Exists(ledgerRoot))
+                    throw new InvalidOperationException("The disposable Editor ownership migration campaign already exists.");
+
+            try
+            {
+                using (var connection = ReignDatabase.OpenCampaignConnection(campaign))
+                {
+                    add("native_editor_origin_schema_fresh_canonical_open",
+                        IsNativeEditorOwnershipSchemaReady(connection)
+                        && ReadCampaignMigrationVersion(connection, null) == LatestCampaignMigrationVersion
+                        && ReignDatabase.IsMemorySchemaCurrent(connection),
+                        "A fresh canonical campaign has the actual origin columns, the migration marker, and the canonical campaign readiness shape.");
+
+                    RelationshipsStore.InsertOrIgnoreCharacterEditorNativeCommands(connection,
+                        TestDict("id", command, "revision", "legacy", "hero", "legacy_native_hero", "changes", rawChanges,
+                            "inverse", "{}", "ts", 1L));
+                    ReignDatabase.ExecuteSql(connection, @"ALTER TABLE character_editor_native_commands
+DROP COLUMN manual_origin_timeline_id,DROP COLUMN manual_origin_lineage_id,DROP COLUMN manual_origin_json,DROP COLUMN automatic_origin_json;");
+                    ReignDatabase.ExecuteSql(connection, "ALTER TABLE notable_mbti_profiles DROP COLUMN startup_native_session_id;");
+                    ReignDatabase.ExecuteSql(connection, "UPDATE schema_meta SET value=$version WHERE key=$key;",
+                        TestDict("key", CampaignMigrationVersionKey, "version", (NativeEditorOwnershipCampaignMigrationVersion - 1).ToString()));
+                }
+                using (var raw = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign,
+                    trackCampaignMutations: false, initializeInfrastructure: false))
+                    add("native_editor_origin_schema_legacy_readiness_does_not_migrate",
+                        raw != null && !IsNativeEditorOwnershipSchemaReady(raw) && !ReignDatabase.IsMemorySchemaCurrent(raw)
+                        && ReadCampaignMigrationVersion(raw, null) == NativeEditorOwnershipCampaignMigrationVersion - 1,
+                        "A no-initialization reader identifies a legacy campaign before any data or schema mutation.");
+
+                ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, older);
+                bool LegacyUnowned(ReignDbConnection connection)
+                {
+                    var row = CharactersStore.SelectCharacterEditorNativeCommands5(connection, TestDict("id", command)).SingleOrDefault();
+                    return row != null && ReadString(row, "changes_json", "") == rawChanges
+                        && ReadString(row, "status", "") == "pending" && ReadString(row, "automatic_origin_json", "missing") == ""
+                        && ReadString(row, "manual_origin_json", "missing") == ""
+                        && ReadString(row, "manual_origin_lineage_id", "missing") == ""
+                        && ReadString(row, "manual_origin_timeline_id", "missing") == "";
+                }
+                using (var migrated = ReignDatabase.OpenCampaignConnection(campaign))
+                {
+                    var applied = new List<int>();
+                    ApplyCampaignSchemaMigrations(migrated, applied);
+                    add("native_editor_origin_existing_schema_upgrade_never_backfills_legacy_authority",
+                        IsNativeEditorOwnershipSchemaReady(migrated) && LegacyUnowned(migrated) && applied.Count == 0,
+                        "Canonical reopen upgrades a previously warm legacy schema exactly once without changing its old command or assigning origin.");
+                    ReignDatabase.ExecuteSql(migrated, "UPDATE character_editor_native_commands SET automatic_origin_json=$witness WHERE command_id=$id;",
+                        TestDict("id", command, "witness", "opaque_shape_preservation_fixture"));
+                }
+                ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, current);
+                ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, older);
+                using (var raw = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign,
+                    trackCampaignMutations: false, initializeInfrastructure: false))
+                    add("native_editor_origin_restored_old_schemas_fail_closed_before_canonical_reopen",
+                        raw != null && !IsNativeEditorOwnershipSchemaReady(raw),
+                        "Restoring a genuine older PostgreSQL clone invalidates cache and does not make non-initializing ownership readers ready.");
+                using (var migrated = ReignDatabase.OpenCampaignConnection(campaign))
+                    add("native_editor_origin_restored_legacy_schema_reopens_without_backfill",
+                        IsNativeEditorOwnershipSchemaReady(migrated) && LegacyUnowned(migrated),
+                        "Canonical reopen migrates the restored older schema and keeps its original command unowned.");
+
+                ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, current);
+                using (var migrated = ReignDatabase.OpenCampaignConnection(campaign))
+                    add("native_editor_origin_current_snapshot_preserves_exact_origin_bytes",
+                        IsNativeEditorOwnershipSchemaReady(migrated)
+                        && ReadString(CharactersStore.SelectCharacterEditorNativeCommands5(migrated,
+                            TestDict("id", command)).SingleOrDefault(), "automatic_origin_json", "") == "opaque_shape_preservation_fixture",
+                        "Restoring the current PostgreSQL clone preserves the origin column bytes instead of replacing them with a default.");
+            }
+            finally
+            {
+                try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                finally
+                {
+                    TryDeleteDirectory(campaignRoot);
+                    TryDeleteDirectory(ledgerRoot);
+                }
+            }
+        }
+
         private static void RunCampaignMigrationSelfTests(
             Action<string, bool, string> add, string token)
         {
@@ -426,6 +519,7 @@ AND table_name IN ('player_attention_events','player_approach_state');")
             }
             try
             {
+                VerifyNativeEditorOwnershipMigration(add, token);
                 add("campaign_migration_list_ordered",
                     CampaignSchemaMigrations.Select((migration, index) => migration.Version == index + 1).All(ordered => ordered)
                     && CampaignSchemaMigrations[0].Apply == null,

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace ReignBetaServer
 {
@@ -32,6 +33,49 @@ command_id TEXT PRIMARY KEY,revision_id TEXT NOT NULL,hero_id TEXT NOT NULL,stat
 changes_json TEXT NOT NULL DEFAULT '{}',inverse_json TEXT NOT NULL DEFAULT '{}',dangerous INTEGER NOT NULL DEFAULT 0,
 confirmation TEXT NOT NULL DEFAULT '',created_ts INTEGER NOT NULL,claimed_ts INTEGER NOT NULL DEFAULT 0,resolved_ts INTEGER NOT NULL DEFAULT 0,
 result_json TEXT NOT NULL DEFAULT '{}');", parameters, transaction);
+        }
+
+        internal static void ApplyNativeEditorOwnershipMigration(ReignDbConnection connection)
+        {
+            CreateCharacterEditorNativeCommands(connection);
+            CreateIndexEditorNativeCommandsStatus(connection);
+            RelationshipsSchema.CreateNotableMbtiProfiles(connection);
+            RelationshipsSchema.CreateIndexNotableMbtiType(connection);
+            RelationshipsSchema.CreateIndexNotableMbtiSync(connection);
+            EnsureManualEditorCommandOriginColumns(connection);
+            EnsureAutomaticNotableOriginColumns(connection);
+            ReignDatabase.EnsureDatabaseColumn(connection, "notable_mbti_profiles",
+                "startup_native_session_id", "TEXT NOT NULL DEFAULT ''");
+        }
+
+        internal static bool NativeEditorOwnershipShapeReady(ReignDbConnection connection,
+            ReignDbTransaction transaction = null)
+        {
+            if (!ReignPostgreSqlDialect.IsPostgreSql(connection)) return false;
+            var columns = ReignDatabase.QuerySql(connection, @"SELECT COUNT(*) AS count
+FROM information_schema.columns
+WHERE table_schema=current_schema() AND data_type='text' AND is_nullable='NO' AND column_default=(quote_literal('')||'::text')
+  AND ((table_name='character_editor_native_commands' AND column_name IN (
+    'manual_origin_timeline_id','manual_origin_lineage_id','manual_origin_json','automatic_origin_json'))
+    OR (table_name='notable_mbti_profiles' AND column_name='startup_native_session_id'));",
+                null, transaction).SingleOrDefault();
+            return ReadInt(columns, "count", 0) == 5;
+        }
+
+        internal static void EnsureManualEditorCommandOriginColumns(ReignDbConnection connection)
+        {
+            ReignDatabase.EnsureDatabaseColumn(connection, "character_editor_native_commands",
+                "manual_origin_timeline_id", "TEXT NOT NULL DEFAULT ''");
+            ReignDatabase.EnsureDatabaseColumn(connection, "character_editor_native_commands",
+                "manual_origin_lineage_id", "TEXT NOT NULL DEFAULT ''");
+            ReignDatabase.EnsureDatabaseColumn(connection, "character_editor_native_commands",
+                "manual_origin_json", "TEXT NOT NULL DEFAULT ''");
+        }
+
+        internal static void EnsureAutomaticNotableOriginColumns(ReignDbConnection connection)
+        {
+            ReignDatabase.EnsureDatabaseColumn(connection, "character_editor_native_commands",
+                "automatic_origin_json", "TEXT NOT NULL DEFAULT ''");
         }
 
         internal static void CreateIndexEditorNativeCommandsStatus(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)

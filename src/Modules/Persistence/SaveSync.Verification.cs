@@ -17,6 +17,358 @@ namespace ReignBetaServer
     internal static partial class PersistenceService
     {
 #if !REIGN_EXCLUDE_VERIFICATION
+        private static void VerifyLegacyEditorNativeOwnerRevocation(Action<string, bool, string> add, string token)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation)
+                throw new InvalidOperationException("The Editor native owner fixture requires the isolated validation database.");
+            string campaign = "sst_editor_owner_" + token;
+            string pointId = Guid.NewGuid().ToString("N");
+            string anchorSession = "";
+            string root = SaveSyncCampaignRoot(campaign);
+            string campaignRoot = StrictCampaignDirectory(campaign);
+            using (var existing = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign,
+                trackCampaignMutations: false, initializeInfrastructure: false))
+                if (existing != null || Path.Exists(root) || Path.Exists(campaignRoot))
+                    throw new IOException("The disposable Editor native owner fixture is already occupied.");
+
+            bool? priorEnabled = SaveSyncEnabledOverrideForTests;
+            bool priorDisableOptimization = SaveSyncDisableBackgroundOptimizationForTests;
+            try
+            {
+                SaveSyncEnabledOverrideForTests = true;
+                SaveSyncDisableBackgroundOptimizationForTests = true;
+                PrepareSaveSyncTestCampaign(campaign, "old");
+                var point = SaveSyncTestPointPayload(campaign, pointId, 10d, "Editor owner fixture " + token);
+                string timeline = ReadString(point, "timelineId", "");
+                var opened = WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", timeline));
+                if (!ReadBool(opened, "ok", false) || ReadString(opened, "timelineId", "") != timeline)
+                    throw new InvalidOperationException("Could not open the isolated Editor owner timeline.");
+                point["worldHistorySequence"] = 0L;
+
+                Dictionary<string, object> Register(Dictionary<string, object> request)
+                {
+                    var result = SaveSyncRegisterApi(request);
+                    if (!ReadBool(result, "ok", false)
+                        || !ReadBool(SaveSyncFinalizeApi(TestDict("campaignId", campaign,
+                            "savePointId", ReadString(request, "savePointId", ""),
+                            "nativeSaveName", ReadString(request, "nativeSaveName", ""), "successful", true)), "ok", false))
+                        throw new InvalidOperationException("Could not register the isolated Editor owner fixture.");
+                    return result;
+                }
+
+                Register(new Dictionary<string, object>(point)
+                    { ["editorNativeOwnerSessionId"] = Guid.NewGuid().ToString("N") });
+                string ActiveLineage() => ReadString(ReadDictionary(
+                    ReadSaveSyncLedger(campaign), EditorNativeOwnerLedgerKey), "lineageId", "");
+                bool OwnerPresent() => IsEditorNativeNonce(ActiveLineage());
+                RegisteredEditorNativeOwner ReadConsumerOwner()
+                {
+                    Program.CampaignDataGate.EnterReadLock();
+                    try { return ReadRegisteredEditorNativeOwner(campaign); }
+                    finally { Program.CampaignDataGate.ExitReadLock(); }
+                }
+                var firstNativePoint = SaveSyncPoint(ReadSaveSyncLedger(campaign), pointId);
+                bool pointStartedUnbound = !OwnerPresent() && ReadConsumerOwner() == null
+                    && ReadString(firstNativePoint, "status", "") == "ready"
+                    && ReadDictionary(firstNativePoint, EditorNativePointLineageKey) == null;
+
+                void Adopt(Dictionary<string, object> target = null)
+                {
+                    anchorSession = Guid.NewGuid().ToString("N");
+                    var payload = new Dictionary<string, object>(target ?? point)
+                    {
+                        ["editorNativeOwnerVersion"] = 1,
+                        ["loadSessionId"] = anchorSession
+                    };
+                    var response = SaveSyncLoadApi(payload, false);
+                    if (!ReadBool(response, "ok", false) || !OwnerPresent())
+                        throw new InvalidOperationException("Could not establish the isolated versioned native Editor owner.");
+                }
+
+                var degraded = SaveSyncTestPointPayload(campaign, "missing_" + token, 1d, "Unregistered editor fixture");
+                degraded["registrationConfirmed"] = false;
+                Adopt();
+                var admitted = ReadConsumerOwner();
+                add("native_editor_first_checkpoint_stays_unbound_until_verified_load",
+                    pointStartedUnbound && admitted != null && admitted.CampaignId == campaign
+                    && admitted.LoadPointId == pointId && admitted.LoadSessionId == anchorSession
+                    && admitted.TimelineId == timeline && admitted.LineageId == ActiveLineage()
+                    && admitted.RestoreGeneration.Length > 0 && ReadRegisteredEditorNativeOwner(campaign) == null,
+                    "A genuine first checkpoint can register and finalize without a manual Editor owner, and its verified subsequent load can establish one.");
+                string ledgerPath = Path.Combine(SaveSyncCampaignRoot(campaign), "ledger.json");
+                string ledgerSha = FileSha256(ledgerPath);
+                var preview = SaveSyncLoadApi(degraded, true);
+                var legacyTokenPreview = SaveSyncLoadApi(new Dictionary<string, object>(degraded)
+                    { ["loadSessionId"] = "load_session_" + token, ["dryRun"] = true }, false);
+                add("native_editor_legacy_load_previews_preserve_live_authority_and_ledger",
+                    ReadBool(preview, "ok", false) && ReadBool(legacyTokenPreview, "ok", false)
+                    && OwnerPresent() && FileSha256(ledgerPath) == ledgerSha,
+                    "Both legacy preview paths leave the live Editor owner and literal ledger bytes untouched.");
+
+                var missingSession = SaveSyncLoadApi(degraded, false);
+                bool missingRetired = !OwnerPresent() && ReadConsumerOwner() == null;
+                Adopt();
+                var olderSession = SaveSyncLoadApi(new Dictionary<string, object>(degraded)
+                    { ["loadSessionId"] = "load_session_" + token, ["editorNativeOwnerVersion"] = 1 }, false);
+                add("native_editor_degraded_legacy_load_revokes_current_owner_with_missing_or_old_session",
+                    missingRetired && !OwnerPresent() && ReadConsumerOwner() == null
+                    && ReadString(missingSession, "result", "") == "unregistered_save_baseline"
+                    && ReadString(olderSession, "result", "") == "unregistered_save_baseline"
+                    && SaveSyncTestSqlValue(campaign, PersistenceStore.SelectMemoryRestoredSourceContextSql2, "load_session_id") == anchorSession,
+                    "An unregistered legacy load retires Editor authority even though Save Sync leaves the previous SQL load proof intact.");
+
+                Adopt();
+                var samePoint = SaveSyncLoadApi(point, false);
+                add("native_editor_same_point_legacy_no_op_without_session_revokes_authority",
+                    ReadString(samePoint, "result", "") == "no_op" && !OwnerPresent()
+                    && SaveSyncTestSqlValue(campaign, PersistenceStore.SelectMemoryRestoredSourceContextSql2, "load_session_id") == anchorSession,
+                    "A same-point no-op with no bound session never preserves a previous native Editor owner.");
+
+                Adopt();
+                SaveSyncEnabledOverrideForTests = false;
+                var disabled = SaveSyncLoadApi(degraded, false);
+                add("native_editor_disabled_legacy_load_retires_only_previous_editor_authority",
+                    ReadString(disabled, "result", "") == "disabled" && !OwnerPresent()
+                    && SaveSyncTestSqlValue(campaign, PersistenceStore.SelectMemoryRestoredSourceContextSql2, "load_session_id") == anchorSession,
+                    "Disabling Save Sync leaves campaign data and SQL session intact while retiring the isolated Editor owner.");
+
+                SaveSyncEnabledOverrideForTests = true;
+                Adopt();
+                string expectedLineage = ActiveLineage();
+                string sharedId = Guid.NewGuid().ToString("N");
+                string cloneId = Guid.NewGuid().ToString("N");
+                var shared = new Dictionary<string, object>(point)
+                {
+                    ["savePointId"] = sharedId, ["nativeSaveName"] = "Shared Editor owner " + token,
+                    ["editorNativeOwnerSessionId"] = anchorSession
+                };
+                var clone = new Dictionary<string, object>(point)
+                {
+                    ["savePointId"] = cloneId, ["nativeSaveName"] = "Cloned Editor owner " + token,
+                    ["editorNativeOwnerSessionId"] = anchorSession
+                };
+                var sharedResult = Register(shared);
+                AppendSaveSyncTestLine(campaign, "actions", "editor_owner_distinct_snapshot");
+                MarkSaveSyncActiveStateDirty(campaign);
+                var cloneResult = Register(clone);
+                var lineageLedger = ReadSaveSyncLedger(campaign);
+                bool Stamped(string id, string storageId)
+                {
+                    var saved = SaveSyncPoint(lineageLedger, id);
+                    var lineage = ReadDictionary(saved, EditorNativePointLineageKey);
+                    return ReadString(lineage, "timelineId", "") == timeline
+                        && ReadString(lineage, "lineageId", "") == expectedLineage
+                        && SaveSyncPostgreSqlSnapshotPointId(saved) == storageId;
+                }
+                Adopt(clone);
+                bool clonedReload = ActiveLineage() == expectedLineage;
+                Adopt(shared);
+                add("native_editor_verified_shared_and_cloned_checkpoints_restore_exact_origin_lineage",
+                    ReadString(sharedResult, "result", "") == "registered_shared_generation"
+                    && ReadString(cloneResult, "result", "") == "registered"
+                    && Stamped(sharedId, pointId) && Stamped(cloneId, cloneId)
+                    && clonedReload && ActiveLineage() == expectedLineage,
+                    "Register, finalize and restore both native points through the real shared-state and cloned-state routes.");
+
+                Adopt();
+                var sameOwner = new Dictionary<string, object>(point)
+                {
+                    ["editorNativeOwnerVersion"] = 1, ["loadSessionId"] = anchorSession
+                };
+                string priorLineage = ActiveLineage();
+                var replay = SaveSyncLoadApi(sameOwner, false);
+                bool preserved = ActiveLineage() == priorLineage;
+                bool Denied(Dictionary<string, object> request, bool dryRun)
+                {
+                    try { SaveSyncLoadApi(request, dryRun); }
+                    catch (InvalidDataException) { return true; }
+                    return false;
+                }
+
+                string beforeRefusal = FileSha256(ledgerPath);
+                bool callerDigestRejected = Denied(new Dictionary<string, object>(sameOwner)
+                    { ["calendarSha256"] = new string('f', 64) }, false);
+                bool callerProofPreserved = OwnerPresent() && FileSha256(ledgerPath) == beforeRefusal;
+                var activePoint = SaveSyncPoint(ReadSaveSyncLedger(campaign), pointId);
+                string manifestPath = Path.Combine(SaveSyncSnapshotRoot(campaign, activePoint), "manifest.json");
+                byte[] manifestBytes = File.ReadAllBytes(manifestPath);
+                try
+                {
+                    var manifest = CampaignFileService.ReadJsonObject(manifestPath);
+                    manifest["fingerprint"] = "editor_fixture_inconsistent_snapshot";
+                    CampaignFileService.WriteJsonObject(manifestPath, manifest);
+                    bool previewRejected = Denied(sameOwner, true);
+                    bool previewPreserved = OwnerPresent() && FileSha256(ledgerPath) == beforeRefusal;
+                    bool realRejected = Denied(sameOwner, false);
+                    add("native_editor_corrupt_registered_manifest_retires_matching_owner_only_for_real_load",
+                        callerDigestRejected && callerProofPreserved && previewRejected && previewPreserved
+                        && realRejected && !OwnerPresent()
+                        && SaveSyncTestSqlValue(campaign, PersistenceStore.SelectMemoryRestoredSourceContextSql2, "load_session_id") == anchorSession,
+                        "A broken persisted manifest retires the matching owner despite prior SQL proof. Preview and caller-only digest failure leave it intact.");
+                }
+                finally { File.WriteAllBytes(manifestPath, manifestBytes); }
+
+                Adopt();
+                sameOwner["loadSessionId"] = anchorSession;
+                string retainedEditorOrigin = CharactersService.VerifyEditorManualCommandOrigin(add, campaign, ledgerPath);
+                CharactersService.VerifyEditorBrowserAdmission(add, campaign, registered: true);
+                ReignPostgreSqlStorage.DropSnapshot(campaign, pointId);
+                var missingPoint = SaveSyncLoadApi(new Dictionary<string, object>(sameOwner)
+                    { ["registrationConfirmed"] = false }, false);
+                add("native_editor_matching_retry_preserves_registered_receipt_but_missing_snapshot_revokes",
+                    ReadBool(replay, "idempotentReplay", false) && preserved
+                    && ReadString(missingPoint, "result", "") == "unregistered_save_baseline" && !OwnerPresent()
+                    && SaveSyncTestSqlValue(campaign, PersistenceStore.SelectMemoryRestoredSourceContextSql2, "load_session_id") == anchorSession,
+                    "Even a formerly verified, still-matching request retires the owner if the referenced snapshot is gone.");
+                CharactersService.VerifyPersistedEditorCommandOriginWithoutCurrentOwner(add,
+                    campaign, ledgerPath, retainedEditorOrigin);
+                CharactersService.VerifyEditorBrowserAdmission(add, campaign, registered: false);
+            }
+            finally
+            {
+                SaveSyncEnabledOverrideForTests = priorEnabled;
+                SaveSyncDisableBackgroundOptimizationForTests = priorDisableOptimization;
+                try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                finally
+                {
+                    TryDeleteDirectory(StrictCampaignDirectory(campaign));
+                    TryDeleteDirectory(SaveSyncCampaignRoot(campaign));
+                }
+            }
+        }
+
+        private static void VerifyManualEditorNativeDeliveryWithRegisteredSave(Action<string, bool, string> add, string token)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation)
+                throw new InvalidOperationException("The manual Editor delivery fixture needs the isolated validation database.");
+            string campaign = "sst_editor_delivery_" + token;
+            string root = SaveSyncCampaignRoot(campaign);
+            string campaignRoot = StrictCampaignDirectory(campaign);
+            using (var existing = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign,
+                trackCampaignMutations: false, initializeInfrastructure: false))
+                if (existing != null || Path.Exists(root) || Path.Exists(campaignRoot))
+                    throw new IOException("The disposable manual Editor delivery fixture is already occupied.");
+
+            bool? priorEnabled = SaveSyncEnabledOverrideForTests;
+            bool priorDisable = SaveSyncDisableBackgroundOptimizationForTests;
+            try
+            {
+                SaveSyncEnabledOverrideForTests = true;
+                SaveSyncDisableBackgroundOptimizationForTests = true;
+                PrepareSaveSyncTestCampaign(campaign, "old");
+                string pointId = Guid.NewGuid().ToString("N");
+                string name = "Scoped native editor delivery " + token;
+                var point = SaveSyncTestPointPayload(campaign, pointId, 10d, name);
+                string timeline = ReadString(point, "timelineId", "");
+                var opened = WorldSimulationService.WorldHistoryOpenTimelineApi(TestDict("campaignId", campaign, "timelineId", timeline));
+                point["worldHistorySequence"] = 0L;
+                if (!ReadBool(opened, "ok", false) || ReadString(opened, "timelineId", "") != timeline
+                    || !ReadBool(SaveSyncRegisterApi(point), "ok", false)
+                    || !ReadBool(SaveSyncFinalizeApi(TestDict("campaignId", campaign, "savePointId", pointId,
+                        "nativeSaveName", name, "successful", true)), "ok", false))
+                    throw new InvalidOperationException("The manual Editor delivery checkpoint could not be registered.");
+                point["editorNativeOwnerVersion"] = 1;
+                point["loadSessionId"] = Guid.NewGuid().ToString("N");
+                if (!ReadBool(SaveSyncLoadApi(point, false), "ok", false))
+                    throw new InvalidOperationException("The manual Editor delivery fixture could not load its checkpoint.");
+                string ledgerPath = Path.Combine(root, "ledger.json");
+                CharactersService.VerifyEditorManualCommandOrigin((name, passed, _) =>
+                {
+                    if (!passed) throw new InvalidOperationException("Could not seed scoped delivery prerequisite " + name + ".");
+                }, campaign, ledgerPath);
+                CharactersService.VerifyScopedManualEditorNativeDelivery(add, campaign, ledgerPath);
+            }
+            finally
+            {
+                SaveSyncEnabledOverrideForTests = priorEnabled;
+                SaveSyncDisableBackgroundOptimizationForTests = priorDisable;
+                try { ReignPostgreSqlStorage.DropCampaign(campaign); }
+                finally
+                {
+                    TryDeleteDirectory(campaignRoot);
+                    TryDeleteDirectory(root);
+                }
+            }
+        }
+
+        private static void VerifyEditorNativeOwnerLineage(Action<string, bool, string> add)
+        {
+            string pointId = Guid.NewGuid().ToString("N");
+            string session = Guid.NewGuid().ToString("N");
+            string laterSession = Guid.NewGuid().ToString("N");
+            string degradedSession = Guid.NewGuid().ToString("N");
+            string generation = Guid.NewGuid().ToString("N");
+            const string timeline = "editor_test_timeline";
+            var payload = TestDict("editorNativeOwnerVersion", 1);
+            var ledger = TestDict();
+            var point = TestDict("savePointId", pointId, "timelineId", timeline, "status", "ready", "savePointKind", "native_save");
+            var next = TestDict("savePointId", Guid.NewGuid().ToString("N"), "timelineId", timeline,
+                "status", "ready", "savePointKind", "native_save");
+
+            bool wroteInitialFence = BeginEditorNativeOwnerLoad(ledger, payload, pointId, session);
+            CompleteEditorNativeOwnerLoad(ledger, point, session, generation);
+            var first = ReadDictionary(ledger, EditorNativeOwnerLedgerKey);
+            string lineage = ReadString(first, "lineageId", "");
+            CaptureEditorNativePointLineage(ledger, next, TestDict("editorNativeOwnerSessionId", session),
+                (expectedPoint, expectedSession, expectedRestore) =>
+                    expectedPoint == pointId && expectedSession == session && expectedRestore == generation);
+            var lostProof = TestDict("timelineId", timeline, "savePointKind", "native_save");
+            CaptureEditorNativePointLineage(ledger, lostProof,
+                TestDict("editorNativeOwnerSessionId", session), (_, _, _) => false);
+            bool preserved = !BeginEditorNativeOwnerLoad(ledger, payload, pointId, session);
+            add("native_editor_verified_load_can_stamp_only_its_own_checkpoint",
+                !wroteInitialFence && preserved && !lostProof.ContainsKey(EditorNativePointLineageKey)
+                && IsEditorNativeNonce(lineage) && ReadString(first, "restoreGeneration", "") == generation
+                && ReadString(ReadDictionary(next, EditorNativePointLineageKey), "lineageId", "") == lineage,
+                "Only the live verified load session stamps the same timeline. An idempotent load retry preserves its authority.");
+
+            var switchedTimeline = TestDict("timelineId", "other", "savePointKind", "native_save");
+            CaptureEditorNativePointLineage(ledger, switchedTimeline, TestDict("editorNativeOwnerSessionId", session), (_, _, _) => true);
+            string nextId = ReadString(next, "savePointId", "");
+            BeginEditorNativeOwnerLoad(ledger, payload, nextId, laterSession);
+            CompleteEditorNativeOwnerLoad(ledger, next, laterSession, generation);
+            var reloaded = ReadDictionary(ledger, EditorNativeOwnerLedgerKey);
+            var staleSave = TestDict("timelineId", timeline, "savePointKind", "native_save");
+            CaptureEditorNativePointLineage(ledger, staleSave, TestDict("editorNativeOwnerSessionId", session), (_, _, _) => true);
+            add("native_editor_registered_descendant_rebinds_lineage_to_fresh_session",
+                ReadString(reloaded, "lineageId", "") == lineage
+                && ReadString(reloaded, "loadSessionId", "") == laterSession
+                && !switchedTimeline.ContainsKey(EditorNativePointLineageKey) && !staleSave.ContainsKey(EditorNativePointLineageKey),
+                "A proven same-timeline checkpoint retains lineage without extending the prior load session.");
+
+            string degradedPoint = Guid.NewGuid().ToString("N");
+            bool fencedPrevious = BeginEditorNativeOwnerLoad(ledger, payload, degradedPoint, degradedSession);
+            var checkpointDuringDegraded = TestDict("savePointId", degradedPoint, "timelineId", timeline,
+                "status", "ready", "savePointKind", "native_save");
+            CaptureEditorNativePointLineage(ledger, checkpointDuringDegraded, TestDict("editorNativeOwnerSessionId", degradedSession), (_, _, _) => true);
+            CaptureEditorNativePointLineage(ledger, checkpointDuringDegraded, TestDict("editorNativeOwnerSessionId", laterSession), (_, _, _) => true);
+            bool reusesPrior = checkpointDuringDegraded.ContainsKey(EditorNativePointLineageKey);
+            string freshSession = Guid.NewGuid().ToString("N");
+            BeginEditorNativeOwnerLoad(ledger, payload, degradedPoint, freshSession);
+            CompleteEditorNativeOwnerLoad(ledger, checkpointDuringDegraded, freshSession, generation);
+            string freshLineage = ReadString(ReadDictionary(ledger, EditorNativeOwnerLedgerKey), "lineageId", "");
+            add("native_editor_degraded_checkpoint_cannot_copy_prior_lineage_on_same_timeline",
+                fencedPrevious && !reusesPrior && IsEditorNativeNonce(freshLineage) && freshLineage != lineage,
+                "An unverified continuation cannot stamp a later checkpoint. A verified load of it cannot inherit earlier native authority.");
+
+            var untypedPoint = TestDict("savePointId", pointId, "timelineId", timeline, "status", "ready",
+                "savePointKind", "native_save", EditorNativePointLineageKey, TestDict("timelineId", timeline, "lineageId", lineage));
+            string untypedSession = Guid.NewGuid().ToString("N");
+            BeginEditorNativeOwnerLoad(ledger, payload, pointId, untypedSession);
+            CompleteEditorNativeOwnerLoad(ledger, untypedPoint, untypedSession, generation);
+            string untypedLineage = ReadString(ReadDictionary(ledger, EditorNativeOwnerLedgerKey), "lineageId", "");
+            add("native_editor_registered_load_rejects_unproven_checkpoint_lineage",
+                IsEditorNativeNonce(untypedLineage) && untypedLineage != lineage,
+                "Identity values alone cannot inherit earlier Editor authority without explicit registered-origin provenance.");
+
+            BeginEditorNativeOwnerLoad(ledger, TestDict(), pointId, Guid.NewGuid().ToString("N"));
+            var unsupported = TestDict("timelineId", timeline, "savePointKind", "native_save");
+            CaptureEditorNativePointLineage(ledger, unsupported, TestDict("editorNativeOwnerSessionId", freshSession), (_, _, _) => true);
+            add("native_editor_legacy_load_never_mints_or_inherits_lineage",
+                !ledger.ContainsKey(EditorNativeOwnerLedgerKey) && !unsupported.ContainsKey(EditorNativePointLineageKey),
+                "An older native load revokes prior lineage admission without authorizing its own session.");
+        }
+
         internal static List<Dictionary<string, object>> RunSaveSyncSelfTests()
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
@@ -30,6 +382,9 @@ namespace ReignBetaServer
             RunCampaignMigrationSelfTests(add, token);
             VerifyRegisteredPartyAgencyAcceptedReceiptProjection(add, token);
             VerifyActiveStatePublicationRetry(add);
+            VerifyEditorNativeOwnerLineage(add);
+            VerifyLegacyEditorNativeOwnerRevocation(add, token);
+            VerifyManualEditorNativeDeliveryWithRegisteredSave(add, token);
             var loadedReceiptLedger = TestDict("lastLoadedSavePoint", TestDict("savePointId", "cached_point", "status", "ready"));
             var registeredLoadedPoint = TestDict("savePointId", "cached_point", "snapshotStorageId", "actual_retained_storage");
             add("loaded_receipt_uses_registered_storage_metadata",
@@ -2798,6 +3153,7 @@ WHERE client_id='bannerlord' AND timeline_id=$timeline;", TestDict("timeline", t
                 var cleanInspection = CleanBytes();
                 var beforeInspection = State(receiptCase, receiptTag);
                 var ready = Apply(inspection);
+                var emptyPredecessor = Apply(new Dictionary<string, object>(inspection) { ["observePredecessorVersion"] = 1 });
                 var forbiddenInspection = new Dictionary<string, object>(inspection) { ["effectIntentId"] = firstIntent["effectIntentId"] };
                 var foreignInspection = new Dictionary<string, object>(inspection) { ["sharedActivityGeneration"] = oldGeneration };
                 add("arrest_captured_repair_inspection_ready_is_read_only",
@@ -2810,6 +3166,7 @@ WHERE client_id='bannerlord' AND timeline_id=$timeline;", TestDict("timeline", t
                     && ReadString(ready, "sharedActivityGeneration", "<missing>") == Generation()
                     && ReadString(Apply(forbiddenInspection), "status", "") == "invalid_effect_intent"
                     && ReadString(Apply(foreignInspection), "status", "") == "ownership_mismatch"
+                    && ReadString(emptyPredecessor, "status", "") == "ready" && !emptyPredecessor.ContainsKey("predecessor")
                     && State(receiptCase, receiptTag) == beforeInspection && ReceiptState() == null
                     && StillCleanBytes(cleanInspection),
                     "An exact registered inspection discovers the empty material revision. An injected intent or old owner cannot read or mutate it.");
@@ -2858,6 +3215,39 @@ WHERE client_id='bannerlord' AND timeline_id=$timeline;", TestDict("timeline", t
                     && State(receiptCase, receiptTag) == firstState && Json.Serialize(ReceiptState()) == Json.Serialize(firstStored)
                     && StillCleanBytes(cleanReplay),
                     "An identical established case returns the measured effect at the existing revision. A conflicting disclosure cannot acquire permission to rebase it.");
+
+                var observe = new Dictionary<string, object>(changedEvidence) { ["observePredecessorVersion"] = 1 };
+                var observed = Apply(observe);
+                var originKnown = new Dictionary<string, object>(settledInspection) { ["observePredecessorVersion"] = 1 };
+                var confirmed = Apply(originKnown);
+                string normalizedPredecessor = Json.Serialize(new object[] { -7, -8, 17d, "Disposable arrest owner fixture.",
+                    "espionage", "serious", true, "established_after_arrest", "fixture_disclosed_evidence" });
+                string expectedPredecessor = Sha256Hex(Json.Serialize(new object[] { normalizedPredecessor, -7 }));
+                add("arrest_effect_predecessor_observation_reads_stored_material_without_write",
+                    !ReadBool(observed, "ok", true) && ReadString(observed, "status", "") == "material_mismatch"
+                    && ReadLong(observed, "materialRevision", -1) == 1
+                    && observed.TryGetValue("predecessor", out var previous) && previous is Dictionary<string, object> witness
+                    && ReadInt(witness, "version", 0) == 1 && ReadDouble(witness, "acquiredDay", -1d) == 17d
+                    && ReadInt(witness, "appliedRelationshipDelta", int.MinValue) == -7
+                    && ReadString(witness, "materialSha256", "") == expectedPredecessor
+                    && confirmed.TryGetValue("predecessor", out var confirmedPrior) && Json.Serialize(confirmedPrior) == Json.Serialize(witness)
+                    && !settled.ContainsKey("predecessor") && State(receiptCase, receiptTag) == firstState
+                    && Json.Serialize(ReceiptState()) == Json.Serialize(firstStored) && StillCleanBytes(cleanReplay),
+                    "Opted-in read-only inspection emits the measured predecessor at its stored day even if the proposed material differs.");
+
+                var wrongOwnerObservation = new Dictionary<string, object>(observe) { ["sharedActivityGeneration"] = oldGeneration };
+                var invalidObservation = new Dictionary<string, object>(observe) { ["observePredecessorVersion"] = "1" };
+                var injectedApply = new Dictionary<string, object>(Versioned(1, -9)) { ["observePredecessorVersion"] = 1 };
+                var wrongOwnerResult = Apply(wrongOwnerObservation);
+                var invalidObservationResult = Apply(invalidObservation);
+                var injectedApplyResult = Apply(injectedApply);
+                add("arrest_effect_predecessor_observation_cannot_authorize_write",
+                    ReadString(wrongOwnerResult, "status", "") == "ownership_mismatch" && !wrongOwnerResult.ContainsKey("predecessor")
+                    && ReadString(invalidObservationResult, "status", "") == "invalid_effect_intent"
+                    && ReadString(injectedApplyResult, "status", "") == "invalid_effect_intent"
+                    && State(receiptCase, receiptTag) == firstState && Json.Serialize(ReceiptState()) == Json.Serialize(firstStored)
+                    && StillCleanBytes(cleanReplay),
+                    "Observation is scoped to the exact owner and typed version on inspect, and requests that mix it into a write do not mutate.");
 
                 var secondIntent = Versioned(1, -9);
                 var secondReceipt = Apply(secondIntent);
@@ -2963,6 +3353,176 @@ DROP COLUMN effect_receipt_json,DROP COLUMN effect_intent_material,DROP COLUMN e
                     && WorldSimulationStore.ArrestEffectReceiptSchemaReady(migrated)
                     && ReadLong(ReceiptState(), "material_revision", -1) == 0 && CommittedCase(receiptCase, receiptTag, -7),
                     "A registered v5 schema keeps its owner-only compatibility and stays unmodified by v2 admission. The normal campaign open migrates without losing existing material.");
+
+                const string compareCase = "compare_predecessor_case", compareTag = "compare_predecessor_tag";
+                var initial = Versioned(0, -7, compareCase, compareTag);
+                if (ReadString(Apply(initial), "status", "") != "committed")
+                    throw new InvalidOperationException("The disposable compare fixture has no measured initial effect.");
+                var proposed = new Dictionary<string, object>(Versioned(1, -7, compareCase, compareTag)) { ["worldDay"] = 24d };
+                var inspectCompare = Inspection(proposed);
+                inspectCompare["observePredecessorVersion"] = 1;
+
+                string ObservedDigest() => ReadString(ReadDictionary(Apply(inspectCompare), "predecessor"), "materialSha256", "");
+
+                Dictionary<string, object> Compare(Dictionary<string, object> request, string digest)
+                {
+                    var access = Program.EnterCampaignRequestAccess("/arrests/case/apply");
+                    try { return WorldSimulationService.VerifyCompareAndApplyArrestCase(request, digest); }
+                    finally { Program.ExitCampaignRequestAccess(access); }
+                }
+
+                void ChangeAcquiredDay(double day) => ReignDatabase.ExecuteSql(migrated, @"UPDATE character_reputations
+SET acquired_day=$day WHERE campaign_id=$campaign AND timeline_id=$timeline AND subject_id=$subject AND tag_id=$tag;",
+                    TestDict("day", day, "campaign", campaign, "timeline", timeline, "subject", accused, "tag", compareTag));
+
+                string firstDigest = ObservedDigest();
+                ChangeAcquiredDay(18d); // An independent edit did not advance the arrest effect revision.
+                string currentDigest = ObservedDigest();
+                var beforeCompare = State(compareCase, compareTag);
+                string beforeCompareReceipt = Json.Serialize(ReceiptState(compareCase, compareTag));
+                var cleanBeforeCompare = CleanBytes();
+                var oldOwnerCompare = new Dictionary<string, object>(proposed) { ["sharedActivityGeneration"] = oldGeneration };
+                add("arrest_effect_compare_rejects_same_revision_predecessor_drift_and_old_owner",
+                    firstDigest.Length == 64 && currentDigest.Length == 64 && firstDigest != currentDigest
+                    && ReadString(Compare(oldOwnerCompare, currentDigest), "status", "") == "ownership_mismatch"
+                    && ReadString(Compare(proposed, firstDigest), "status", "") == "predecessor_mismatch"
+                    && State(compareCase, compareTag) == beforeCompare
+                    && Json.Serialize(ReceiptState(compareCase, compareTag)) == beforeCompareReceipt && StillCleanBytes(cleanBeforeCompare),
+                    "A measured day change without a revision change defeats the frozen digest. Both refusals preserve the actual SQL rows and clean sidecar.");
+
+                var compared = Compare(proposed, currentDigest);
+                string comparedBytes = Json.Serialize(compared);
+                string resultDigest = ObservedDigest();
+                var afterCompare = State(compareCase, compareTag);
+                var storedCompare = ReceiptState(compareCase, compareTag);
+                var afterInspection = ReadDictionary(Apply(inspectCompare), "predecessor");
+                bool wasDirtied = ReadBool(CampaignFileService.ReadAtomicallyReplacedJsonObject(sidecar), "dirty", false);
+                var cleanAfterCompare = CleanBytes();
+                add("arrest_effect_compare_commits_material_and_replays_only_exact_witness",
+                    ReadString(compared, "status", "") == "committed" && ReadLong(compared, "materialRevision", -1) == 2
+                    && ReadString(compared, "predecessorMaterialSha256", "") == currentDigest
+                    && ReadString(compared, "committedMaterialSha256", "") == resultDigest && resultDigest != currentDigest
+                    && ReadDouble(afterInspection, "acquiredDay", -1d) == 24d && beforeCompare.Affinity == afterCompare.Affinity
+                    && ReadString(storedCompare, "effect_receipt_json", "") == comparedBytes && wasDirtied
+                    && Json.Serialize(Compare(proposed, currentDigest)) == comparedBytes
+                    && ReadString(Compare(proposed, firstDigest), "status", "") == "intent_conflict"
+                    && State(compareCase, compareTag) == afterCompare
+                    && Json.Serialize(ReceiptState(compareCase, compareTag)) == Json.Serialize(storedCompare)
+                    && StillCleanBytes(cleanAfterCompare),
+                    "Same-delta comparison still records the exact new day and revision. A retained receipt is replayed without a second effect or dirty write.");
+
+                ChangeAcquiredDay(25d);
+                var laterState = State(compareCase, compareTag);
+                var cleanLater = CleanBytes();
+                add("arrest_effect_compare_replay_holds_changed_committed_postimage",
+                    ReadString(Compare(proposed, currentDigest), "status", "") == "receipt_unavailable"
+                    && State(compareCase, compareTag) == laterState
+                    && Json.Serialize(ReceiptState(compareCase, compareTag)) == Json.Serialize(storedCompare)
+                    && StillCleanBytes(cleanLater),
+                    "After the committed material changes independently, the exact nonce cannot replay the old success against the changed row.");
+
+                const string compareFaultMarker = "d23_compare_changed_affinity_at_receipt";
+                const int changedDelta = -11, expectedMovement = -4;
+                var changed = new Dictionary<string, object>(Versioned(2, changedDelta, compareCase, compareTag)) { ["worldDay"] = 26d };
+                string originalDigest = ObservedDigest();
+                string originalReceipt = Json.Serialize(ReceiptState(compareCase, compareTag));
+                string originalHistory = HistoryHead(), originalGeneration = Generation();
+                int changedAffinity = laterState.Affinity + expectedMovement;
+                if (originalDigest.Length != 64 || changedAffinity < -100 || laterState.Cases != 1 || laterState.Reputations != 1)
+                    throw new InvalidOperationException("The disposable compare rollback fixture lacks its measured predecessor.");
+                CleanBytes();
+
+                Dictionary<string, object> changedRejected;
+                int statementRetries = 0;
+                using (var faultConnection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                {
+                    // The fixture's trigger fires only for the attempted next revision of this case.
+                    // Its own reads must see the changed affinity and reputation before it aborts.
+                    ReignDatabase.ExecuteSql(faultConnection, """
+                        CREATE FUNCTION d23_compare_receipt_fault() RETURNS trigger LANGUAGE plpgsql AS $$
+                        BEGIN
+                            IF NOT EXISTS (
+                                SELECT 1 FROM relationship_pair_chemistry
+                                WHERE hero_a_id = NEW.accused_id AND hero_b_id = NEW.player_id
+                                  AND affinity_a_to_b = TG_ARGV[0]::integer
+                            ) OR NOT EXISTS (
+                                SELECT 1 FROM character_reputations
+                                WHERE campaign_id = NEW.campaign_id AND timeline_id = NEW.timeline_id
+                                  AND subject_id = NEW.accused_id AND tag_id = NEW.tag_id AND acquired_day = 26
+                                  AND snapshot_json::jsonb ->> 'arrestAppliedRelationshipDelta' = '-11'
+                            ) OR NEW.effect_receipt_json::jsonb ->> 'effectIntentId' IS DISTINCT FROM NEW.effect_intent_id
+                              OR NEW.effect_receipt_json::jsonb ->> 'predecessorMaterialSha256'
+                                  IS DISTINCT FROM NEW.effect_intent_material::jsonb ->> 1 THEN
+                                RAISE EXCEPTION 'D23 compare fixture did not reach the changed affinity and receipt';
+                            END IF;
+                            RAISE SQLSTATE '40001' USING MESSAGE = 'd23_compare_changed_affinity_at_receipt';
+                        END;
+                        $$;
+                        """);
+                    try
+                    {
+                        ReignDatabase.ExecuteSql(faultConnection, $"""
+                            CREATE TRIGGER d23_compare_receipt_fault BEFORE UPDATE ON arrest_case_effect_state
+                            FOR EACH ROW WHEN (NEW.case_id = 'compare_predecessor_case' AND NEW.material_revision = 3)
+                            EXECUTE FUNCTION d23_compare_receipt_fault('{changedAffinity.ToString(CultureInfo.InvariantCulture)}');
+                            """);
+                        try
+                        {
+                            var priorRetryObserver = ReignDatabase.SqlContentionRetryObserverForTests;
+                            try
+                            {
+                                ReignDatabase.SqlContentionRetryObserverForTests = _ => statementRetries++;
+                                changedRejected = Compare(changed, originalDigest);
+                            }
+                            finally { ReignDatabase.SqlContentionRetryObserverForTests = priorRetryObserver; }
+                        }
+                        finally
+                        {
+                            ReignDatabase.ExecuteSql(faultConnection, "DROP TRIGGER d23_compare_receipt_fault ON arrest_case_effect_state;");
+                        }
+                    }
+                    finally { ReignDatabase.ExecuteSql(faultConnection, "DROP FUNCTION d23_compare_receipt_fault();"); }
+                }
+
+                string faultError = ReadString(changedRejected, "error", "");
+                add("arrest_effect_compare_changed_affinity_rolls_back_without_statement_retry",
+                    !ReadBool(changedRejected, "ok", true) && ReadString(changedRejected, "caseId", "") == compareCase
+                    && faultError.Contains(Npgsql.PostgresErrorCodes.SerializationFailure, StringComparison.Ordinal)
+                    && faultError.Contains(compareFaultMarker, StringComparison.Ordinal)
+                    && statementRetries == 0 && !changedRejected.ContainsKey("effectIntentId")
+                    && State(compareCase, compareTag) == laterState
+                    && Json.Serialize(ReceiptState(compareCase, compareTag)) == originalReceipt
+                    && ObservedDigest() == originalDigest && HistoryHead() == originalHistory && Generation() == originalGeneration
+                    && ReadString(CampaignFileService.ReadAtomicallyReplacedJsonObject(sidecar), "savePointId", "") == pointId,
+                    "The final PostgreSQL receipt write sees the changed affinity and reputation. Its serialization failure aborts the whole request without an in-transaction SQL retry or any committed effect.");
+
+                var recoveredCompare = Compare(changed, originalDigest);
+                string recoveredBytes = Json.Serialize(recoveredCompare);
+                var recoveredCompareState = State(compareCase, compareTag);
+                var recoveredCompareReceipt = ReceiptState(compareCase, compareTag);
+                var recoveredPredecessor = ReadDictionary(Apply(inspectCompare), "predecessor");
+                string recoveredDigest = ReadString(recoveredPredecessor, "materialSha256", "");
+                var cleanRecovered = CleanBytes();
+                add("arrest_effect_compare_changed_affinity_retries_same_intent_once",
+                    ReadBool(recoveredCompare, "ok", false) && ReadString(recoveredCompare, "status", "") == "committed"
+                    && ReadLong(recoveredCompare, "materialRevision", -1) == 3
+                    && ReadString(recoveredCompare, "effectIntentId", "") == ReadString(changed, "effectIntentId", "-")
+                    && ReadString(recoveredCompare, "predecessorMaterialSha256", "") == originalDigest
+                    && ReadString(recoveredCompare, "committedMaterialSha256", "") == recoveredDigest
+                    && recoveredDigest.Length == 64 && recoveredDigest != originalDigest
+                    && ReadDouble(recoveredPredecessor, "acquiredDay", -1d) == 26d
+                    && ReadInt(recoveredCompare, "appliedRelationshipDelta", int.MinValue) == changedDelta
+                    && recoveredCompareState.Affinity == changedAffinity
+                    && recoveredCompareState.Cases == 1 && recoveredCompareState.Reputations == 1
+                    && CommittedCase(compareCase, compareTag, changedDelta)
+                    && ReadLong(recoveredCompareReceipt, "material_revision", -1) == 3
+                    && ReadString(recoveredCompareReceipt, "effect_receipt_json", "") == recoveredBytes
+                    && Json.Serialize(Compare(changed, originalDigest)) == recoveredBytes
+                    && State(compareCase, compareTag) == recoveredCompareState
+                    && Json.Serialize(ReceiptState(compareCase, compareTag)) == Json.Serialize(recoveredCompareReceipt)
+                    && StillCleanBytes(cleanRecovered) && HistoryHead() == originalHistory && Generation() == originalGeneration,
+                    "After removing the fault, a fresh transaction applies the same frozen intent once. Repeating it returns the exact stored receipt without another affinity change.");
+
             }
             finally
             {

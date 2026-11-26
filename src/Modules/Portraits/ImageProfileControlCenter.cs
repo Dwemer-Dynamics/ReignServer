@@ -18,6 +18,24 @@ namespace ReignBetaServer
             <select id='@PROFILE@Provider' onchange='updateImageProfileUi()'>@PROVIDERS@</select>
           </label>
           @CODEX@
+          <div id='@PROFILE@LocalModelProfileSettings' style='display:none'>
+            <label>Local image model <input id='@PROFILE@LocalModelImageModel' value='@LOCAL_MODEL@' readonly></label>
+            <label>Output size <input id='@PROFILE@LocalModelImageSize' placeholder='@LOCAL_SIZE@' pattern='[0-9]{3,4}x[0-9]{3,4}' spellcheck='false'></label>
+            <p class='hint'>Enter width x height in pixels. Both must be multiples of 32 from 256 to 2048.</p>
+            <label>Inference steps <input id='@PROFILE@LocalModelSteps' type='number' min='1' max='100' step='1'></label>
+            <label>Guidance scale <input id='@PROFILE@LocalModelCfg' type='number' min='0.1' max='20' step='any'></label>
+            <details>
+              <summary>Local Model advanced settings</summary>
+              <label>Sampler <select id='@PROFILE@LocalModelSampler'>@LOCAL_SAMPLERS@</select></label>
+              <label>Scheduler <select id='@PROFILE@LocalModelScheduler'>@LOCAL_SCHEDULERS@</select></label>
+              <label>Negative prompt <textarea id='@PROFILE@LocalModelNegativePrompt' rows='4' maxlength='16000'></textarea></label>
+              <label>Reference resolution <input id='@PROFILE@LocalModelReferenceResolution' type='number' min='0' max='2048' step='32'></label>
+              <p class='hint'>For reference edits, use 0 to keep the reference resolution or a multiple of 32 from 256 to 2048.</p>
+              <label>Fit output to reference <input id='@PROFILE@LocalModelFitReference' type='checkbox'></label>
+              <p class='hint'>Fitted edits can exceed the canvas dimensions. Reduce reference resolution if an unusually shaped image is too large. Edits that require an exact output size use their fixed canvas.</p>
+              <label>Seed <input id='@PROFILE@LocalModelSeed' inputmode='numeric' pattern='[0-9]{1,20}' maxlength='20' placeholder='Random'></label>
+            </details>
+          </div>
           <div id='@PROFILE@OpenRouterProfileSettings' style='display:none'>
             <label>OpenRouter image model <select id='@PROFILE@OpenRouterImageModel'>@OPENROUTER@</select></label>
             <p class='hint'>Uses your saved OpenRouter key from API Settings. Character portraits follow the selected generation method; image edits retain their reference.</p>
@@ -58,7 +76,12 @@ namespace ReignBetaServer
           </div>")
                 .Replace("@PROFILE@", prefix).Replace("@TITLE@", title).Replace("@HINT@", hint)
                 .Replace("@PROVIDERS@", ImageProfileOptions(new[] { "NanoGPT", "AtlasCloud", "OpenRouter" })
+                    + "<option value='LocalModel'>Local Model</option>"
                     + (prefix.StartsWith("adult") ? "" : "<option value='Codex'>Codex SDK (ChatGPT)</option>"))
+                .Replace("@LOCAL_MODEL@", DefaultLocalModelImageModel)
+                .Replace("@LOCAL_SIZE@", prefix == "scenery" || prefix == "adultScenery" ? "1536x1024" : "1024x1536")
+                .Replace("@LOCAL_SAMPLERS@", ImageProfileOptions(LocalModelImageSamplers))
+                .Replace("@LOCAL_SCHEDULERS@", ImageProfileOptions(LocalModelImageSchedulers))
                 .Replace("@OPENROUTER@", ImageProfileOptions(OpenRouterImageModels)).Replace("@NANO@", ImageProfileOptions(NanoImageModels)).Replace("@ATLAS@", ImageProfileOptions(AtlasImageModels));
         }
 
@@ -75,9 +98,12 @@ namespace ReignBetaServer
                 @media(max-width:700px) { .imageProfileGrid { grid-template-columns:1fr; } .imageProfileCard label { grid-template-columns:1fr; } }
                 </style><div class='card imageProfileCard' id='portraitGenerationOptions'>
                   <h2>Character Portrait Generation</h2>
-                  <label>Generation method <select id='portraitGenerationMethod' onchange='updatePortraitGenerationUi()'>
-                    <option value='text'>Text based (recommended)</option><option value='image'>Image based</option></select></label>
-                  <p class='hint'>Text based describes the native face, then creates a photographic portrait from those traits and current age, weight and build. Image based sends the native source to the normal image provider.</p>
+                  <p id='portraitLocalModelReferenceHint' class='hint' style='display:none'>Local Model uses the native reference directly. Choose at least 768 x 1024 pixels and a portrait aspect ratio from 2:3 to 3:4.</p>
+                  <div id='portraitGenerationMethodSettings'>
+                    <label>Generation method <select id='portraitGenerationMethod' onchange='updatePortraitGenerationUi()'>
+                      <option value='text'>Text based (recommended)</option><option value='image'>Image based</option></select></label>
+                    <p class='hint'>Text based describes the native face, then creates a photographic portrait from those traits and current age, weight and build. Image based sends the native source to the normal image provider.</p>
+                  </div>
                   <div id='portraitVisionSettings'>
                     <label>Vision provider <select id='portraitVisionProvider' onchange='updatePortraitGenerationUi();loadPortraitVisionModels()'><option value='Codex'>Codex SDK (ChatGPT)</option><option value='NanoGPT'>NanoGPT subscription</option></select></label>
                     <label id='portraitCodexVisionModelLabel'>Vision model <select id='portraitVisionModel'><option value='runtime-default'>Runtime default</option></select></label>

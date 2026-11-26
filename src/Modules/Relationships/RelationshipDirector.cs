@@ -367,7 +367,7 @@ namespace ReignBetaServer
                     "hero_id,revision_token,latest_revision_id,updated_ts",
                     ""),
                 ["character_editor_native_commands"] = (
-                    "command_id,revision_id,hero_id,status,changes_json,inverse_json,dangerous,confirmation,created_ts,claimed_ts,resolved_ts,result_json",
+                    "command_id,revision_id,hero_id,status,changes_json,inverse_json,dangerous,confirmation,created_ts,claimed_ts,resolved_ts,result_json,manual_origin_timeline_id,manual_origin_lineage_id,manual_origin_json,automatic_origin_json",
                     "idx_editor_native_commands_status"),
                 ["character_editor_reconciliation"] = (
                     "job_id,revision_id,hero_id,section,status,summary,result_json,created_ts,updated_ts",
@@ -376,7 +376,7 @@ namespace ReignBetaServer
                     "revision_id,hero_id,section,description,before_json,after_json,native_changes_json,reconciliation_json,rollback_of,created_ts",
                     "idx_editor_revisions_hero"),
                 ["notable_mbti_profiles"] = (
-                    "hero_id,mbti_type,title,description,foundation_json,percentages_json,native_traits_json,source,template_version,first_observed_day,native_sync_status,native_action_id,native_action_created_day,last_native_observed_json,last_native_observed_day,updated_ts",
+                    "hero_id,mbti_type,title,description,foundation_json,percentages_json,native_traits_json,source,template_version,first_observed_day,native_sync_status,native_action_id,native_action_created_day,last_native_observed_json,last_native_observed_day,updated_ts,startup_native_session_id",
                     "idx_notable_mbti_type,idx_notable_mbti_sync"),
                 ["relationship_fling_encounters"] = (
                     "encounter_id,campaign_id,timeline_id,world_day,pair_key,hero_a_id,hero_b_id,location_kind,location_id,same_sex,short_affair,fixed_discovery_chance,fixed_discovery_roll,fixed_discovered,pregnancy_discovery_chance,pregnancy_discovery_roll,pregnancy_discovered,discovery_applied,rumor_id,conception_attempt_id,conception_id,conception_chance,conception_roll,conceived,conception_action_id,status,payload_json,created_ts,updated_ts",

@@ -586,6 +586,12 @@
         </div>
       </div>
       <div class='card'>
+        <h2>Local Model Connection</h2>
+        <p class='hint'>All Local Model profiles share these endpoints. Use loopback URLs reachable from ReignServer. No API key is required.</p>
+        <label>Text generation URL <input id='localModelImageGenerationsUrl' type='url' autocomplete='off' spellcheck='false' placeholder='http://127.0.0.1:18500/v1/images/generations'></label>
+        <label>Reference edits URL <input id='localModelImageEditsUrl' type='url' autocomplete='off' spellcheck='false' placeholder='http://127.0.0.1:18500/v1/images/edits'></label>
+      </div>
+      <div class='card'>
         <h2>Portrait Prompt Library</h2>
 		<p class='hint'>All shared portrait prompting is editable here. Provider and model-required request formatting stays protected. Identity templates may use [CHARACTER NAME], [AGE], [CULTURE], [GENDER], [CLAN TIER], and [SOCIAL STATION].</p>
         <label>Portrait prompt layer <select id='imagePromptSelect' onchange='selectPrompt("image")'></select></label>
@@ -1344,6 +1350,19 @@
     intIds.add('recentRawConversationTurns');
     intIds.add('recentRawConversationCharBudget');
     const floatIds = new Set(['correspondenceFrequencyMultiplier','correspondenceTravelTimeMultiplier','reignXpMultiplier','reignXpConversationMultiplier','reignXpSocialCharmMultiplier','reignXpSocialBonusMultiplier','reignXpPetitionMultiplier','temperature','adultPortraitImageStrength','adultPortraitGuidanceScale','adultSceneryImageStrength','adultSceneryGuidanceScale','portraitImageStrength','portraitGuidanceScale','sceneryImageStrength','sceneryGuidanceScale',]);
+    ids.push('localModelImageGenerationsUrl', 'localModelImageEditsUrl');
+    const localModelImageFields = [
+      ['LocalModelImageModel'], ['LocalModelImageSize'], ['LocalModelSteps', intIds], ['LocalModelCfg', floatIds],
+      ['LocalModelSampler'], ['LocalModelScheduler'], ['LocalModelNegativePrompt'],
+      ['LocalModelReferenceResolution', intIds], ['LocalModelFitReference', boolIds], ['LocalModelSeed']
+    ];
+    for (const profile of imageProfiles) {
+      for (const [suffix, typeIds] of localModelImageFields) {
+        const id = profile + suffix;
+        ids.push(id);
+        typeIds?.add(id);
+      }
+    }
     const promptState = { files:{}, catalog:[], loaded:false, drafts:{}, selected:{}, saving:false, revision:0, loading:0 };
     const promptCategories = ['general','context','action','relationship','image'];
     const nanoPresetHints = {
@@ -1493,9 +1512,7 @@
       await loadGlobalKeys();
       updateLlmProviderUi();
       await loadCodexStatus();
-      updateImagePresetHints();
       updateImageProfileUi();
-      updatePortraitGenerationUi();
       await loadPortraitVisionModels();
       updateReasoningPolicyHint();
       await checkHealth();
@@ -2138,6 +2155,7 @@
       const queueStatus=[];
       if(pending)queueStatus.push(`${pending} native change(s) pending`);
       if(review)queueStatus.push(`${review} native change(s) need review`);
+      if(d.nativeEditAdmission==='registered_load_required')queueStatus.push('Load a registered Save Sync save to edit native fields. Server-only edits are available.');
       document.getElementById('characterEditorPending').textContent=queueStatus.join(' · ')||'No pending native changes';
       const sectionSave=document.getElementById('characterEditorSaveSection');if(sectionSave)sectionSave.disabled=['traits','relationships','dynamic'].includes(characterEditorState.section);
       document.getElementById('characterEditorTabs').innerHTML=characterEditorSections.map(([id,label])=>`<button class='${id===characterEditorState.section?'active':''}' onclick='selectCharacterEditorSection("${id}")'>${label}${characterEditorState.dirty.has(id)?' *':''}</button>`).join('');renderCharacterEditorPanel();
@@ -2312,10 +2330,18 @@
       }
       return {records,letterStatusEdits,summaryTextEdits};
     }
-    async function saveCharacterSection(all=false){if(!characterEditorState.data)return;const section=all?'all':characterEditorState.section,profileChanges=editorProfileChanges(),nativeChanges=nativeProfileChanges(profileChanges),dangerKeys=['isalive','ispregnant','spouseid','fatherid','motherid','clanid','kingdomid'];const dangerous=Object.keys(nativeChanges).some(k=>dangerKeys.includes(k.toLowerCase()));let confirmation='';if(dangerous){const name=characterEditorState.data.documents.profile?.name||characterEditorState.heroId;if(!confirm('These changes affect family, political, pregnancy, or life-state data. Review dependencies before continuing.'))return;confirmation=prompt(`Type ${name} to confirm dangerous native changes.`)||'';if(confirmation!==name){editorStatus('Confirmation did not match. Nothing was saved.','error');return;}}
+    async function saveCharacterSection(all=false){if(!characterEditorState.data)return;const section=all?'all':characterEditorState.section,profileChanges=editorProfileChanges(),nativeChanges=nativeProfileChanges(profileChanges),dangerKeys=['isalive','ispregnant','spouseid','fatherid','motherid','clanid','kingdomid'];
+      if(Object.keys(nativeChanges).length&&characterEditorState.original?.nativeEditAdmission==='registered_load_required'){
+        editorStatus('Load a registered Save Sync save and reload the Character Editor to edit native fields.','error');return;
+      }
+      const dangerous=Object.keys(nativeChanges).some(k=>dangerKeys.includes(k.toLowerCase()));let confirmation='';if(dangerous){const name=characterEditorState.data.documents.profile?.name||characterEditorState.heroId;if(!confirm('These changes affect family, political, pregnancy, or life-state data. Review dependencies before continuing.'))return;confirmation=prompt(`Type ${name} to confirm dangerous native changes.`)||'';if(confirmation!==name){editorStatus('Confirmation did not match. Nothing was saved.','error');return;}}
       const {data,original,dirty,heroId}=characterEditorState;
       const documents={...data.documents},narrative=documents.narrative,loadedNarrative=original?.documents?.narrative;
       delete documents.narrative;
+      if(original?.nativeEditAdmission){
+        delete documents.profile;
+        if(!Object.prototype.hasOwnProperty.call(nativeChanges,'wealth'))delete documents.wealth;
+      }
       const narrativeChanges={};
       for(const group of ['life','voice']){
         const changed=Object.fromEntries(Object.entries(narrative?.[group]||{}).filter(([key,value])=>
@@ -2327,6 +2353,8 @@
       if(Object.keys(narrativeChanges).length)documents.narrative=narrativeChanges;
       const payload={campaignId:editorCampaign(),heroStringId:heroId,revisionToken:data.revisionToken,section,description:`Character Editor ${section} save`,documents,nativeChanges,dangerous,confirmation};
       if(documents.narrative)payload.narrativeEditBasis=original?.narrativeEditBasis;
+      if(original?.nativeEditAdmission==='ready'&&Object.keys(nativeChanges).length)
+        payload.nativeRevisionBasis=original.nativeRevisionBasis;
       const basis=original?.profileEditBasis;
       if(basis)payload.profileEdit={basis,fields:profileChanges};
       try{
@@ -2344,7 +2372,14 @@
       data.revisionToken=j.revisionToken;dirty.clear();await loadCharacterEditor(heroId,true,j);}
     function saveAllCharacterSections(){return saveCharacterSection(true);}
     function revertCharacterDraft(){if(!characterEditorState.original)return;characterEditorState.data=editorClone(characterEditorState.original);characterEditorState.dirty.clear();renderCharacterEditor();editorStatus('Unsaved changes reverted.');}
-    async function rollbackCharacterRevision(revisionId){if(!confirm('Restore this revision? A new rollback revision will preserve the current state.'))return;const j=await (await fetch('/character-editor/rollback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionId})})).json();editorStatus(j.message||j.error,characterEditorResultKind(j));if(j.ok)await loadCharacterEditor(characterEditorState.heroId,true,j);}
+    async function rollbackCharacterRevision(revisionId){
+      if(!confirm('Restore this revision? A new rollback revision will preserve the current state.'))return;
+      const payload={campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,revisionId};
+      if(characterEditorState.original?.nativeEditAdmission==='ready')
+        payload.nativeRevisionBasis=characterEditorState.original.nativeRevisionBasis;
+      const j=await (await fetch('/character-editor/rollback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
+      editorStatus(j.message||j.error,characterEditorResultKind(j));if(j.ok)await loadCharacterEditor(characterEditorState.heroId,true,j);
+    }
 
     async function uploadCharacterPortrait(file){if(!file)return;const reader=new FileReader();reader.onload=async()=>{editorStatus('Uploading portrait...');const j=await (await fetch('/character-editor/portrait/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,fileName:file.name,dataUrl:reader.result})})).json();if(j.ok){characterEditorState.data.portraits=j.portraits;renderCharacterEditorPanel();editorStatus('Portrait uploaded. Select it to make it active.','good');}else editorStatus(j.error,'error');};reader.readAsDataURL(file);}
     async function selectCharacterPortrait(variant){const j=await (await fetch('/character-editor/portrait/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({campaignId:editorCampaign(),heroStringId:characterEditorState.heroId,variant})})).json();if(j.ok){editorStatus('Active portrait updated. The game cache will refresh on the next savegame load.','good');await loadCharacterEditor(characterEditorState.heroId,true);}else editorStatus(j.error,'error');}
@@ -2384,24 +2419,33 @@
         const openrouter = document.getElementById(profile + 'OpenRouterProfileSettings');
         if (openrouter) openrouter.style.display = provider === 'OpenRouter' ? '' : 'none';
         const codex = document.getElementById(profile + 'CodexProfileSettings');
+        const local = document.getElementById(profile + 'LocalModelProfileSettings');
         const request = document.getElementById(profile + 'RequestParameters');
         if (nano) nano.style.display = provider === 'NanoGPT' ? '' : 'none';
         if (atlas) atlas.style.display = provider === 'AtlasCloud' ? '' : 'none';
         if (codex) codex.style.display = provider === 'Codex' ? '' : 'none';
+        if (local) local.style.display = provider === 'LocalModel' ? '' : 'none';
         if (request) request.style.display = provider === 'NanoGPT' ? '' : 'none';
       });
       updateImagePresetHints();
+      updatePortraitGenerationUi();
     }
 
     function updatePortraitGenerationUi() {
+      const local = document.getElementById('portraitProvider')?.value === 'LocalModel';
       const box = document.getElementById('portraitVisionSettings');
-      if (box) box.style.display = document.getElementById('portraitGenerationMethod').value === 'text' ? '' : 'none';
+      const method = document.getElementById('portraitGenerationMethodSettings');
+      const localHint = document.getElementById('portraitLocalModelReferenceHint');
+      if (box) box.style.display = !local && document.getElementById('portraitGenerationMethod').value === 'text' ? '' : 'none';
+      if (method) method.style.display = local ? 'none' : '';
+      if (localHint) localHint.style.display = local ? '' : 'none';
       const nano = document.getElementById('portraitVisionProvider')?.value === 'NanoGPT';
       document.getElementById('portraitCodexVisionModelLabel').style.display = nano ? 'none' : '';
       document.getElementById('portraitNanoVisionModelLabel').style.display = nano ? '' : 'none';
     }
 
     async function loadPortraitVisionModels() {
+      if (document.getElementById('portraitProvider')?.value === 'LocalModel') return;
       const provider = document.getElementById('portraitVisionProvider')?.value || 'Codex';
       const select = document.getElementById(provider === 'NanoGPT' ? 'portraitVisionNanoGptModel' : 'portraitVisionModel');
       const status = document.getElementById('portraitVisionCatalogStatus');
@@ -2751,6 +2795,7 @@
     }
 
     document.addEventListener('change', (event) => {
+      if (event.target?.id === 'portraitProvider') loadPortraitVisionModels();
       if (event.target && imageProfiles.some(prefix => [prefix + 'NanoGptImageModel', prefix + 'AtlasImageModel'].includes(event.target.id))) {
         updateImagePresetHints();
       }

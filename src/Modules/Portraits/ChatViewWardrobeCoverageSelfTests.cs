@@ -121,6 +121,41 @@ namespace ReignBetaServer
                 string prompt = Render(identity, scene);
                 require(ids.All(id => prompt.Contains("\"characterId\":\"" + id + "\",\"wardrobe\":\"mapped_portrait\"")), "A default actor disappeared.");
             });
+            check("coverage_selector_empty_row_citations_are_ignored_only_without_evidence", () => {
+                var identity = Identity(); Neutral(identity, 0);
+                var scene = Scene(identity); scene["wardrobeOverrides"] = new object[0];
+                scene["wardrobeCoverage"] = ids.Select(id => Row(id, "portrait")).ToList();
+                var canonical = TryParseJsonObject(Json.Serialize(scene));
+                string expectedPrompt = Render(identity, canonical);
+
+                foreach (var row in ReadDictionaryList(scene, "wardrobeCoverage").Take(2)) row["citations"] = new object[0];
+                var decoded = TryParseJsonObject(Json.Serialize(scene));
+                string prompt = Render(identity, decoded);
+                require(prompt == expectedPrompt && CanonicalJson(decoded["wardrobeCoverageReceipt"]) == CanonicalJson(canonical["wardrobeCoverageReceipt"]),
+                    "Empty row citations changed the wardrobe receipt or portrait identity.");
+                require(ReadDictionaryList(decoded, "wardrobeCoverage").Count(row => row.ContainsKey("citations")) == 2,
+                    "Validation modified the original selector rows.");
+                ReadDictionaryList(decoded, "wardrobeCoverage")[0]["unsupported"] = new object[0];
+                require(Reject(() => Render(identity, decoded)), "An unknown field was ignored alongside redundant citations.");
+                ReadDictionaryList(decoded, "wardrobeCoverage")[0].Remove("unsupported");
+                ReadDictionaryList(decoded, "wardrobeCoverage")[0]["citations"] = new[] { TestDict("turnId", "n2", "quote", action) };
+                require(Reject(() => Render(identity, decoded)), "A misplaced citation was ignored.");
+                ReadDictionaryList(decoded, "wardrobeCoverage")[0]["citations"] = TestDict();
+                require(Reject(() => Render(identity, decoded)), "A non-array citations value was ignored.");
+                ReadDictionaryList(decoded, "wardrobeCoverage")[0]["citations"] = null;
+                require(Reject(() => Render(identity, decoded)), "A null citations value was ignored.");
+                ReadDictionaryList(decoded, "wardrobeCoverage")[0]["citations"] = new object[0];
+                ReadDictionaryList(decoded, "wardrobeCoverage")[0].Remove("evidence");
+                require(Reject(() => Render(identity, decoded)), "A missing evidence array passed with redundant citations.");
+            });
+            RejectCase("coverage_row_citations_with_evidence_are_rejected", (identity, scene) => {
+                ReadDictionaryList(scene, "wardrobeCoverage")[0]["citations"] = new object[0];
+            });
+            RejectCase("coverage_empty_row_citations_cannot_bypass_required_review", (identity, scene) => {
+                var row = ReadDictionaryList(scene, "wardrobeCoverage")[0];
+                row["citations"] = new object[0];
+                row["evidence"] = new object[0];
+            });
             check("coverage_refused_proposal_allows_grounded_default", () => {
                 var identity = Identity(); Neutral(identity, 0); var window = ReadDictionaryList(identity, "window");
                 window[0]["text"] = "I might change into a blue practice coat."; window[0]["sourceHash"] = DialogueService.PromptHash(ReadString(window[0], "text", ""));

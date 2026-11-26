@@ -181,13 +181,15 @@ namespace ReignBetaServer
                 : provider == LlmProviderService.NanoGptProvider ? "nanoGptApiKey" : "apiKey";
         }
 
-        // Chat slots whose unbound local key is confined to the slot's own origin, exactly like a binding: the saved custom
-        // endpoint for apiKey, the fixed provider origin for the named slots. Portrait slots keep their legacy behaviour.
+        // Chat slots confine an unbound local key to the saved custom endpoint or fixed provider origin.
+        // The NanoGPT image slot separately requires a genuine NanoGPT HTTPS destination.
         private static readonly HashSet<string> OriginBoundLocalKeySlots = new HashSet<string>(StringComparer.Ordinal)
             { "apiKey", "openRouterApiKey", "ollamaCloudApiKey", "nanoGptApiKey" };
 
         internal static bool LocalKeyDestinationAllowed(Dictionary<string, object> settings, string slot, string[] destinations)
         {
+            if (slot == "portraitNanoGptApiKey")
+                return destinations != null && destinations.Length > 0 && destinations.All(PortraitsService.IsNanoGptImageCredentialDestination);
             if (!OriginBoundLocalKeySlots.Contains(slot)) return true;
             string expected = GlobalKeyTarget(settings, slot).Origin;
             return expected != null && destinations != null && destinations.Length > 0

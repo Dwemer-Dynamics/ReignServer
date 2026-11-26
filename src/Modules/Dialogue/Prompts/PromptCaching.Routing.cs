@@ -114,7 +114,8 @@ namespace ReignBetaServer
             bool coolingDown = cooldownUntil > DateTime.UtcNow;
             bool openrouter = LlmProviderService.IsOpenRouterApiUrl(apiUrl);
             bool ollama = LlmProviderService.IsOllamaCloudApiUrl(apiUrl);
-            bool applied = (nano || openrouter || ollama) && (!coolingDown || mandatoryReasoning);
+            bool localOrionOff = !requested && LlmProviderService.IsLocalModelDeskOrion(apiUrl, model);
+            bool applied = (nano || openrouter || ollama || localOrionOff) && (!coolingDown || mandatoryReasoning);
             if (mandatoryReasoning)
             {
                 // Never let stale extra controls or a generic fallback cooldown
@@ -124,7 +125,7 @@ namespace ReignBetaServer
                 requestBody.Remove("enable_thinking");
                 requestBody.Remove("thinking_budget");
             }
-            if (!requested && (nano || openrouter || ollama))
+            if (!requested && (nano || openrouter || ollama || localOrionOff))
             {
                 // NanoGPT's top-level effort overrides the nested control.
                 // Neither an extra field nor hidden-output mode may turn a
@@ -137,6 +138,10 @@ namespace ReignBetaServer
                 requestBody.Remove("reasoning");
                 requestBody.Remove("reasoning_effort");
                 if (applied) requestBody["reasoning_effort"] = effort;
+            }
+            else if (localOrionOff && applied)
+            {
+                requestBody["reasoning_effort"] = "none";
             }
             else if (applied)
             {

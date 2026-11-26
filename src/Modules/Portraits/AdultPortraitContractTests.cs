@@ -75,11 +75,14 @@ namespace ReignBetaServer
                 new[] { "Provider", "NanoGptImageModel", "AtlasImageModel", "OpenRouterImageModel" }.All(suffix =>
                 {
                     Match select = Regex.Match(html, "<select id='" + prefix + suffix + "'[^>]*>(.*?)</select>", RegexOptions.Singleline);
-                    string[] values = suffix == "Provider" ? (prefix.StartsWith("adult") ? new[] { "NanoGPT", "AtlasCloud", "OpenRouter" } : new[] { "NanoGPT", "AtlasCloud", "OpenRouter", "Codex" }) : suffix == "NanoGptImageModel" ? NanoImageModels : suffix == "OpenRouterImageModel" ? OpenRouterImageModels : AtlasImageModels;
+                    string[] values = suffix == "Provider"
+                        ? (prefix.StartsWith("adult") ? new[] { "NanoGPT", "AtlasCloud", "OpenRouter", LocalModelImageProviderId }
+                            : new[] { "NanoGPT", "AtlasCloud", "OpenRouter", LocalModelImageProviderId, "Codex" })
+                        : suffix == "NanoGptImageModel" ? NanoImageModels : suffix == "OpenRouterImageModel" ? OpenRouterImageModels : AtlasImageModels;
                     return select.Success && values.All(value => select.Groups[1].Value.Contains("value='" + value + "'"))
                         && Regex.Matches(select.Groups[1].Value, "<option ").Count == values.Length;
                 })) && !html.Contains("reign-generator/") && !html.Contains("Reign Image Generator")
-                && !html.Contains("reignGeneratorStatus"), "All four profiles retain current catalogs; Codex appears only in normal profiles and retired controls remain absent.");
+                && !html.Contains("reignGeneratorStatus"), "All four profiles include Local Model and retain their model catalogs; Codex appears only in normal profiles and retired controls remain absent.");
 
             byte[] native = { 1, 2 }, normalBytes = { 3, 4 }, editedBytes = { 5, 6 }, normalizedBytes = { 7, 8 };
             var normalCall = PortraitImageCallResult.Success("NanoGPT", "gpt-image-1.5", "test", normalBytes, 1, 0, 0);

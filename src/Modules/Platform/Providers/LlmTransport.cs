@@ -394,7 +394,8 @@ namespace ReignBetaServer
             Dictionary<string, object> diagnostics,
             string correlationId,
             string requestType,
-            string model)
+            string model,
+            string responseKey)
         {
             int maxAttempts = Math.Max(1, Math.Min(4, ReadInt(settings, "llmTransientMaxAttempts", 4)));
             if (FinalConversationGauntletProviderBudget
@@ -416,7 +417,8 @@ namespace ReignBetaServer
                         + "-call external-provider budget.");
                 try
                 {
-                    string response = PostJsonToLlm(apiUrl, apiKey, requestJson, settings);
+                    string response = PostJsonToLlm(apiUrl, apiKey, requestJson, settings,
+                        IsLocalModelDeskOrion(apiUrl, model) ? responseKey : null);
                     FinalConversationGauntletProviderBudget
                         .CompleteRegisteredPhysicalDispatch(
                             reservation, true, "");
@@ -474,6 +476,15 @@ namespace ReignBetaServer
 
         private const string ProviderUrlInvalidError = "The provider URL must be an http or https URL without embedded credentials.";
 
+        internal static bool IsLocalModelDeskOrion(string apiUrl, string model)
+        {
+            return string.Equals(model, "orion-26b-a4b-v1.1", StringComparison.OrdinalIgnoreCase)
+                && Uri.TryCreate(apiUrl, UriKind.Absolute, out Uri uri)
+                && uri.Scheme == Uri.UriSchemeHttp
+                && uri.IsLoopback && uri.Port == 18500 && uri.UserInfo.Length == 0
+                && uri.AbsolutePath == "/v1/chat/completions";
+        }
+
         // One destination and redirect policy for both provider senders (PostJsonToLlm and the streaming
         // PostStreamingProviderJson). Only an absolute http(s) URL without userinfo is handed to the transport; the check
         // runs before the test guard, diagnostics or any socket. A request that carries a key (saved, global or an explicit
@@ -513,7 +524,14 @@ namespace ReignBetaServer
 
         internal static string PostJsonToLlm(string apiUrl, string apiKey, string requestJson, Dictionary<string, object> settings)
         {
+            return PostJsonToLlm(apiUrl, apiKey, requestJson, settings, null);
+        }
+
+        private static string PostJsonToLlm(string apiUrl, string apiKey, string requestJson,
+            Dictionary<string, object> settings, string idempotencyKey)
+        {
             HttpWebRequest request = CreateProviderRequest(apiUrl, apiKey, settings, "application/json");
+            if (idempotencyKey != null) request.Headers["Idempotency-Key"] = idempotencyKey;
             Program.ProviderTestGuard.BeforeDispatch("http_text_or_image");
             using var diagnosticAttempt = ConversationResponseService.BeginDiagnosticAttempt(apiUrl, requestJson, apiKey);
             byte[] bytes = Encoding.UTF8.GetBytes(requestJson);

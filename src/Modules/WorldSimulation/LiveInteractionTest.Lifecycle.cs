@@ -351,6 +351,34 @@ namespace ReignBetaServer
             }
             if (operation == "send" && string.IsNullOrWhiteSpace(ReadString(command, "text", ""))) return null;
             if (operation == "structured_action_test") command["enrollment"] = ReadDictionary(run, "enrollment");
+            if (operation == "rebellion_test"
+                && (ReadString(input, "profile", "").Trim().ToLowerInvariant() is "outbreak_reload_prepare" or "outbreak_reload_verify"))
+            {
+                var enrollment = ReadDictionary(run, "enrollment");
+                string save = ReadString(enrollment, "disposableSaveName", "");
+                string baseline = ReadString(enrollment, "protectedBaselineSaveName", "");
+                string hash = ReadString(enrollment, "checkpointSha256", "");
+                if (mode != "individual_chat" || ReadString(run, "mode", "") != "individual_chat"
+                    || ReadString(command, "effects", "") != "guarded"
+                    // The enrollment echoes public controller data. It cannot authorize the founder mutation.
+                    || !ReadString(input, "profile", "").Trim().Equals("outbreak_reload_verify", StringComparison.OrdinalIgnoreCase)
+                    || ReadString(enrollment, "source", "") != "reign_mcp_rebellion_outbreak_reload"
+                    || ReadString(enrollment, "campaignId", "") != ReadString(run, "campaignId", "")
+                    || ReadString(input, "caseId", "") != "RB-NATIVE-004"
+                    || ReadString(input, "fixtureRunId", "") != ReadString(enrollment, "certificationRunId", "")
+                    || ReadString(enrollment, "certificationRunId", "").Length == 0
+                    || ReadString(enrollment, "campaignTestRunId", "").Length == 0
+                    || ReadString(enrollment, "timelineId", "").Length == 0
+                    || ReadString(enrollment, "checkpointSavePointId", "").Length == 0
+                    || enrollment == null || !enrollment.TryGetValue("recoveryCheckpointVerified", out object owned) || owned is not true
+                    || baseline.Length == 0 || !save.EndsWith("_Current", StringComparison.Ordinal)
+                    || !(save.StartsWith("ReignTest_", StringComparison.OrdinalIgnoreCase) || save.StartsWith("Reign_", StringComparison.OrdinalIgnoreCase))
+                    || save.Equals(baseline, StringComparison.OrdinalIgnoreCase)
+                    || ReadString(input, "disposableSaveName", "") != save || hash.Length != 64 || !hash.All(Uri.IsHexDigit))
+                    return null;
+                // Only the original run enrollment is delivered, irrespective of what the step supplied.
+                command["enrollment"] = enrollment;
+            }
             if (operation == "conversation_clock_probe")
             {
                 command["enrollment"] = ReadDictionary(run, "enrollment");

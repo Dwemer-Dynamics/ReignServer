@@ -14,7 +14,7 @@ namespace ReignBetaServer
 {
     internal static partial class PortraitsService
     {
-        private const string NanoGptImageGenerationsUrl = "https://nano-gpt.com/api/v1/images/generations";
+        internal const string NanoGptImageGenerationsUrl = "https://nano-gpt.com/api/v1/images/generations";
         internal const string NanoGptChatCompletionsUrl = "https://nano-gpt.com/api/v1/chat/completions";
         private const string AtlasGenerateImageUrl = "https://api.atlascloud.ai/api/v1/model/generateImage";
         private const string AtlasUploadMediaUrl = "https://api.atlascloud.ai/api/v1/model/uploadMedia";
@@ -54,6 +54,7 @@ namespace ReignBetaServer
             public string PromptPurpose;
             public string Provider;
             public string NanoGptModel;
+            public LocalModelImageOptions LocalModel;
             public string OpenRouterModel;
             public string AtlasModel;
             public string AtlasWanNegativePrompt;
@@ -96,6 +97,7 @@ namespace ReignBetaServer
                 Provider = NormalizeImageProvider(string.IsNullOrWhiteSpace(providerOverride) ? configuredProvider : providerOverride),
                 OpenRouterModel = readString("OpenRouterImageModel", DefaultOpenRouterImageModel),
                 NanoGptModel = readString("NanoGptImageModel", "gpt-image-1.5"),
+                LocalModel = ReadLocalModelImageOptions(settings, prefix),
                 AtlasModel = readString("AtlasImageModel", name.StartsWith("adult", StringComparison.Ordinal) ? AtlasModelSeedreamV5ProEdit : DefaultAtlasImageModel),
                 AtlasWanNegativePrompt = readString("AtlasWanNegativePrompt", DefaultAtlasWan25NegativePrompt),
                 ImageStrength = DialogueService.ClampDouble(readDouble("ImageStrength", 0.75d), 0.4d, 1d),
@@ -234,7 +236,8 @@ namespace ReignBetaServer
                         if (imageProfile.AtlasWanNegativePrompt == DefaultAtlasWan25NegativePrompt)
                             imageProfile.AtlasWanNegativePrompt = DefaultAtlasWan25NegativePrompt.Replace(", armor, weapons, helmets, chainmail, modern clothing", "");
                     }
-                    if (!sharedRebuild && imageProfile.Name == "portrait" && PortraitGenerationMethod(settings) == "text")
+                    if (!sharedRebuild && imageProfile.Name == "portrait"
+                        && imageProfile.Provider != LocalModelImageProviderId && PortraitGenerationMethod(settings) == "text")
                     {
                         phase.Restart();
                         visionEvidence = DescribePortraitSource(settings, sourceImage);
@@ -246,7 +249,7 @@ namespace ReignBetaServer
                     prompt = sharedRebuild
                         ? ApplyPortraitProductPromptContract(BuildSharedPortraitRebuildPrompt(payload))
                         : ApplyPortraitProductPromptContract(BuildPortraitPrompt(payload, clientPrompt, !adultClothingEdit));
-                    outputSizeOverride = "768x1024";
+                    if (imageProfile.Provider != LocalModelImageProviderId) outputSizeOverride = "768x1024";
                 }
 
                 if (string.IsNullOrWhiteSpace(prompt))
@@ -264,7 +267,7 @@ namespace ReignBetaServer
                 timing["totalMs"] = total.ElapsedMilliseconds;
                 if (!call.Ok || call.ImageBytes == null || call.ImageBytes.Length == 0)
                 {
-                    LogPortraitImageCall(campaignId, imageProfile, call, prompt.Length, sourceImage.Length, false, timing);
+                    LogPortraitImageCall(campaignId, imageProfile, call, prompt.Length, sourceImage?.Length ?? 0, false, timing);
                     return FailPortraitGenerationOperation(generationOperationId,
                         PortraitGenerateError(campaignId, imageProfile, call.Model, call.Error, timing, total, call));
                 }
@@ -285,7 +288,7 @@ namespace ReignBetaServer
                     {
                         phase.Stop();
                         timing["productValidationMs"] = phase.ElapsedMilliseconds;
-                        LogPortraitImageCall(campaignId, imageProfile, call, prompt.Length, sourceImage.Length, false, timing);
+                        LogPortraitImageCall(campaignId, imageProfile, call, prompt.Length, sourceImage?.Length ?? 0, false, timing);
                         return FailPortraitGenerationOperation(generationOperationId, PortraitGenerateError(
                             campaignId,
                             imageProfile,
@@ -305,19 +308,20 @@ namespace ReignBetaServer
                         ["model"] = call.Model, ["outcome"] = "completed", ["durationMs"] = timing["providerCallMs"],
                         ["sourceSha256"] = Sha256Hex(sourceImage), ["outputSha256"] = Sha256Hex(call.ImageBytes) }
                 };
-                generationStages[0]["generationMethod"] = visionEvidence == null ? "image" : "text";
+                generationStages[0]["generationMethod"] = visionEvidence == null && sourceImage != null ? "image" : "text";
                 if (visionEvidence != null) generationStages[0]["vision"] = visionEvidence;
                 string generationWarning = "";
                 if (ReadDictionary(payload, "resolvedPortraitPhysique") != null)
                     generationStages[0]["physique"] = ReadDictionary(payload, "resolvedPortraitPhysique");
                 if (adultClothingEdit && productValidation != null)
                 {
-                    LogPortraitImageCall(campaignId, imageProfile, call, prompt.Length, sourceImage.Length, true, timing);
+                    LogPortraitImageCall(campaignId, imageProfile, call, prompt.Length, sourceImage?.Length ?? 0, true, timing);
                     ImageGenerationProfile adultProfile = ResolveImageGenerationProfile(settings, "adultPortrait");
                     PortraitProductValidation editedValidation = null;
                     PortraitClothingEditResult edit = RunPortraitClothingEdit(call, prompt, sourceImage, adultProfile,
                         () => BuildAdultPortraitClothingPrompt(payload),
-                        (editPrompt, reference) => CallImageProvider(settings, adultProfile, editPrompt, reference, "768x1024"),
+                        (editPrompt, reference) => CallImageProvider(settings, adultProfile, editPrompt, reference,
+                            adultProfile.Provider == LocalModelImageProviderId ? "" : "768x1024"),
                         bytes => { editedValidation = NormalizeAndValidateGeneratedPortraitProduct(bytes, out byte[] normalized); return normalized; });
                     generationStages.Add(edit.Evidence);
                     edit.Evidence["physique"] = ReadDictionary(payload, "resolvedPortraitPhysique");
@@ -432,7 +436,7 @@ namespace ReignBetaServer
 				response["physicalConfidence"] = physicalConfidence;
 
                 if (!adultClothingEdit)
-                    LogPortraitImageCall(campaignId, imageProfile, call, prompt.Length, sourceImage.Length, true, timing);
+                    LogPortraitImageCall(campaignId, imageProfile, call, prompt.Length, sourceImage?.Length ?? 0, true, timing);
                 CompletePortraitGenerationOperation(generationOperationId);
                 return response;
             }

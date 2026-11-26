@@ -190,7 +190,8 @@ WHERE table_schema=current_schema() AND table_name IN (
                     .FirstOrDefault(), "value", ""), "complete", StringComparison.OrdinalIgnoreCase);
                 bool precision = string.Equals(ReadString(QuerySql(connection,
                     "SELECT value FROM schema_meta WHERE key='memory_precision_v1';").FirstOrDefault(), "value", ""), "complete", StringComparison.Ordinal);
-                return requiredTables == 10 && compactTurnPayloads && precision;
+                return requiredTables == 10 && compactTurnPayloads && precision
+                    && PersistenceService.IsNativeEditorOwnershipSchemaReady(connection);
             }
             catch
             {
