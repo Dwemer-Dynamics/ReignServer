@@ -25,6 +25,7 @@ namespace ReignBetaServer
             routes.Post("/tests/live/game/poll", request => WorldSimulationService.LiveTestGamePollApi(request.JsonBody));
             routes.Post("/tests/live/game/ack", request => WorldSimulationService.LiveTestGameAckApi(request.JsonBody));
             routes.Post("/tests/live/game/result", request => WorldSimulationService.LiveTestGameResultApi(request.JsonBody));
+            routes.Post("/tests/live/game/notable-startup-fixture", request => WorldSimulationService.LiveTestNotableStartupFixtureApi(request.JsonBody));
             routes.Get("/tests/campaign-command/manifest", request => WorldSimulationService.CampaignCommandManifestApi(request.Query));
             routes.Post("/tests/campaign-command/prepare", request => WorldSimulationService.CampaignCommandPrepareApi(request.JsonBody));
             routes.Post("/tests/campaign-command/save/verify", request => WorldSimulationService.CampaignCommandSaveVerifyApi(request.JsonBody));

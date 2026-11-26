@@ -106,6 +106,7 @@ namespace ReignBetaServer
             "POST exact Ordinal /tests/live/game/poll read",
             "POST exact Ordinal /tests/live/game/ack read",
             "POST exact Ordinal /tests/live/game/result read",
+            "POST exact Ordinal /tests/live/game/notable-startup-fixture read",
             "POST exact Ordinal /tests/final-gauntlet/catalog/build none",
             "POST exact Ordinal /tests/final-gauntlet/state/fingerprint none",
             "GET exact Ordinal /tests/final-gauntlet/catalog none",
