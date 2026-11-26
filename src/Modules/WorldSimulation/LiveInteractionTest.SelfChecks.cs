@@ -16,8 +16,266 @@ namespace ReignBetaServer
     internal static partial class WorldSimulationService
     {
 #if !REIGN_EXCLUDE_VERIFICATION
+        private static void VerifyNotableStartupObservationContract(Action<string, bool, string> add)
+        {
+            var step = TestDict("operation", NotableStartupObservationMode);
+            var plan = TestDict("mode", NotableStartupObservationMode, "effects", "observed",
+                "presentation", "headless", "autoCompleteWhenIdle", true, "steps", new[] { step });
+            bool singlePlan = NotableStartupObservationPlanAllowed(plan, true)
+                && !NotableStartupObservationPlanAllowed(plan, false);
+            plan["steps"] = new[] { step, TestDict("operation", "save_checkpoint") };
+            bool refusesExtra = !NotableStartupObservationPlanAllowed(plan, true);
+            plan["steps"] = new[] { TestDict("operation", NotableStartupObservationMode, "notableStartupObservationVerified", true) };
+            add("notable_startup_observation_plan_is_single_read",
+                singlePlan && refusesExtra && !NotableStartupObservationPlanAllowed(plan, true),
+                "The narrow mode refuses mixed commands and caller-supplied evidence.");
+
+            const string lease = "98d30000000000000000000000000001";
+            const string process = "98d30000000000000000000000000002";
+            var issued = TestDict("leaseId", lease, "clientProcessInstanceId", process, "executionRetryGeneration", 1);
+            var execution = TestDict("status", "pending_artifact_review", "executionObservation", issued);
+            var command = TestDict("notableStartupAcceptedExecution", PartyAgencySendAck(issued));
+            bool acceptsOriginal = MatchesNotableObservationExecution(command, execution);
+            issued["executionRetryGeneration"] = 2;
+            bool refusesOldRetry = !MatchesNotableObservationExecution(command, execution);
+            issued["executionRetryGeneration"] = 1;
+            issued["leaseId"] = process;
+            bool refusesWrongLease = !MatchesNotableObservationExecution(command, execution);
+            add("notable_startup_observation_requires_original_accepted_lease",
+                acceptsOriginal && refusesOldRetry && refusesWrongLease
+                    && !MatchesNotableObservationExecution(TestDict(), execution),
+                "A completion cannot replace the originally accepted command, lease or retry.");
+
+            var owner = new PersistenceService.RegisteredEditorNativeOwner("campaign", "timeline", "point", lease, "new_gen", process);
+            var response = TestDict("ok", true, "campaignId", "campaign", "savePointId", "point", "loadSessionId", lease,
+                "restoreGeneration", "new_gen", "outcome", "committed", "result", "rolled_back", "databaseRestored", true);
+            response["savePoint"] = TestDict("savePointId", "point", "nativeSaveName", "ReignTest_Fixture_Current",
+                "savePointKind", "native_save", "timelineId", "timeline");
+            var receipt = TestDict("savePointId", "point", "loadSessionId", lease, "response", response);
+            bool acceptsRollback = PersistenceService.RegisteredEditorNativeRollbackMatches(owner, "ReignTest_Fixture_Current", receipt);
+            response["result"] = "no_op";
+            bool refusesNoOp = !PersistenceService.RegisteredEditorNativeRollbackMatches(owner, "ReignTest_Fixture_Current", receipt);
+            response["result"] = "rolled_back";
+            receipt["savePointId"] = "foreign";
+            add("notable_startup_observation_requires_exact_committed_rollback",
+                acceptsRollback && refusesNoOp && !PersistenceService.RegisteredEditorNativeRollbackMatches(owner, "ReignTest_Fixture_Current", receipt),
+                "The retained load receipt must be the committed database rollback for the exact registered point and session.");
+
+            var scope = TestDict("heroId", "notable", "gameInstanceId", "owned-instance", "clientProcessInstanceId", process,
+                "savePointId", "point", "loadSessionSha256", NotableObservationDigest(lease),
+                "restoreGenerationSha256", NotableObservationDigest("new_gen"), "coordinatorGeneration", 3,
+                "origin", "http://127.0.0.1:5101");
+            var readback = CloneDictionary(scope);
+            var traits = TestDict("valor", -1, "generosity", 2, "honor", 1, "mercy", 0, "calculating", -2);
+            string expected = CanonicalJson(traits);
+            readback["loadResult"] = "rolled_back";
+            readback["timeMode"] = "Stop";
+            readback["traits"] = traits;
+            bool acceptsComplete = MatchesNotableStartupNativeReadback(scope, readback, expected);
+            readback["heroId"] = "wrong";
+            bool refusesWrongHero = !MatchesNotableStartupNativeReadback(scope, readback, expected);
+            readback["heroId"] = "notable";
+            traits["honor"] = "1";
+            bool refusesCoercion = !MatchesNotableStartupNativeReadback(scope, readback, expected);
+            traits.Remove("honor");
+            add("notable_startup_observation_requires_complete_current_native_vector",
+                acceptsComplete && refusesWrongHero && refusesCoercion && !MatchesNotableStartupNativeReadback(scope, readback, expected),
+                "Only all five exact current trait values for the enrolled hero and rollback can establish a match.");
+        }
+
+        // Uses the real start, poll, ACK and result endpoints on the isolated verification
+        // store. Only the external rollback/template read is injected.
+        private static void VerifyNotableStartupObservationSequence(Action<string, bool, string> add)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation) return;
+            string campaign = "__notable_observation_sequence_" + Guid.NewGuid().ToString("N");
+            string campaignRoot = PersistenceService.StrictCampaignDirectory(campaign);
+            string runtimePath = LiveTestRuntimePath(campaign);
+            if (Directory.Exists(campaignRoot) || File.Exists(runtimePath))
+                throw new InvalidOperationException("The disposable notable sequence fixture already exists.");
+
+            const string instance = "notable-observation-native";
+            const string save = "ReignTest_Notable_Current";
+            const string timeline = "notable_timeline";
+            const string hero = "notable_under_observation";
+            const string origin = "http://127.0.0.1:5101";
+            string point = Guid.NewGuid().ToString("N");
+            string process = Guid.NewGuid().ToString("N");
+            string sessionHash = NotableObservationDigest("verified_session");
+            string restoreHash = NotableObservationDigest("verified_restore");
+            var traits = TestDict("valor", -1, "generosity", 0, "honor", 1, "mercy", 2, "calculating", -2);
+            var basis = new NotableStartupObservationBasis(NotableObservationDigest("fixture_basis"),
+                CanonicalJson(traits), sessionHash, restoreHash);
+            var scope = TestDict("source", NotableStartupObservationSource, "campaignId", campaign,
+                "campaignTestRunId", "disposable_notable_run", "timelineId", timeline,
+                "disposableSaveName", save, "protectedBaselineSaveName", "Protected", "savePointId", point,
+                "checkpointSha256", NotableObservationDigest("native_file"), "heroId", hero,
+                "gameInstanceId", instance, "clientProcessInstanceId", process, "origin", origin);
+            Dictionary<string, object> Plan(string id) => TestDict("campaignId", campaign, "gameInstanceId", instance,
+                "runId", id, "mode", NotableStartupObservationMode, "effects", "observed", "presentation", "headless",
+                "autoCompleteWhenIdle", true, "enrollment", scope,
+                "steps", new[] { TestDict("operation", NotableStartupObservationMode) });
+            Dictionary<string, object> Poll() =>
+                LiveTestGamePollApi(TestDict("campaignId", campaign, "gameInstanceId", instance));
+            Dictionary<string, object> Command(string id) => ReadDictionaryList(LoadLiveTestRun(campaign, id), "commands").Single();
+            Dictionary<string, object> Report(Dictionary<string, object> delivery, string originalLease, string status) =>
+                TestDict("campaignId", campaign, "gameInstanceId", instance, "runId", ReadString(delivery, "runId", ""),
+                    "commandId", ReadString(delivery, "commandId", ""), "leaseId", ReadString(delivery, "leaseId", ""),
+                    "status", status, "executionObservation", TestDict("schemaVersion", LiveTestExecutionObservationVersion,
+                        "campaignId", campaign, "gameInstanceId", instance, "runId", ReadString(delivery, "runId", ""),
+                        "commandId", ReadString(delivery, "commandId", ""), "executionLeaseId", originalLease,
+                        "clientProcessInstanceId", process));
+            Dictionary<string, object> Readback() =>
+                TestDict("heroId", hero, "traits", traits, "timeMode", "Stop", "loadResult", "rolled_back",
+                    "gameInstanceId", instance, "clientProcessInstanceId", process, "savePointId", point,
+                    "coordinatorGeneration", 3, "loadSessionSha256", sessionHash, "restoreGenerationSha256", restoreHash,
+                    "origin", origin);
+            bool Ok(Dictionary<string, object> response) => ReadBool(response, "ok", false);
+            bool WithBusyTimeline(Func<bool> observe)
+            {
+                var gate = WorldHistoryTimelineLocks.GetOrAdd(WorldHistoryTimelineScopeKey(campaign), _ => new object());
+                using var entered = new ManualResetEventSlim();
+                using var release = new ManualResetEventSlim();
+                var owner = Task.Run(() =>
+                {
+                    lock (gate)
+                    {
+                        entered.Set();
+                        release.Wait(TimeSpan.FromSeconds(10));
+                    }
+                });
+                try { return entered.Wait(TimeSpan.FromSeconds(5)) && observe(); }
+                finally
+                {
+                    release.Set();
+                    owner.GetAwaiter().GetResult();
+                }
+            }
+
+            bool ownsCampaignGate = !(Program.CampaignDataGate.IsReadLockHeld || Program.CampaignDataGate.IsWriteLockHeld);
+            if (ownsCampaignGate) Program.CampaignDataGate.EnterReadLock();
+            try
+            {
+                lock (LiveTestLock)
+                {
+                    string armPath = LiveTestArmPath();
+                    byte[] priorArm = File.Exists(armPath) ? File.ReadAllBytes(armPath) : null;
+                    bool haveBasis = true;
+                    try
+                    {
+                        NotableStartupBasisForTests = observed => observed == campaign && haveBasis ? basis : null;
+                        CampaignFileService.WriteJsonObject(armPath, TestDict("expiresUtc", DateTimeOffset.UtcNow.AddMinutes(1).ToString("o")));
+                        CampaignFileService.WriteJsonObject(runtimePath, TestDict("campaignId", campaign,
+                            "gameInstanceId", instance, "activeSaveName", save, "receivedUtc", DateTimeOffset.UtcNow.ToString("o"),
+                            "saveSync", TestDict("ready", true, "alignmentPending", false, "timelineId", timeline),
+                            "characterInitialization", TestDict("notableBackgroundReady", false),
+                            "executionIdentity", TestDict("schemaVersion", LiveTestExecutionObservationVersion,
+                                "clientProcessInstanceId", process,
+                                "moduleIds", TestDict("ReignBeta", Guid.NewGuid().ToString("D")))));
+
+                        bool blocksOrdinary = !Ok(LiveTestRunStartApi(TestDict("campaignId", campaign,
+                            "gameInstanceId", instance, "mode", "passive_world",
+                            "steps", new[] { TestDict("operation", "world_snapshot") })));
+                        var gauntlet = Plan("notable-unrelated");
+                        gauntlet["gauntletRunId"] = "external";
+                        gauntlet["caseInstanceId"] = "case";
+                        gauntlet["correlationId"] = "correlation";
+                        bool rejectsMetadata = !Ok(LiveTestRunStartApi(gauntlet))
+                            && LoadLiveTestRun(campaign, "notable-unrelated").Count == 0;
+                        const string firstRun = "notable-original-execution";
+                        bool startsHeld = Ok(LiveTestRunStartApi(Plan(firstRun)));
+                        var first = ReadDictionary(Poll(), "command");
+                        string original = ReadString(first, "leaseId", "");
+                        bool guardedMode = startsHeld && ReadString(first, "effects", "") == "observed"
+                            && ReadString(first, "presentation", "") == "headless"
+                            && ReadString(ReadDictionary(first, "notableStartupScope"), "loadSessionSha256", "") == sessionHash;
+                        add("notable_startup_observation_start_while_unready_is_narrow",
+                            blocksOrdinary && rejectsMetadata && guardedMode,
+                            "Production start permits only the checked read while notable initialization is pending and rejects gauntlet metadata.");
+
+                        bool wrongAck = !Ok(LiveTestGameAckApi(Report(first, Guid.NewGuid().ToString("N"), "accepted")));
+                        bool firstAccepted = Ok(LiveTestGameAckApi(Report(first, original, "accepted")));
+                        var persisted = LoadLiveTestRun(campaign, firstRun);
+                        ReadDictionaryList(persisted, "commands").Single()["leaseExpiresUtc"] =
+                            DateTimeOffset.UtcNow.AddSeconds(-1).ToString("o");
+                        SaveLiveTestRun(persisted);
+                        var replacement = ReadDictionary(Poll(), "command");
+                        string transport = ReadString(replacement, "leaseId", "");
+                        bool rejectsReplacement = !Ok(LiveTestGameAckApi(Report(replacement, transport, "accepted")))
+                            && ReadString(ReadDictionary(Command(firstRun), "notableStartupAcceptedExecution"), "leaseId", "") == original;
+                        var completed = Report(replacement, original, "completed");
+                        completed["result"] = Readback();
+                        bool originalCompletes = Ok(LiveTestGameResultApi(completed))
+                            && ReadString(Command(firstRun), "status", "") == "completed"
+                            && ReadString(ReadDictionary(Command(firstRun), "result"), "disposition", "") == "current_traits_match";
+                        bool rejectsTerminalAck = !Ok(LiveTestGameAckApi(Report(replacement, original, "accepted")));
+                        add("notable_startup_observation_poll_ack_result_keeps_first_acceptance",
+                            wrongAck && firstAccepted && transport.Length > 0 && transport != original && rejectsReplacement
+                                && originalCompletes && rejectsTerminalAck,
+                            "Through the production endpoints, original accepted evidence can complete on a replacement transport, but no replacement or terminal ACK can rewrite it.");
+
+                        const string noAckRun = "notable-unaccepted-execution";
+                        bool startsUnaccepted = Ok(LiveTestRunStartApi(Plan(noAckRun)));
+                        var unaccepted = ReadDictionary(Poll(), "command");
+                        var forged = Report(unaccepted, ReadString(unaccepted, "leaseId", ""), "completed");
+                        forged["result"] = Readback();
+                        bool failedClosed = Ok(LiveTestGameResultApi(forged))
+                            && ReadString(Command(noAckRun), "status", "") == "failed"
+                            && ReadString(ReadDictionary(Command(noAckRun), "result"), "disposition", "") == "unverified";
+                        add("notable_startup_observation_result_without_ack_fails_closed", startsUnaccepted && failedClosed,
+                            "A complete matching vector from an issued but unaccepted command cannot verify the diagnostic.");
+
+                        const string busy = "notable-busy-timeline";
+                        bool startsBeforeBusy = Ok(LiveTestRunStartApi(Plan(busy)));
+                        bool busyDefersLease = WithBusyTimeline(() => !ReadBool(Poll(), "found", true)
+                            && ReadString(LoadLiveTestRun(campaign, busy), "status", "") == "running"
+                            && ReadString(Command(busy), "leaseId", "").Length == 0);
+                        var issued = ReadDictionary(Poll(), "command");
+                        string lease = ReadString(issued, "leaseId", "");
+                        bool acceptedAfterBusy = Ok(LiveTestGameAckApi(Report(issued, lease, "accepted")));
+                        var settled = Report(issued, lease, "completed");
+                        settled["result"] = Readback();
+                        bool rejectsNonterminal = !Ok(LiveTestGameResultApi(Report(issued, lease, "running")))
+                            && ReadString(Command(busy), "status", "") == "accepted";
+                        bool busyDefersResult = WithBusyTimeline(() => !Ok(LiveTestGameResultApi(settled))
+                            && ReadString(Command(busy), "status", "") == "accepted");
+                        bool sameResultCompletes = Ok(LiveTestGameResultApi(settled))
+                            && ReadString(ReadDictionary(Command(busy), "result"), "disposition", "") == "current_traits_match";
+                        add("notable_startup_observation_waits_for_busy_timeline", startsBeforeBusy && busyDefersLease
+                            && acceptedAfterBusy && rejectsNonterminal && busyDefersResult && sameResultCompletes,
+                            "A held timeline defers lease and terminal evidence without retiring the original accepted execution.");
+
+                        const string lost = "notable-lost-basis";
+                        bool startsBeforeLoss = Ok(LiveTestRunStartApi(Plan(lost)));
+                        haveBasis = false;
+                        bool foreignCannotClose = !Ok(LiveTestGamePollApi(TestDict("campaignId", campaign, "gameInstanceId", "foreign-instance")))
+                            && ReadString(LoadLiveTestRun(campaign, lost), "status", "") == "running";
+                        bool endsWithoutLease = !ReadBool(Poll(), "found", true)
+                            && ReadString(LoadLiveTestRun(campaign, lost), "status", "") == "interrupted"
+                            && ReadString(Command(lost), "leaseId", "").Length == 0
+                            && FindActiveLiveTestRun(campaign) == null;
+                        haveBasis = true;
+                        bool nextCanStart = Ok(LiveTestRunStartApi(Plan("notable-after-loss")));
+                        add("notable_startup_observation_lost_basis_releases_run", startsBeforeLoss && foreignCannotClose && endsWithoutLease && nextCanStart,
+                            "A permanently lost pre-issuance proof records interruption and releases the exact active test slot.");
+                    }
+                    finally
+                    {
+                        NotableStartupBasisForTests = null;
+                        if (priorArm == null) File.Delete(armPath);
+                        else File.WriteAllBytes(armPath, priorArm);
+                        File.Delete(runtimePath);
+                        PersistenceService.TryDeleteDirectory(campaignRoot);
+                    }
+                }
+            }
+            finally { if (ownsCampaignGate) Program.CampaignDataGate.ExitReadLock(); }
+        }
+
         private static void AddLiveTestExecutionObservationChecks(Action<string, bool, string> add)
         {
+            VerifyNotableStartupObservationContract(add);
+            VerifyNotableStartupObservationSequence(add);
             var scope = TestDict("campaignId", "execution-fixture", "gameInstanceId", "native-game",
                 "runId", "execution-run", "commandId", "observe");
             var start = CloneDictionary(scope);

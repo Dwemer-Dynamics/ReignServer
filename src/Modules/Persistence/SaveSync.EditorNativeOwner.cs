@@ -86,6 +86,35 @@ namespace ReignBetaServer
                 "restoreGeneration", restore, "timelineId", timeline, "lineageId", lineage);
         }
 
+        internal static RegisteredEditorNativeOwner ReadRegisteredEditorNativeRollback(string campaign, string nativeSaveName)
+        {
+            var owner = ReadRegisteredEditorNativeOwner(campaign);
+            if (owner == null) return null;
+            var receipt = ReadDictionary(ReadSaveSyncLedger(campaign), "lastLoadReceipt");
+            return RegisteredEditorNativeRollbackMatches(owner, nativeSaveName, receipt) ? owner : null;
+        }
+
+        internal static bool RegisteredEditorNativeRollbackMatches(RegisteredEditorNativeOwner owner, string nativeSaveName,
+            Dictionary<string, object> receipt)
+        {
+            var response = ReadDictionary(receipt, "response");
+            var point = ReadDictionary(response, "savePoint");
+            return owner != null && response != null && ReadString(receipt, "savePointId", "") == owner.LoadPointId
+                && ReadString(receipt, "loadSessionId", "") == owner.LoadSessionId
+                && ReadString(response, "campaignId", "") == owner.CampaignId
+                && ReadString(response, "savePointId", "") == owner.LoadPointId
+                && ReadString(response, "loadSessionId", "") == owner.LoadSessionId
+                && ReadString(response, "restoreGeneration", "") == owner.RestoreGeneration
+                && ReadString(point, "savePointId", "") == owner.LoadPointId
+                && ReadString(point, "nativeSaveName", "") == nativeSaveName
+                && ReadString(point, "savePointKind", "") == "native_save"
+                && ReadString(point, "timelineId", "") == owner.TimelineId
+                && ReadString(response, "result", "") == "rolled_back"
+                && ReadString(response, "outcome", "") == "committed"
+                && response.TryGetValue("ok", out object ok) && ok is true
+                && response.TryGetValue("databaseRestored", out object restored) && restored is true;
+        }
+
         private static bool EditorNativeOwnerStillVerified(string campaign, string timeline,
             string point, string session, string restore)
         {
