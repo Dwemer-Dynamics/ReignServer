@@ -29,7 +29,8 @@ namespace ReignBetaServer
             string auditMode,
             string heroId,
             string eventId,
-            Func<Dictionary<string, object>, Dictionary<string, object>> responder = null)
+            Func<Dictionary<string, object>, Dictionary<string, object>> responder = null,
+            bool deferOnProviderQueueTimeout = false)
         {
             if (!ReadBool(llm, "ok", false))
                 return llm;
@@ -163,6 +164,9 @@ namespace ReignBetaServer
                 retryRequest["temperature"] = attempt == 1 ? 0.05d : 0d;
                 retryRequest["maxTokens"] = Math.Max(regenerateEnvelope ? 16000 : 2200, ReadInt(retryRequest, "maxTokens", 2200));
                 Dictionary<string, object> retry = responder == null ? LlmProviderService.ChatWithLlm(retryRequest) : responder(retryRequest);
+                if (deferOnProviderQueueTimeout && !ReadBool(retry, "ok", false)
+                    && ReadString(retry, "errorCode", "") == LlmProviderService.ProviderQueueTimeoutCode)
+                    return retry;
                 retry = RecoverConversationResponseEnvelope(retry, request, auditMode, campaignId, correlationId, heroId, eventId);
                 if (ReadBool(retry, "responseRecoveryRequiresRegeneration", false))
                 {

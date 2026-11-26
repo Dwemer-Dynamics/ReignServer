@@ -247,10 +247,13 @@ namespace ReignBetaServer
             Dictionary<string, object> decision = AskRulerForDiplomaticDecision(campaignId, payload, ruler, traits, rulerState, mode, fixedTargetId);
             if (!ReadBool(decision, "ok", false))
             {
-                WorldSimulationService.RecordWorldTestDiplomacyEvaluation(campaignId, timelineId, day,
-                    "model_failure", initiativeAttempts.Count, true, true,
-                    new Dictionary<string, object> { ["intent"] = mode });
-                return DirectorModelFailure(decision, "The diplomacy model did not return a usable decision.", debugInitiativeTest);
+                Dictionary<string, object> failure = DirectorModelFailure(decision,
+                    "The diplomacy model did not return a usable decision.", debugInitiativeTest);
+                if (ReadString(failure, "status", "") != LlmProviderService.ProviderQueueTimeoutCode)
+                    WorldSimulationService.RecordWorldTestDiplomacyEvaluation(campaignId, timelineId, day,
+                        "model_failure", initiativeAttempts.Count, true, true,
+                        new Dictionary<string, object> { ["intent"] = mode });
+                return failure;
             }
 
             Dictionary<string, object> parsed = ReadDictionary(decision, "decision");
@@ -406,7 +409,8 @@ namespace ReignBetaServer
             if (!DirectorUnilateralCommands.Contains(command))
             {
                 Dictionary<string, object> response = AskRulerToRespond(
-                    campaignId, payload, ruler, target, candidate, mode, false);
+                    campaignId, payload, ruler, target, candidate, mode, false,
+                    deferOnProviderQueueTimeout: true);
                 if (!ReadBool(response, "ok", false))
                 {
                     return DirectorModelFailure(response, "The responding diplomacy model failed.", debugInitiativeTest);
@@ -444,7 +448,8 @@ namespace ReignBetaServer
                     {
                         Dictionary<string, object> finalResponse =
                             AskRulerToRespond(campaignId, payload, target,
-                                ruler, finalCandidate, mode, true);
+                                ruler, finalCandidate, mode, true,
+                                deferOnProviderQueueTimeout: true);
                         if (!ReadBool(finalResponse, "ok", false))
                         {
                             return DirectorModelFailure(finalResponse,
@@ -1079,12 +1084,11 @@ namespace ReignBetaServer
             });
             Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(llmRequest);
             if (!ReadBool(llm, "ok", false))
-            {
-                return new Dictionary<string, object> { ["ok"] = false, ["error"] = ReadString(llm, "error", "Diplomacy model unavailable.") };
-            }
+                return DiplomacyProviderFailure(llm, "Diplomacy model unavailable.");
 
             llm = ConversationResponseService.RetryMalformedStructuredResponse(llm, llmRequest, campaignId,
-                OperationsService.EnsureCorrelationId(llmRequest), "diplomacy_decision", rulerHeroId, "");
+                OperationsService.EnsureCorrelationId(llmRequest), "diplomacy_decision", rulerHeroId, "",
+                deferOnProviderQueueTimeout: true);
             return FinishDiplomacyModelOutput(llm, llmRequest, campaignId, rulerHeroId, "decision");
         }
 
@@ -1095,7 +1099,8 @@ namespace ReignBetaServer
             Dictionary<string, object> responder,
             Dictionary<string, object> candidate,
             string mode,
-            bool finalCounterDecision)
+            bool finalCounterDecision,
+            bool deferOnProviderQueueTimeout = false)
         {
             Dictionary<string, object> traits = LoadDirectorTraits(campaignId, responder);
             Dictionary<string, object> allianceLeverage = BuildAllianceLeverage(world, proposer, responder, candidate);
@@ -1153,12 +1158,11 @@ namespace ReignBetaServer
             };
             Dictionary<string, object> llm = LlmProviderService.ChatWithLlm(llmRequest);
             if (!ReadBool(llm, "ok", false))
-            {
-                return new Dictionary<string, object> { ["ok"] = false, ["error"] = ReadString(llm, "error", "Diplomacy responder unavailable.") };
-            }
+                return DiplomacyProviderFailure(llm, "Diplomacy responder unavailable.");
 
             llm = ConversationResponseService.RetryMalformedStructuredResponse(llm, llmRequest, campaignId,
-                OperationsService.EnsureCorrelationId(llmRequest), "diplomacy_response", responderHeroId, "");
+                OperationsService.EnsureCorrelationId(llmRequest), "diplomacy_response", responderHeroId, "",
+                deferOnProviderQueueTimeout: deferOnProviderQueueTimeout);
             return FinishDiplomacyModelOutput(llm, llmRequest, campaignId, responderHeroId, "response", finalCounterDecision);
         }
 
@@ -1183,6 +1187,10 @@ namespace ReignBetaServer
         private static Dictionary<string, object> ParseDiplomacyModelOutput(
             Dictionary<string, object> llm, string field, bool finalCounterDecision = false)
         {
+            if (!ReadBool(llm, "ok", false)
+                && ReadString(llm, "errorCode", "") == LlmProviderService.ProviderQueueTimeoutCode)
+                return DiplomacyProviderFailure(llm, "The diplomacy model is waiting for provider capacity.");
+
             Dictionary<string, object> parsed = ReadBool(llm, "ok", false)
                 ? TryParseJsonObject(ReadString(llm, "content", "")) : null;
             string choice = ReadString(parsed, field, "").Trim().ToLowerInvariant();
@@ -1203,10 +1211,28 @@ namespace ReignBetaServer
             };
         }
 
+        private static Dictionary<string, object> DiplomacyProviderFailure(
+            Dictionary<string, object> llm, string defaultError) => new Dictionary<string, object>
+        {
+            ["ok"] = false,
+            ["error"] = ReadString(llm, "error", defaultError),
+            ["errorCode"] = ReadString(llm, "errorCode", "")
+        };
+
         private static Dictionary<string, object> DirectorModelFailure(
             Dictionary<string, object> model, string defaultError, bool debugInitiativeTest)
         {
             string error = ReadString(model, "error", defaultError);
+            if (ReadString(model, "errorCode", "") == LlmProviderService.ProviderQueueTimeoutCode)
+            {
+                // This evaluation made no ruler choice. Let the campaign retry when a slot opens.
+                return new Dictionary<string, object>
+                {
+                    ["ok"] = false,
+                    ["status"] = LlmProviderService.ProviderQueueTimeoutCode,
+                    ["error"] = error
+                };
+            }
             if (!ReadBool(model, "formatFallback", false)) return DirectorError(error);
 
             // The evaluation completed without a ruler choice. Keep its normal schedule;
