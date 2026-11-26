@@ -695,6 +695,28 @@ namespace ReignBetaServer
                 ("counteroffer", "response", true)
             })
             {
+                var queued = Output("{\"" + field + "\":\"accept\"}", false);
+                queued["errorCode"] = LlmProviderService.ProviderQueueTimeoutCode;
+                queued["error"] = "Provider priority queue timed out.";
+                var admissionFailure = DirectorModelFailure(DiplomacyProviderFailure(queued, ""), "", false);
+                string auditMode = field == "decision" ? "diplomacy_decision" : "diplomacy_response";
+                int recoveryAttempts = 0;
+                var recovered = ConversationResponseService.RetryMalformedStructuredResponse(Output("{}"),
+                    new Dictionary<string, object>(), "diplomacy_contract", "diplomacy_queue_" + stage,
+                    auditMode, "", "", _ => { recoveryAttempts++; return queued; },
+                    deferOnProviderQueueTimeout: true);
+                var recoveryFailure = DirectorModelFailure(ParseDiplomacyModelOutput(recovered, field, finalCounterDecision), "", false);
+                add(stage + "_provider_queue_timeout_defers_evaluation",
+                    recoveryAttempts == 1 && new[] { admissionFailure, recoveryFailure }.All(result => !ReadBool(result, "ok", true)
+                        && ReadString(result, "status", "") == LlmProviderService.ProviderQueueTimeoutCode
+                        && !result.ContainsKey(field) && !result.ContainsKey("actionId") && !result.ContainsKey("eventId")),
+                    "Provider queue admission and recovery keep the evaluation pending without producing a ruler choice.");
+                queued.Remove("errorCode");
+                var providerFailure = DirectorModelFailure(DiplomacyProviderFailure(queued, ""), "", false);
+                add(stage + "_provider_failure_without_queue_code_still_pauses",
+                    !ReadBool(providerFailure, "ok", true) && ReadString(providerFailure, "status", "") == "paused",
+                    "A provider failure without the queue code still reaches the outage path, regardless of its message.");
+
                 foreach (var (kind, content) in new[]
                 {
                     ("malformed", "{\"" + field + "\":"),
@@ -713,6 +735,25 @@ namespace ReignBetaServer
                         "Unusable output cannot enter the political outcome path or trigger the client outage retry.");
                 }
             }
+
+            int legacyRecoveryAttempts = 0;
+            var legacyRecovery = ConversationResponseService.RetryMalformedStructuredResponse(Output("{}"),
+                new Dictionary<string, object>(), "diplomacy_contract", "diplomacy_referral_queue",
+                "diplomacy_response", "", "", _ =>
+                {
+                    legacyRecoveryAttempts++;
+                    return new Dictionary<string, object>
+                    {
+                        ["ok"] = false,
+                        ["errorCode"] = LlmProviderService.ProviderQueueTimeoutCode
+                    };
+                });
+            var referralFailure = ParseDiplomacyModelOutput(legacyRecovery, "response");
+            add("resident_ambassador_recovery_exhaustion_remains_technical_failure",
+                legacyRecoveryAttempts == 2 && !ReadBool(referralFailure, "ok", true)
+                    && ReadBool(referralFailure, "formatFallback", false)
+                    && !referralFailure.ContainsKey("response"),
+                "Callers keeping the existing recovery policy still receive a technical format failure after bounded exhaustion.");
 
             Dictionary<string, object> noAction = ParseDiplomacyModelOutput(Output("{\"decision\":\"none\"}"), "decision");
             add("initiative_explicit_no_action_remains_a_choice",

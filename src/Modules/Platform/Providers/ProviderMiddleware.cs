@@ -11,6 +11,13 @@ namespace ReignBetaServer
 {
     internal static partial class LlmProviderService
     {
+        internal const string ProviderQueueTimeoutCode = "provider_queue_timeout";
+
+        private sealed class ProviderQueueTimeoutException : TimeoutException
+        {
+            internal ProviderQueueTimeoutException() : base("Provider priority queue timed out.") { }
+        }
+
         internal sealed class ProviderState
         {
             public readonly object Gate = new object();
@@ -73,7 +80,7 @@ namespace ReignBetaServer
             if (!AcquireProviderSlot(state, interactive, queueTimeout))
             {
                 RecordProviderTimings(diagnostics, timer.ElapsedMilliseconds, 0, "queue_timeout");
-                throw new TimeoutException("Provider priority queue timed out.");
+                throw new ProviderQueueTimeoutException();
             }
             long queueMs = timer.ElapsedMilliseconds;
             var callTimer = Stopwatch.StartNew();
