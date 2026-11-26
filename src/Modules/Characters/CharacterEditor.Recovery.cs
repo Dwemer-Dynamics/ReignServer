@@ -169,11 +169,16 @@ namespace ReignBetaServer
                 "sessionId", ReadString(exchange, "sessionId", ""), "exchangeId", ReadString(exchange, "exchangeId", ""),
                 "timelineId", "main", "role", "npc", "speakerHeroStringId", EditorRestartHero,
                 "ts", timestamp, "text", EditorRestartEventBefore);
-            var prefix = Enumerable.Range(0, 64).Select(i => TestDict("id", "padding-" + i, "text", new string('x', 128)));
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
-            File.WriteAllLines(path, prefix.Append(row).Append(TestDict("id", EditorRestartEventSuffix, "text", "unchanged"))
-                .Select(item => Json.Serialize(item)));
+            WriteEditorRestartEventHistory(path, row, TestDict("id", EditorRestartEventSuffix, "text", "unchanged"), 64);
             return row;
+        }
+
+        private static void WriteEditorRestartEventHistory(string path, Dictionary<string, object> row,
+            Dictionary<string, object> suffix, int paddingRows)
+        {
+            var prefix = Enumerable.Range(0, paddingRows).Select(i => TestDict("id", "padding-" + i, "text", new string('x', 128)));
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllLines(path, prefix.Append(row).Append(suffix).Select(item => Json.Serialize(item)));
         }
 
         private static bool EditorRestartEventMatches(IEnumerable<Dictionary<string, object>> rows,
@@ -183,31 +188,41 @@ namespace ReignBetaServer
             return matched.Count == 1 && SameEditorHistoryRow(matched[0], expected);
         }
 
-        private static bool VerifyEditorRestartIndexedEvent(string path, Dictionary<string, object> expected)
+        private static List<Dictionary<string, object>> ReadEditorRestartIndexedTail(string path, out long readBytes)
         {
-            long fileBytes = new FileInfo(path).Length, readBytes = 0;
+            long sourceBytes = 0;
             var previousObserver = StrictJsonlHistoryIndex.SourceBytesReadForTests;
-            StrictJsonlHistoryIndex.SourceBytesReadForTests = count => readBytes += count;
+            StrictJsonlHistoryIndex.SourceBytesReadForTests = count => sourceBytes += count;
             try
             {
-                var cold = Program.ReadDialogueHistoryTail(path, 2);
-                long coldReads = readBytes;
-                readBytes = 0;
-                var warm = Program.ReadDialogueHistoryTail(path, 2);
-                return coldReads >= fileBytes && readBytes > 0 && readBytes < fileBytes / 8
-                    && EditorRestartEventMatches(cold, expected) && EditorRestartEventMatches(warm, expected)
-                    && cold.Count == 2 && warm.Count == 2
-                    && SameEditorHistoryRow(cold[1], warm[1])
-                    && EditorHistoryRowId(warm[1]) == EditorRestartEventSuffix
-                    && ReadString(warm[1], "text", "") == "unchanged";
+                var rows = Program.ReadDialogueHistoryTail(path, 2);
+                readBytes = sourceBytes;
+                return rows;
             }
             finally { StrictJsonlHistoryIndex.SourceBytesReadForTests = previousObserver; }
+        }
+
+        private static bool EditorRestartReadWasWarm(long readBytes, long fileBytes)
+            => readBytes > 0 && readBytes < fileBytes / 8;
+
+        private static bool VerifyEditorRestartIndexedEvent(string path, Dictionary<string, object> expected)
+        {
+            long fileBytes = new FileInfo(path).Length;
+            var cold = ReadEditorRestartIndexedTail(path, out long coldReads);
+            var warm = ReadEditorRestartIndexedTail(path, out long warmReads);
+            return coldReads >= fileBytes && EditorRestartReadWasWarm(warmReads, fileBytes)
+                && EditorRestartEventMatches(cold, expected) && EditorRestartEventMatches(warm, expected)
+                && cold.Count == 2 && warm.Count == 2
+                && SameEditorHistoryRow(cold[1], warm[1])
+                && EditorHistoryRowId(warm[1]) == EditorRestartEventSuffix
+                && ReadString(warm[1], "text", "") == "unchanged";
         }
 
         private static void VerifyEditorHardExit(Action<string, bool, string> add, bool committed)
         {
             string caseId = committed ? "mixed_recovery_hard_exit_after_commit" : "mixed_recovery_hard_exit_before_commit";
             string indexCaseId = caseId + "_strict_event_index";
+            string siblingIndexCaseId = caseId + "_sibling_event_index_remains_warm";
             string id = Guid.NewGuid().ToString("N"), campaign = EditorRestartCampaign(id);
             string fixture = Path.Combine(EditorRestartFixtureHome, id);
             string campaigns = Path.Combine(fixture, "campaigns");
@@ -232,6 +247,26 @@ namespace ReignBetaServer
                 byte[] originalHistory = File.ReadAllBytes(eventPath);
                 long parentGeneration = System.Threading.Volatile.Read(ref PersistenceService.CampaignReplacementGeneration);
                 bool originalIndex = VerifyEditorRestartIndexedEvent(eventPath, originalEvent);
+
+                const string siblingHero = "fixture_editor_restart_sibling";
+                string siblingPath = CampaignFileService.CharacterFile(campaign, siblingHero, "history", "events.jsonl");
+                var siblingEvent = TestDict("id", EditorRestartEventRow, "speakerHeroStringId", siblingHero,
+                    "text", "This hero is waiting at the mill.");
+                var siblingSuffix = TestDict("id", EditorRestartEventSuffix, "text", "Sibling history ends at the mill.");
+                WriteEditorRestartEventHistory(siblingPath, siblingEvent, siblingSuffix, 96);
+                byte[] siblingBefore = File.ReadAllBytes(siblingPath);
+
+                bool SiblingRowsMatch(List<Dictionary<string, object>> rows) => rows.Count == 2
+                    && SameEditorHistoryRow(rows[0], siblingEvent) && SameEditorHistoryRow(rows[1], siblingSuffix);
+
+                var siblingCold = ReadEditorRestartIndexedTail(siblingPath, out long siblingColdReads);
+                var originalWarm = ReadEditorRestartIndexedTail(eventPath, out long originalWarmReads);
+                var siblingWarm = ReadEditorRestartIndexedTail(siblingPath, out long siblingWarmReads);
+                // Establish simultaneous warmth before the child owns either restart boundary.
+                bool bothOriginallyWarm = siblingColdReads >= siblingBefore.LongLength && SiblingRowsMatch(siblingCold)
+                    && EditorRestartReadWasWarm(originalWarmReads, originalHistory.LongLength)
+                    && EditorRestartEventMatches(originalWarm, originalEvent)
+                    && EditorRestartReadWasWarm(siblingWarmReads, siblingBefore.LongLength) && SiblingRowsMatch(siblingWarm);
                 RunEditorRestartFixtureChild(id, committed ? "after_sql_commit" : "before_sql_commit", EditorRestartWriterExitCode);
 
                 string journalRoot = EditorJournalRoot(campaigns, campaign);
@@ -247,6 +282,12 @@ namespace ReignBetaServer
                     && eventIntent.AfterHashes[^1] == EditorFileHash(publishedHistory)
                     && EditorRestartEventMatches(Program.ReadJsonLinesFromPath(eventPath), editedEvent);
                 RunEditorRestartFixtureChild(id, "recover", 0);
+
+                // Read the sibling first so rebuilding the edited index cannot cause a capacity eviction.
+                var recoveredSibling = ReadEditorRestartIndexedTail(siblingPath, out long recoveredSiblingReads);
+                bool siblingRemainsWarm = bothOriginallyWarm && SiblingRowsMatch(recoveredSibling)
+                    && EditorRestartReadWasWarm(recoveredSiblingReads, siblingBefore.LongLength)
+                    && File.ReadAllBytes(siblingPath).SequenceEqual(siblingBefore);
 
                 using var reader = ReignDatabase.OpenCampaignConnection(campaign);
                 var revisions = ReignDatabase.QuerySql(reader,
@@ -286,12 +327,16 @@ namespace ReignBetaServer
                 add(indexCaseId, indexed, committed
                     ? "The surviving strict index rebuilds after a child's committed event edit and returns exactly the event witnessed by SQL."
                     : "The surviving strict index rebuilds after a child's abandoned event edit and returns only the exact rolled-back event.");
-                passed = recovered && indexed;
+                add(siblingIndexCaseId, recovered && siblingRemainsWarm, !bothOriginallyWarm
+                    ? "The fixture did not establish two independently warm history files before interruption."
+                    : "After the same recovery, the other hero's history bytes and tail rows are unchanged and the first read remains indexed.");
+                passed = recovered && indexed && siblingRemainsWarm;
             }
             catch (Exception ex)
             {
                 add(caseId, false, ex.Message);
                 add(indexCaseId, false, ex.Message);
+                add(siblingIndexCaseId, false, ex.Message);
             }
             finally
             {
