@@ -148,6 +148,7 @@ namespace ReignBetaServer
             + "pledge_rebellion_support requests the approached clan leader's durable support for the player's future rebellion against the named ruler; it does not immediately change allegiance and may be refused. "
             + "leave_spouse binds only the agreeing NPC's current spouseId and spouseClanId from currentMarriage. It means writing to that spouse that the marriage is over and ending it, without any commitment to the player. "
             + "With playerDeclaration and nativeReceipt, react to the already submitted unilateral declaration's recorded state (rebellion or pregnancy exposure) and use none for that declaration; your permission cannot cancel it. Pregnancy exposure reveals only the parents/facts actually named in the receipt.\n"
+            + "A captive-ruler appeal with playerDeclaration and nativeReceipt records a persuasion result only. Use none for that clause. Treat a successful appeal as a preference for the later judgment. Never claim a verdict was issued, a captive was released, or a war ended from the appeal.\n"
             + "REGISTERED INTERPERSONAL ACTIONS (compact lossless catalog): " + StructuredActionCatalogPrompt() + "\n";
 
         private static Dictionary<string, object> StructuredActionDecisionExample() => TestDict(

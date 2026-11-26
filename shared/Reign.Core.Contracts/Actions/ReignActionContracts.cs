@@ -193,9 +193,12 @@ namespace Reign.Core.Contracts.Actions
         }
 
         public const int MaximumClauses = 64;
+        public const string RulerInfluenceActionId = "influence_ruler_judgment";
+        public static bool IsPlayerDeclarationAction(string id)
+            => id == "start_ruling_clan_rebellion" || id == "expose_concealed_pregnancy" || id == RulerInfluenceActionId;
         public static bool IsPlayerDeclaration(ActionAgreement a) => a != null && a.Clauses != null
             && a.Clauses.Count == 1 && a.Clauses[0] != null
-            && (a.Clauses[0].ActionId == "start_ruling_clan_rebellion" || a.Clauses[0].ActionId == "expose_concealed_pregnancy")
+            && IsPlayerDeclarationAction(a.Clauses[0].ActionId)
             && a.ProposerId == a.PlayerId && a.Clauses[0].ActorId == a.PlayerId
             && a.Clauses[0].RecipientId == a.NpcId;
         public static readonly string[] ConditionKinds = { "", "arrival", "release", "peace", "war", "ownership", "day" };
@@ -215,7 +218,7 @@ namespace Reign.Core.Contracts.Actions
             if (a.Clauses.Select(x => x.Id).Distinct(StringComparer.Ordinal).Count() != a.Clauses.Count) errors.Add("Duplicate clause identity.");
             if (new[] { now, a.CreatedDay, a.ExpiresDay }.Any(x => double.IsNaN(x) || double.IsInfinity(x) || x < 0)) errors.Add("Invalid campaign time.");
             if (a.ExpiresDay > 0 && now > a.ExpiresDay) errors.Add("This proposal has expired.");
-            if (a.Clauses.Any(c => c.ActionId == "start_ruling_clan_rebellion" || c.ActionId == "expose_concealed_pregnancy"))
+            if (a.Clauses.Any(c => IsPlayerDeclarationAction(c.ActionId)))
             {
                 if (!IsPlayerDeclaration(a) || a.AdvancePayment)
                     errors.Add("A declaration must be the player's own standalone statement, without a bargain.");
@@ -223,6 +226,9 @@ namespace Reign.Core.Contracts.Actions
                     || c.IntervalDays != 0 || c.ConditionKind.Length != 0 || c.Timing != TermTiming.Immediate))
                     errors.Add("A declaration is submitted when sent and cannot be scheduled or conditional.");
             }
+            if (a.Clauses.Any(c => c.ActionId == RulerInfluenceActionId)
+                && (a.Origin != ActionOrigin.Conversation || a.Channel == AgreementChannel.Correspondence))
+                errors.Add("Appeal directly to the ruler in conversation.");
             foreach (var c in a.Clauses)
             {
                 if (new[] { c.Id, c.ActionId, c.ActorId, c.RecipientId }.Any(s => string.IsNullOrWhiteSpace(s) || s.Length > 256) || c.ConditionTargetId.Length > 256) errors.Add("Invalid term identity.");

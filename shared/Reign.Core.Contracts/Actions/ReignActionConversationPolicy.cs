@@ -16,7 +16,7 @@ namespace Reign.Core.Contracts.Actions
         public static bool Allows(ActionDefinition definition, bool playerActs, int existingTerms = 0)
         {
             if (!definition.ConversationEligible || definition.IsSetup) return false;
-            if (definition.Id == "start_ruling_clan_rebellion" || definition.Id == "expose_concealed_pregnancy") return playerActs && existingTerms == 0;
+            if (AgreementRules.IsPlayerDeclarationAction(definition.Id)) return playerActs && existingTerms == 0;
             if (definition.MovesActor && playerActs) return false;
             if (definition.Family == "court") return !playerActs;
             if (definition.Adapter.StartsWith("npc_life:", StringComparison.Ordinal)) return !playerActs;
@@ -117,6 +117,7 @@ namespace Reign.Core.Contracts.Actions
             switch (definition.Id)
             {
                 case "expose_concealed_pregnancy": return "expose their concealed pregnancy";
+                case AgreementRules.RulerInfluenceActionId: return "appeal for a captive ruler's verdict";
                 case "duel_player": return "duel me";
                 case "attack_player_party": return "attack my party";
                 case "surrender_to_player": return "surrender to me";

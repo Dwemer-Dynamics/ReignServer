@@ -85,6 +85,7 @@ namespace ReignBeta.Shared.Rulers
         public RulerJudgmentStage Stage { get; set; }
         public RulerVerdict Verdict { get; set; }
         public RulerVerdict? PendingVerdict { get; set; }
+        public RulerJudgmentInfluence? Influence { get; set; }
         public double CapturedDay { get; set; } = -1;
         public double SentencedDay { get; set; } = -1;
         public double Deadline { get; set; }
@@ -104,6 +105,17 @@ namespace ReignBeta.Shared.Rulers
         public List<RulerClanSnapshot> Clans { get; set; } = new List<RulerClanSnapshot>();
         public Dictionary<string, double> Traits { get; set; } = new Dictionary<string, double>();
         public HashSet<string> Receipts { get; set; } = new HashSet<string>(StringComparer.Ordinal);
+    }
+
+    public sealed class RulerJudgmentInfluence
+    {
+        public string OperationId { get; set; } = "";
+        public string RulerId { get; set; } = "";
+        public RulerVerdict Verdict { get; set; }
+        public int Chance { get; set; }
+        public int Roll { get; set; }
+        public bool Succeeded { get; set; }
+        public bool AuthorityChanged { get; set; }
     }
     public sealed class RulerEffect
     {
@@ -237,7 +249,20 @@ namespace ReignBeta.Shared.Rulers
             j.VictorId = rulerId;
             // A queued choice belongs to its sovereign, not their successor.
             j.PendingVerdict = null;
+            if (j.Influence != null) j.Influence.AuthorityChanged = true;
         }
+        public static bool InfluenceOpen(RulerJudgment j, double day)
+            => j.Stage == RulerJudgmentStage.AwaitingDecision && j.Influence == null && !j.PendingVerdict.HasValue
+                && Finite(day) && Finite(j.CapturedDay) && j.CapturedDay >= 0
+                && day >= j.CapturedDay && day < j.CapturedDay + DecisionDays;
+
+        public static int InfluenceChance(int relation) => Math.Max(0, Math.Min(100, relation) - 25);
+
+        public static bool InfluenceSucceeds(int relation, int roll) => roll >= 1 && roll <= InfluenceChance(relation);
+
+        public static RulerVerdict? InfluencedVerdict(RulerJudgment j)
+            => j.Influence is { Succeeded: true, AuthorityChanged: false } influence && influence.RulerId == j.VictorId
+                ? influence.Verdict : (RulerVerdict?)null;
         public static void EnsureSentenceDeadline(RulerJudgment j, double day)
         {
             // Preserve every valid absolute saved deadline. A corrupt non-finite
