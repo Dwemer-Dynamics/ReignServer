@@ -95,9 +95,12 @@ namespace ReignBetaServer
         private static bool HasNotableEditorAuthorityFile(string campaign, string hero) =>
             System.IO.Path.Exists(CampaignFileService.CharacterFile(campaign, hero, "editor_authority.json"));
 
-        internal static bool StockNotableConstructionMustHold(string campaign, string hero, bool requestsNotable)
+        internal static bool StockNotableConstructionMustHold(string campaign, string hero, bool requestsNotable) =>
+            !CharactersService.OwnedAutomaticNotableDeliveryReady
+            && RetainedNotableDeliveryMustHold(campaign, hero, requestsNotable);
+
+        internal static bool RetainedNotableDeliveryMustHold(string campaign, string hero, bool requestsNotable)
         {
-            if (CharactersService.OwnedAutomaticNotableDeliveryReady) return false;
             var persisted = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json"));
             // A stale request can ask for notable treatment, but cannot erase stored notable identity.
             bool knownNotable = requestsNotable || ReadBool(persisted, "isNotable", false);
@@ -265,6 +268,45 @@ namespace ReignBetaServer
                     expected, observed ?? TestDict(), transaction);
             }
             own?.Commit();
+        }
+
+        internal sealed record RetainedNotableStartupObservation(string BasisSha256, string ExpectedTraits);
+
+        internal static RetainedNotableStartupObservation ReadRetainedNotableStartupObservation(
+            string campaign, string hero, string timelineId, string restoreGeneration)
+        {
+            if (!OwnsNativeNotableTimeline(campaign)) return null;
+            using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign,
+                trackCampaignMutations: false, initializeInfrastructure: false);
+            if (connection == null || !PersistenceService.IsNativeEditorOwnershipSchemaReady(connection)
+                || ReadNotableStartupScope(connection) != new NotableStartupScope(timelineId, restoreGeneration))
+                return null;
+
+            var row = RelationshipsStore.SelectNotableMbtiProfiles4(connection, TestDict("id", hero)).SingleOrDefault();
+            if (row == null || ReadString(row, "native_sync_status", "") != StockNativeStartupPending
+                || ReadString(row, "source", "") != "notable_mbti_template"
+                || ReadInt(row, "template_version", -1) != NotableMbtiTemplateVersion
+                || HasOwnedOrHeldNotableDelivery(connection, null, campaign, hero, row))
+                return null;
+
+            string raw = ReadString(row, "startup_native_session_id", "");
+            var token = TryParseStrictJsonObject(raw);
+            string previousGeneration = ExactStartupReservationField(token, "restoreGeneration");
+            if (token?.Count != 4 || !token.Keys.OrderBy(key => key, StringComparer.Ordinal)
+                    .SequenceEqual(new[] { "preparationId", "restoreGeneration", "sessionId", "timelineId" }, StringComparer.Ordinal)
+                || ExactStartupReservationField(token, "timelineId") != timelineId
+                || !Reign.Core.Contracts.Actions.TerminalActionReportProtocol.IsTrustedIdentifier(previousGeneration)
+                || previousGeneration == restoreGeneration
+                || !IsNotableStartupNonce(ExactStartupReservationField(token, "preparationId"))
+                || !IsNotableStartupNonce(ExactStartupReservationField(token, "sessionId")))
+                return null;
+
+            string expected = ReadString(row, "native_traits_json", "");
+            var desired = TryParseStrictJsonObject(expected);
+            if (!CharactersService.HasExactAutomaticNotableTraits(desired)) return null;
+            var bytes = System.Text.Encoding.UTF8.GetBytes(Json.Serialize(new[] { raw, expected }));
+            string digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+            return new RetainedNotableStartupObservation(digest, CanonicalJson(desired));
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
@@ -563,6 +605,7 @@ namespace ReignBetaServer
                 finally { Program.CampaignDataGate.ExitReadLock(); }
 
                 VerifyStockNotableManualConstruction(add, campaign);
+                VerifyRetainedNotablePreactivationGuards(add, campaign);
             }
             finally
             {
@@ -573,6 +616,113 @@ namespace ReignBetaServer
                     PersistenceService.TryDeleteDirectory(ledgerRoot);
                 }
             }
+        }
+
+        private static void VerifyRetainedNotablePreactivationGuards(Action<string, bool, string> add, string campaign)
+        {
+            const string held = "retained_startup_stock", statusOnly = "retained_startup_status",
+                ordinary = "unreserved_stock_queue", manual = "unreserved_manual_queue";
+            Dictionary<string, object> Native(string id) => TestDict("heroStringId", id, "campaignId", campaign,
+                "name", id, "isNotable", true, "isAlive", true, "narrativeVersion", 0,
+                "traits", TestDict("valor", 0, "generosity", 0, "honor", 0, "mercy", 0, "calculating", 0));
+            using var connection = ReignDatabase.OpenCampaignConnection(campaign);
+            Dictionary<string, object> Profile(string hero) =>
+                RelationshipsStore.SelectNotableMbtiProfiles4(connection, TestDict("id", hero)).Single();
+            string CommandId(string hero) => ExpectedNotableStartupCommandId(hero);
+            Dictionary<string, object> Command(string id) =>
+                RelationshipsStore.SelectCharacterEditorNativeCommands(connection, TestDict("id", id)).Single();
+            foreach (string hero in new[] { held, statusOnly, ordinary })
+            {
+                EnsureNotableMbtiProfile(connection, campaign, 4d, Native(hero), false, queueNativeTraits: false);
+                RelationshipsStore.InsertOrIgnoreCharacterEditorNativeCommands(connection,
+                    TestDict("id", CommandId(hero), "revision", "notable_mbti_v" + NotableMbtiTemplateVersion,
+                        "hero", hero, "changes", "{}", "inverse", "{}", "ts", 0L));
+            }
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO character_editor_native_commands
+(command_id,revision_id,hero_id,status,changes_json,inverse_json,dangerous,confirmation,created_ts)
+VALUES($id,$id,$id,'pending','{}','{}',0,'',0);", TestDict("id", manual));
+            // Reproduce mixed legacy state that a restored save can carry. Startup
+            // and the stock queue must not independently act on the same notable.
+            ReignDatabase.ExecuteSql(connection,
+                "UPDATE notable_mbti_profiles SET startup_native_session_id=$session WHERE hero_id=$hero;",
+                TestDict("hero", held, "session", Json.Serialize(TestDict("timelineId", "notable_startup_fixture",
+                    "restoreGeneration", "retained_generation", "preparationId", Guid.NewGuid().ToString("N"),
+                    "sessionId", Guid.NewGuid().ToString("N")))));
+            ReignDatabase.ExecuteSql(connection,
+                "UPDATE notable_mbti_profiles SET native_sync_status=$status WHERE hero_id=$hero;",
+                TestDict("hero", statusOnly, "status", StockNativeStartupPending));
+            string ProfileBytes(string hero) => CanonicalJson(Profile(hero));
+            string heldProfile = ProfileBytes(held), statusProfile = ProfileBytes(statusOnly);
+            string Id(Dictionary<string, object> row) => ReadString(row, "command_id", "");
+            bool ReportVisible(string id) =>
+                CharactersStore.ReadLegacyNativeEditorCommandForReport(connection, TestDict("id", id)) != null;
+            var first = CharactersStore.ClaimCharacterEditorNativeCommands(connection,
+                TestDict("ts", 1000L, "stale", 700L, "claim", "{}"));
+            bool correctClaims = first.Any(row => Id(row) == CommandId(ordinary)) && first.Any(row => Id(row) == manual)
+                && first.All(row => Id(row) != CommandId(held) && Id(row) != CommandId(statusOnly))
+                && ReadString(Command(CommandId(held)), "status", "") == "pending"
+                && ReadString(Command(CommandId(statusOnly)), "status", "") == "pending"
+                && ReportVisible(CommandId(ordinary)) && ReportVisible(manual)
+                && !ReportVisible(CommandId(held)) && !ReportVisible(CommandId(statusOnly));
+
+            ReignDatabase.ExecuteSql(connection, "UPDATE character_editor_native_commands SET status='claimed',claimed_ts=1 WHERE command_id=$id;",
+                TestDict("id", CommandId(held)));
+            string stale = CanonicalJson(Command(CommandId(held)));
+            var retry = CharactersStore.ClaimCharacterEditorNativeCommands(connection,
+                TestDict("ts", 1100L, "stale", 800L, "claim", "{}"));
+            bool heldStaleClaim = retry.All(row => Id(row) != CommandId(held))
+                && CanonicalJson(Command(CommandId(held))) == stale && !ReportVisible(CommandId(held));
+
+            foreach (string id in new[] { CommandId(held), CommandId(ordinary), manual })
+                ReignDatabase.ExecuteSql(connection, "UPDATE character_editor_native_commands SET status='reconciling' WHERE command_id=$id;",
+                    TestDict("id", id));
+            string reconciling = CanonicalJson(Command(CommandId(held)));
+            var replay = CharactersStore.ReadCharacterEditorNativeReconciliations(connection);
+            add("stock_notable_legacy_delivery_holds_startup_reservations",
+                correctClaims && heldStaleClaim && replay.All(row => Id(row) != CommandId(held))
+                && replay.Any(row => Id(row) == CommandId(ordinary)) && replay.Any(row => Id(row) == manual)
+                && !ReportVisible(CommandId(held)) && CanonicalJson(Command(CommandId(held))) == reconciling
+                && ProfileBytes(held) == heldProfile && ProfileBytes(statusOnly) == statusProfile,
+                "Legacy pending and stale claims, reconciliation, and reports preserve a retained startup owner; ordinary stock and manual work stay eligible.");
+
+            // The profile is intentionally incomplete so only the retained-owner
+            // check can stop the real worker before its identity upsert.
+            const string ordinaryTown = "unreserved_town_prewarm";
+            CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(campaign, held, "profile.json"), Native(held));
+            var townHero = Native(held);
+            townHero["name"] = "Unapplied prewarm identity";
+            string profile = CampaignFileService.CharacterFile(campaign, held, "profile.json");
+            string enrichment = CampaignFileService.CharacterFile(campaign, held, "enrichment.json");
+            string index = System.IO.Path.Combine(CampaignFileService.CampaignDirectory(campaign), "characters", "index.json");
+            string HashOrMissing(string path) => System.IO.File.Exists(path) ? PersistenceService.FileSha256(path) : "";
+            string beforeProfile = HashOrMissing(profile), beforeIndex = HashOrMissing(index),
+                beforeEnrichment = HashOrMissing(enrichment);
+            long generation = System.Threading.Volatile.Read(ref PersistenceService.CampaignReplacementGeneration);
+            int calls = 0;
+            Dictionary<string, object> Author(string c, string h, Dictionary<string, object> request)
+            {
+                calls++;
+                var ready = TestDict("ok", true, "status", "ready", "llmUsed", true);
+                CampaignFileService.WriteJsonObject(CampaignFileService.CharacterFile(c, h, "constructed.json"), ready);
+                return ready;
+            }
+            var protectedWork = new CharactersService.TownProfileWork
+            {
+                Campaign = campaign, HeroId = held, Hero = townHero, Generation = generation
+            };
+            bool skipped = CharactersService.VerifyTownNotableStartupPrewarm(protectedWork, Author);
+            bool preserved = skipped && calls == 0 && HashOrMissing(profile) == beforeProfile
+                && HashOrMissing(index) == beforeIndex && HashOrMissing(enrichment) == beforeEnrichment
+                && ProfileBytes(held) == heldProfile && CanonicalJson(Command(CommandId(held))) == reconciling;
+            var controlWork = new CharactersService.TownProfileWork
+            {
+                Campaign = campaign, HeroId = ordinaryTown, Hero = Native(ordinaryTown), Generation = generation
+            };
+            bool constructed = CharactersService.VerifyTownNotableStartupPrewarm(controlWork, Author);
+            add("stock_notable_town_prewarm_holds_before_profile_upsert",
+                preserved && constructed && calls == 1
+                && System.IO.File.Exists(CampaignFileService.CharacterFile(campaign, ordinaryTown, "enrichment.json")),
+                "Real town prewarm leaves the held row, profile, unrelated index and enrichment untouched, while ordinary unreserved work reaches its author.");
         }
 
         private static void VerifyStockNotableManualConstruction(Action<string, bool, string> add, string campaign)

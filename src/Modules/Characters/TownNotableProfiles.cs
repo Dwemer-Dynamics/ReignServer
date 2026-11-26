@@ -202,7 +202,7 @@ namespace ReignBetaServer
                     if (TownNotableProfileComplete(work.Campaign, work.HeroId, hero)) return true;
                     lock (NarrativeStateLock)
                     {
-                        if (CharacterHasEditorCorrections(work.Campaign, work.HeroId)) return true;
+                        if (!TownProfilePublicationAllowed(work.Campaign, work.HeroId, ReadBool(hero, "isNotable", false))) return true;
                         CharactersService.UpsertCharacterProfile(work.Campaign, hero);
                     }
                     bool ok = RunSpeculativeTownProfile(work.Campaign, work.HeroId, () => construct(work.Campaign, work.HeroId, hero),
@@ -210,7 +210,7 @@ namespace ReignBetaServer
                     if (ok)
                         lock (NarrativeStateLock)
                         {
-                            if (CharacterHasEditorCorrections(work.Campaign, work.HeroId)) return true;
+                            if (!TownProfilePublicationAllowed(work.Campaign, work.HeroId)) return true;
                             var enrichment = CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(work.Campaign, work.HeroId, "enrichment.json"));
                             enrichment["version"] = 2; enrichment["status"] = "completed_on_town_entry";
                             enrichment["source"] = TownNotableProfileSource; enrichment["campaignId"] = work.Campaign;
@@ -239,9 +239,20 @@ namespace ReignBetaServer
                 : ReadBool(status, "llmUsed", false));
         }
 
-        internal static bool TownProfilePublicationAllowed(string campaign, string hero)
+        internal static bool TownProfilePublicationAllowed(string campaign, string hero, bool requestsNotable = false)
             => !CharacterHasEditorCorrections(campaign, hero)
-                && ReadBool(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json")), "isAlive", true);
+                && ReadBool(CampaignFileService.ReadJsonObject(CampaignFileService.CharacterFile(campaign, hero, "profile.json")), "isAlive", true)
+                && !RelationshipsService.RetainedNotableDeliveryMustHold(campaign, hero, requestsNotable);
+
+#if !REIGN_EXCLUDE_VERIFICATION
+        internal static bool VerifyTownNotableStartupPrewarm(TownProfileWork work,
+            Func<string, string, Dictionary<string, object>, Dictionary<string, object>> construct)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation || !CampaignFileService.IsInternalCampaignId(work.Campaign))
+                throw new InvalidOperationException("The town startup prewarm fixture requires a disposable validation campaign.");
+            return RunTownProfileWorkCore(work, construct, new NativeProviderTestGuard(CampaignFileService.CampaignDirectory(work.Campaign)));
+        }
+#endif
 
         private static bool RunSpeculativeTownProfile(string campaign, string hero, Func<Dictionary<string, object>> construct, Func<bool> complete = null)
         {

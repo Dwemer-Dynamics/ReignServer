@@ -31,7 +31,7 @@ namespace ReignBetaServer
             "TaleWorlds.CampaignSystem.ViewModelCollection"
         };
         private static readonly HashSet<string> LiveTestModes = new HashSet<string>(
-            new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions", "npc_lives", "personal_gossip" },
+            new[] { "individual_chat", "party_chat", "social_event", "wilderness_event", "social_balance", "passive_world", "correspondence", "court_event", "spymaster", "ambassador_official", "kingdom_event", "campaign_command", "government", "party_agency", "structured_actions", "npc_lives", "personal_gossip", NotableStartupObservationMode },
             StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> LiveTestOperations = new HashSet<string>(
             new[]
@@ -59,7 +59,7 @@ namespace ReignBetaServer
                 "social_acknowledge_diplomacy_announcement",
                 "social_set_underlying_affinity",
                 "social_queue_rebellion_roll", "social_resolve_rebellion", "social_clear_overrides",
-                "world_economy_test", "world_snapshot", "world_time_control", "world_advance", "wait_for_correspondence", "world_delete_checkpoint",
+                "world_economy_test", "world_snapshot", NotableStartupObservationMode, "world_time_control", "world_advance", "wait_for_correspondence", "world_delete_checkpoint",
                 "world_acknowledge_diplomacy_announcement",
                 "world_acknowledge_native_diplomacy_notices",
                 "world_drain_political_pressure"
@@ -292,9 +292,13 @@ namespace ReignBetaServer
             Dictionary<string, object> runtime = LoadLiveTestRuntime(campaignId);
             if (!IsFreshLiveTestRuntime(runtime)) return LiveTestError("No fresh loaded-game heartbeat exists for this campaign.");
             if (ReadBool(ReadDictionary(runtime, "saveSync"), "alignmentPending", false)) return LiveTestError("Save Sync alignment is still pending.");
+            string mode = NormalizeLiveTestMode(ReadString(payload, "mode", "individual_chat"));
+            bool notableObservation = mode == NotableStartupObservationMode;
+            if (notableObservation && !NotableStartupObservationPlanAllowed(payload, true))
+                return LiveTestError("Notable startup observation requires a single owned, read-only command.");
             Dictionary<string, object> characterInitialization =
                 ReadDictionary(runtime, "characterInitialization");
-            if (!ReadBool(characterInitialization, "notableBackgroundReady", false)
+            if (!notableObservation && !ReadBool(characterInitialization, "notableBackgroundReady", false)
                 && !IsInitializationControlRun(payload))
                 return LiveTestError(
                     "Campaign day-one character initialization is still pending; "
@@ -305,8 +309,9 @@ namespace ReignBetaServer
             if (!string.IsNullOrWhiteSpace(requestedInstance) && !string.Equals(requestedInstance, liveInstance, StringComparison.OrdinalIgnoreCase))
                 return LiveTestError("The requested game instance is stale.");
             string requestedRunId = ReadString(payload, "runId", "");
-            string mode = NormalizeLiveTestMode(ReadString(payload, "mode", "individual_chat"));
             if (!LiveTestModes.Contains(mode)) return LiveTestError("Unsupported live-test mode.");
+            if (!notableObservation && !NotableStartupObservationPlanAllowed(payload, false))
+                return LiveTestError("Notable startup observation requires a single owned, read-only command.");
             if (mode.Equals("social_balance", StringComparison.OrdinalIgnoreCase)
                 && !ReputationService.ValidateSocialBalanceLiveEnrollment(payload, campaignId, out string enrollmentError))
                 return LiveTestError(enrollmentError);
@@ -332,6 +337,10 @@ namespace ReignBetaServer
                                 StringComparison.OrdinalIgnoreCase)
                             && ReadString(existing, "label", "").Equals(
                                 requestedLabel, StringComparison.Ordinal);
+                        if (notableObservation && (CanonicalJson(ReadDictionary(existing, "enrollment"))
+                                != CanonicalJson(ReadDictionary(payload, "enrollment"))
+                            || ReadCurrentNotableStartupBasis(existing, out _) == null))
+                            return LiveTestError("The original notable startup observation no longer owns this rollback scope.");
                         if (!sameIdentity)
                             return LiveTestError(
                                 "The requested runId already exists with a different "
@@ -343,15 +352,23 @@ namespace ReignBetaServer
                     }
                 }
                 Dictionary<string, object> active = FindActiveLiveTestRun(campaignId);
-                if (active != null && !ExpirePaidCourtLease(active, DateTimeOffset.UtcNow))
-                    return new Dictionary<string, object>
+                if (active != null && !ExpirePaidCourtLease(active, DateTimeOffset.UtcNow)
+                    && !CloseUnavailableNotableStartupObservation(active, out _)) return new Dictionary<string, object>
                 {
                     ["ok"] = false, ["error"] = "A live interaction run is already active for this campaign.", ["activeRunId"] = ReadString(active, "runId", "")
                 };
 
-                string effects = NormalizeLiveTestEffects(ReadString(payload, "effects", "guarded"));
+                string effects = notableObservation ? "observed" : NormalizeLiveTestEffects(ReadString(payload, "effects", "guarded"));
                 var enrollment = ReadDictionary(payload, "enrollment");
                 Dictionary<string, object> executionStart = null;
+                NotableStartupObservationBasis notableBasis = null;
+                if (notableObservation)
+                {
+                    notableBasis = ReadNotableStartupObservationBasis(campaignId, liveInstance, enrollment, out bool timelineBusy);
+                    if (notableBasis == null)
+                        return LiveTestError(timelineBusy ? "The timeline is busy. Retry the notable startup observation."
+                            : "The exact registered rollback or held notable reservation is unavailable.");
+                }
                 if (IsLiveTestExecutionEnrollment(mode, campaignId, enrollment))
                 {
                     // Heartbeat writers share this lock. Observe the same heartbeat that
@@ -361,7 +378,8 @@ namespace ReignBetaServer
                         || ReadString(currentRuntime, "campaignId", "") != campaignId
                         || ReadString(currentRuntime, "gameInstanceId", "") != liveInstance
                         || ReadBool(ReadDictionary(currentRuntime, "saveSync"), "alignmentPending", false)
-                        || (!ReadBool(ReadDictionary(currentRuntime, "characterInitialization"), "notableBackgroundReady", false)
+                        || (!notableObservation
+                            && !ReadBool(ReadDictionary(currentRuntime, "characterInitialization"), "notableBackgroundReady", false)
                             && !IsInitializationControlRun(payload)))
                         return LiveTestError("The loaded-game heartbeat changed while starting this run. Refresh the loaded campaign and retry.");
 
@@ -415,6 +433,18 @@ namespace ReignBetaServer
                         || requestedInstance != liveInstance || !ReadBool(run, "autoCompleteWhenIdle", false))
                         return LiveTestError("Paid Court acceptance requires one bound command in its own active run.");
                 }
+                if (notableObservation)
+                {
+                    if (executionStart == null || normalized.Count != 1)
+                        return LiveTestError("The notable startup command could not bind the active game.");
+                    run["notableStartupBasisSha256"] = notableBasis.Digest;
+                    var issuedScope = CloneDictionary(enrollment);
+                    issuedScope["loadSessionSha256"] = notableBasis.LoadSessionSha256;
+                    issuedScope["restoreGenerationSha256"] = notableBasis.RestoreGenerationSha256;
+                    normalized[0]["notableStartupScope"] = issuedScope;
+                    normalized[0]["effects"] = "observed";
+                    normalized[0]["timeoutSeconds"] = 30;
+                }
                 if (ReadDictionaryList(payload, "steps").Any(step =>
                         string.Equals(ReadString(step, "operation", ReadString(step, "op", "")).Trim(),
                             "world_economy_test", StringComparison.OrdinalIgnoreCase))
@@ -464,6 +494,9 @@ namespace ReignBetaServer
                 Dictionary<string, object> run = LoadLiveTestRun(campaignId, runId);
                 if (run.Count == 0) return LiveTestError("Live interaction run was not found.");
                 if (LiveTestTerminalRunStates.Contains(ReadString(run, "status", ""))) return LiveTestError("The run is already terminal.");
+                if (ReadString(run, "mode", "") == NotableStartupObservationMode
+                    || IsNotableStartupObservationOperation(payload))
+                    return LiveTestError("Notable startup observation cannot be enqueued.");
                 Dictionary<string, object> command = NormalizeLiveTestCommand(run, payload);
                 if (command == null) return LiveTestError("Unsupported or invalid live-test command.");
                 List<Dictionary<string, object>> commands = ReadDictionaryList(run, "commands");
@@ -596,7 +629,8 @@ namespace ReignBetaServer
             if (includeEvidence)
             {
                 response["auditEvidence"] = CollectLiveTestAuditEvidence(run);
-                if (IsLiveTestExecutionEvidenceRun(run) && ReadString(run, "campaignId", "") == campaignId
+                if (ReadString(run, "mode", "") == "party_agency" && IsLiveTestExecutionEvidenceRun(run)
+                    && ReadString(run, "campaignId", "") == campaignId
                     && (string.IsNullOrWhiteSpace(runId) || ReadString(run, "runId", "") == runId))
                     response["partyAgencyCompletedSendEvidence"] = ReadCompletedPartyAgencySendEvidence(run);
             }
@@ -616,6 +650,8 @@ namespace ReignBetaServer
                     return new Dictionary<string, object> { ["ok"] = true, ["found"] = false, ["armed"] = true };
                 if (!string.Equals(ReadString(run, "gameInstanceId", ""), instanceId, StringComparison.OrdinalIgnoreCase))
                     return LiveTestError("The polling game instance does not own this run.");
+                if (CloseUnavailableNotableStartupObservation(run, out bool timelineBusy) || timelineBusy)
+                    return new Dictionary<string, object> { ["ok"] = true, ["found"] = false, ["armed"] = true };
 
                 DateTimeOffset now = DateTimeOffset.UtcNow;
                 if (ExpirePaidCourtLease(run, now))
@@ -674,10 +710,10 @@ namespace ReignBetaServer
 
         private static bool IsLiveTestExecutionEnrollment(string mode, string campaign,
             Dictionary<string, object> enrollment) =>
-            mode == "party_agency" && !string.IsNullOrWhiteSpace(campaign)
-            && ReadString(enrollment, "campaignId", "") == campaign
+            !string.IsNullOrWhiteSpace(campaign) && ReadString(enrollment, "campaignId", "") == campaign
             && !string.IsNullOrWhiteSpace(ReadString(enrollment, "campaignTestRunId", ""))
-            && !string.IsNullOrWhiteSpace(ReadString(enrollment, "certificationRunId", ""));
+            && (mode == "party_agency" && !string.IsNullOrWhiteSpace(ReadString(enrollment, "certificationRunId", ""))
+                || mode == NotableStartupObservationMode && ReadString(enrollment, "source", "") == NotableStartupObservationSource);
 
         private static bool IsLiveTestExecutionEvidenceRun(Dictionary<string, object> run) =>
             IsLiveTestExecutionEnrollment(ReadString(run, "mode", ""), ReadString(run, "campaignId", ""),
@@ -1304,6 +1340,13 @@ namespace ReignBetaServer
                 bool paidCourt = IsPaidCourtFixtureCommand(command);
                 if (paidCourt && !AdmitPaidCourtTransport(run, command, payload, result))
                     return LiveTestError("The paid Court command no longer has an active authority for this operation.");
+                bool notableObservation = ReadString(run, "mode", "") == NotableStartupObservationMode;
+                if (notableObservation && !result && (ReadString(run, "status", "") != "running"
+                    || ExactNotableObservationText(payload, "status") != "accepted"
+                    || ReadString(command, "status", "") != "leased"
+                    || ParseLiveTestUtc(ReadString(command, "leaseExpiresUtc", "")) <= DateTimeOffset.UtcNow
+                    || command.ContainsKey("notableStartupAcceptedExecution")))
+                    return LiveTestError("The notable startup observation may accept only its first exact execution lease.");
                 bool observesExecution = IsLiveTestExecutionEvidenceRun(run);
                 Dictionary<string, object> observation = null;
                 if (observesExecution)
@@ -1334,16 +1377,32 @@ namespace ReignBetaServer
                     return new Dictionary<string, object> { ["ok"] = true, ["idempotent"] = true, ["command"] = command };
 
                 string status = ReadString(payload, "status", result ? "completed" : "accepted").ToLowerInvariant();
+                if (notableObservation && result && !LiveTestTerminalCommandStates.Contains(status))
+                    return LiveTestError("A notable startup observation result must be terminal.");
                 if (!new[] { "accepted", "running", "needs_input", "completed", "failed", "cancelled", "interrupted" }.Contains(status))
                     status = result ? "failed" : "accepted";
                 string reportedError = ReadString(payload, "error", ReadString(payload, "message", "Command failed."));
                 bool infrastructureFailure = result && status == "failed" && IsFatalLiveTestInfrastructureFailure(reportedError);
-                bool fatalInfrastructureFailure = !paidCourt && infrastructureFailure;
+                bool fatalInfrastructureFailure = !paidCourt && !notableObservation && infrastructureFailure;
                 bool paidDispatchAdmitted = paidCourt && PaidCourtNativeDispatchAdmitted(command);
                 if (fatalInfrastructureFailure) status = "needs_input";
                 if (observesExecution && !result && (status is "accepted" or "running")
                     && ReadString(command, "operation", "") == "send")
                     command["partyAgencyAcceptedSendExecution"] = PartyAgencySendAck(ReadDictionary(observation, "executionObservation"));
+                if (notableObservation)
+                {
+                    if (!result)
+                        command.Add("notableStartupAcceptedExecution", PartyAgencySendAck(ReadDictionary(observation, "executionObservation")));
+                    if (result && status == "completed"
+                        && !EvaluateNotableStartupObservation(run, command, observation,
+                            ReadDictionary(payload, "result"), out bool timelineBusy))
+                    {
+                        if (timelineBusy)
+                            return LiveTestError("The timeline is busy. The accepted notable startup observation remains eligible for replay.");
+                        status = "failed";
+                        reportedError = "The notable startup observation did not match the current rollback and original accepted execution.";
+                    }
+                }
                 command["status"] = status;
                 command["message"] = fatalInfrastructureFailure
                     ? "Paused because the configured LLM provider cannot currently accept requests. Resume after correcting provider access or balance."
@@ -1354,10 +1413,14 @@ namespace ReignBetaServer
                     if (observesExecution)
                         command["executionEvidence"] = observation;
 
-                    command["result"] = fatalInfrastructureFailure
-                        ? new Dictionary<string, object> { ["fatalInfrastructureFailure"] = true, ["error"] = DialogueService.LimitText(reportedError, 2000) }
-                        : ReadDictionary(payload, "result") ?? new Dictionary<string, object>();
-                    command["error"] = fatalInfrastructureFailure ? DialogueService.LimitText(reportedError, 2000) : ReadString(payload, "error", "");
+                    command["result"] = notableObservation
+                        ? NotableStartupObservationResult(run, command)
+                        : fatalInfrastructureFailure
+                            ? new Dictionary<string, object> { ["fatalInfrastructureFailure"] = true, ["error"] = DialogueService.LimitText(reportedError, 2000) }
+                            : ReadDictionary(payload, "result") ?? new Dictionary<string, object>();
+                    command["error"] = fatalInfrastructureFailure ? DialogueService.LimitText(reportedError, 2000)
+                        : notableObservation && status == "failed"
+                            ? reportedError : ReadString(payload, "error", "");
                     command["correlationIds"] = ReadStringList(payload, "correlationIds");
                     if (paidCourt && status == "failed")
                     {

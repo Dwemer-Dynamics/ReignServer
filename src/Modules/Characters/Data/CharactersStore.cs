@@ -189,12 +189,28 @@ WHERE hero_a_id=$id OR hero_b_id=$id ORDER BY last_day DESC,updated_ts DESC LIMI
  AND COALESCE((to_jsonb(c)->'manual_origin_json') = to_jsonb(''::text), TRUE)
  AND COALESCE((to_jsonb(c)->'automatic_origin_json') = to_jsonb(''::text), TRUE)";
 
+        private static string LegacyNativeEditorDeliveryFilter(ReignDbConnection connection)
+        {
+            if (!WorldSimulationService.TableExists(connection, "notable_mbti_profiles"))
+                return LegacyNativeEditorOriginFilter;
+
+            string version = RelationshipsService.NotableMbtiTemplateVersion.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return LegacyNativeEditorOriginFilter + @"
+ AND NOT (
+     c.confirmation='automatic_notable_mbti_sync'
+     AND c.command_id=('notable_mbti_native_' || c.hero_id || '_v" + version + @"')
+     AND EXISTS (
+         SELECT 1 FROM notable_mbti_profiles p WHERE p.hero_id=c.hero_id
+         AND (COALESCE(to_jsonb(p)->'startup_native_session_id' <> to_jsonb(''::text), FALSE)
+              OR LOWER(COALESCE(to_jsonb(p)->>'native_sync_status',''))='startup_direct_pending')))";
+        }
+
         internal static List<Dictionary<string, object>> ClaimCharacterEditorNativeCommands(ReignDbConnection connection, Dictionary<string, object> parameters)
         {
             return ReignDatabase.QuerySql(connection, @"WITH next AS (
 SELECT c.command_id FROM character_editor_native_commands c
 WHERE (c.status='pending' OR (c.status='claimed' AND c.claimed_ts<$stale))"
-                + LegacyNativeEditorOriginFilter + @"
+                + LegacyNativeEditorDeliveryFilter(connection) + @"
 AND NOT EXISTS (SELECT 1 FROM character_editor_native_commands earlier
     WHERE earlier.hero_id=c.hero_id AND earlier.status IN ('pending','claimed','reconciling')
     AND (earlier.status='reconciling' OR (earlier.created_ts,earlier.command_id)<(c.created_ts,c.command_id)))
@@ -248,12 +264,12 @@ AND result_json=$basis AND automatic_origin_json=$origin RETURNING command_id;",
 
         internal static List<Dictionary<string, object>> ReadCharacterEditorNativeReconciliations(ReignDbConnection connection) =>
             ReignDatabase.QuerySql(connection, @"SELECT c.* FROM character_editor_native_commands c
- WHERE c.status='reconciling'" + LegacyNativeEditorOriginFilter + " ORDER BY c.created_ts,c.command_id;");
+ WHERE c.status='reconciling'" + LegacyNativeEditorDeliveryFilter(connection) + " ORDER BY c.created_ts,c.command_id;");
 
         internal static Dictionary<string, object> ReadLegacyNativeEditorCommandForReport(ReignDbConnection connection,
             Dictionary<string, object> parameters) =>
             ReignDatabase.QuerySql(connection, @"SELECT c.* FROM character_editor_native_commands c
- WHERE c.command_id=$id" + LegacyNativeEditorOriginFilter + " LIMIT 1;", parameters).SingleOrDefault();
+ WHERE c.command_id=$id" + LegacyNativeEditorDeliveryFilter(connection) + " LIMIT 1;", parameters).SingleOrDefault();
 
         internal static List<Dictionary<string, object>> SelectCharacterEditorNativeCommands5(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
