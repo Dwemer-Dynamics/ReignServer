@@ -310,6 +310,33 @@ namespace ReignBetaServer
         }
 
 #if !REIGN_EXCLUDE_VERIFICATION
+        // The live fixture stages one genuinely new native notable through the
+        // real reservation code. Its caller holds the enrolled campaign and timeline.
+        internal static Dictionary<string, object> StageNotableStartupFixture(string campaign, string hero,
+            double worldDay, string timeline, string generation, string preparation)
+        {
+            var owner = new NotableStartupRequest(new NotableStartupScope(timeline, generation), preparation);
+            if (!IsNotableStartupNonce(preparation) || !double.IsFinite(worldDay)
+                || !Reign.Core.Contracts.Actions.TerminalActionReportProtocol.IsTrustedIdentifier(hero)) return null;
+            using var connection = OpenOwnedNotableStartupCampaign(campaign);
+            if (connection == null || !PersistenceService.IsNativeEditorOwnershipSchemaReady(connection)) return null;
+            using var suppressRetries = new ReignDatabase.SqlStatementRetrySuppression(connection);
+            using var transaction = connection.BeginTransaction();
+            if (!MatchesNotableStartupScope(connection, owner)
+                || RelationshipsStore.LockAutomaticNotableProfile(connection, TestDict("hero", hero), transaction) != null
+                || HasOwnedOrHeldNotableDelivery(connection, transaction, campaign, hero, null)) return null;
+
+            var native = TestDict("heroStringId", hero, "name", hero, "isNotable", true);
+            var profile = EnsureNotableMbtiProfile(connection, campaign, worldDay, native,
+                false, true, transaction, false, out bool inserted, out _);
+            var reservation = ReserveOrDeferNotableStartup(connection, transaction, campaign, hero, owner, inserted);
+            var traits = ReadDictionary(profile, "nativeTraits");
+            if (reservation == null || reservation.Deferred || !IsNotableStartupNonce(reservation.Session)
+                || !CharactersService.HasExactAutomaticNotableTraits(traits)) return null;
+            transaction.Commit();
+            return TestDict("heroId", hero, "nativeTraits", traits);
+        }
+
         [ThreadStatic] private static Action<string> TypedNotableMaterializationStartingForTests;
 
         private static void VerifyOwnedNotableStartupCoordination(Action<string, bool, string> add)
@@ -364,6 +391,26 @@ namespace ReignBetaServer
                         RelationshipsStore.SelectNotableMbtiProfiles4(connection, TestDict("id", hero)).Single();
                     Dictionary<string, object> Command(string hero) =>
                         RelationshipsStore.SelectCharacterEditorNativeCommands(connection, TestDict("id", ExpectedNotableStartupCommandId(hero))).SingleOrDefault();
+                    const string fixtureHero = "new_native_fixture_notable";
+                    string unchangedProfile = CanonicalJson(Profile(priorUnlinked));
+                    using (WorldSimulationService.EnterWorldHistoryTimelineScope(campaign))
+                    {
+                        bool wrongScope = StageNotableStartupFixture(campaign, fixtureHero, 1d, scope.Timeline,
+                            "foreign_generation", owner.Preparation) == null;
+                        var staged = StageNotableStartupFixture(campaign, fixtureHero, 1d, scope.Timeline,
+                            scope.Generation, owner.Preparation);
+                        var reserved = Profile(fixtureHero);
+                        string retained = CanonicalJson(reserved);
+                        bool noReplay = StageNotableStartupFixture(campaign, fixtureHero, 1d, scope.Timeline,
+                            scope.Generation, owner.Preparation) == null;
+                        add("live_fixture_stages_one_new_held_reservation",
+                            wrongScope && ReadString(staged, "heroId", "") == fixtureHero
+                            && CharactersService.HasExactAutomaticNotableTraits(ReadDictionary(staged, "nativeTraits"))
+                            && ReadOwnedNotableStartupSession(reserved, owner).Length > 0 && Command(fixtureHero) == null
+                            && noReplay && CanonicalJson(Profile(fixtureHero)) == retained
+                            && CanonicalJson(Profile(priorUnlinked)) == unchangedProfile,
+                            "The fixture stages the production startup token for one new hero, with no fallback assignment or existing profile change.");
+                    }
                     bool wrongTimelineRefused;
                     using (WorldSimulationService.EnterWorldHistoryTimelineScope(campaign + "_wrong"))
                         wrongTimelineRefused = !CharactersService.QueueTypedAutomaticNotableTraits(connection, campaign, queued, 1d, expected, observed)
