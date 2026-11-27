@@ -98,12 +98,8 @@ namespace ReignBetaServer
                 return UnprovenVerifiedFork();
 
             var source = WorldSimulationStore.SelectWorldHistoryTimelines(connection, TestDict("id", request.Timeline)).SingleOrDefault();
-            var anchor = WorldSimulationStore.SelectWorldHistoryEvents4(connection,
-                TestDict("id", request.Head, "timeline", request.Timeline)).SingleOrDefault();
             long sourceHead = ReadLong(source, "head_sequence", -1);
-            if (VerifiedForkString(source, "campaign_id") != request.Campaign || sourceHead < request.Sequence
-                || VerifiedForkString(anchor, "campaign_id") != request.Campaign
-                || ReadLong(anchor, "sequence", -1) != request.Sequence)
+            if (VerifiedForkString(source, "campaign_id") != request.Campaign || sourceHead < request.Sequence)
                 return UnprovenVerifiedFork();
 
             string scopeTimeline = VerifiedForkString(context, "timeline_id");
@@ -112,13 +108,22 @@ namespace ReignBetaServer
                 return UnprovenVerifiedFork();
             double completeFrom = ReadDouble(source, "history_complete_from_day", savedDay);
             string child;
+            // An unchanged registered head can be inherited immediately after
+            // a fork. Reopening it leaves the already verified scope untouched.
+            if (scopeTimeline == request.Timeline && sourceHead == request.Sequence)
+                return VerifiedForkString(source, "head_event_id") == request.Head
+                    ? VerifiedForkOpenResponse(request, request.Timeline, VerifiedForkString(source, "parent_timeline_id"),
+                        sourceHead, completeFrom, null) : UnprovenVerifiedFork();
+
+            // Only a directly retained event can authorize a changed timeline.
+            var anchor = WorldSimulationStore.SelectWorldHistoryEvents4(connection,
+                TestDict("id", request.Head, "timeline", request.Timeline)).SingleOrDefault();
+            if (VerifiedForkString(anchor, "campaign_id") != request.Campaign
+                || ReadLong(anchor, "sequence", -1) != request.Sequence)
+                return UnprovenVerifiedFork();
+
             if (scopeTimeline == request.Timeline)
             {
-                if (sourceHead == request.Sequence)
-                    return VerifiedForkString(source, "head_event_id") == request.Head
-                        ? VerifiedForkOpenResponse(request, request.Timeline, VerifiedForkString(source, "parent_timeline_id"),
-                            sourceHead, completeFrom, null) : UnprovenVerifiedFork();
-
                 child = "verified_fork_" + Guid.NewGuid().ToString("N");
                 string now = DateTime.UtcNow.ToString("o");
                 using var transaction = connection.BeginTransaction();

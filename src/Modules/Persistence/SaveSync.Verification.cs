@@ -3166,6 +3166,36 @@ WHERE client_id='bannerlord' AND timeline_id=$timeline;", TestDict("timeline", t
                     && State() == (child, 2),
                     "An identical request after a lost response returns the existing child and byte-equivalent proof.");
 
+                // Save immediately in the child, before it retains any local event.
+                // Its authenticated head is still inherited from the parent.
+                const string childPointId = "d18_fork_child_checkpoint";
+                const string childSession = "d18_fork_child_session";
+                string childSaveName = "D18 fixture child " + token;
+                var childPoint = SaveSyncTestPointPayload(campaign, childPointId, savedDay, childSaveName);
+                childPoint["timelineId"] = child;
+                childPoint["worldHistorySequence"] = 1L;
+                childPoint["worldHistoryHeadEventId"] = head;
+                if (!ReadBool(SaveSyncRegisterApi(childPoint), "ok", false)
+                    || !ReadBool(SaveSyncFinalizeApi(TestDict("campaignId", campaign, "savePointId", childPointId,
+                        "nativeSaveName", childSaveName, "successful", true)), "ok", false))
+                    throw new InvalidOperationException("The verified fork fixture could not finalize the immediate child save.");
+
+                childPoint["loadSessionId"] = childSession;
+                childPoint["skipCleanLoadComparison"] = true;
+                var loadedChild = SaveSyncLoadApi(childPoint, false);
+                string childGeneration = ReadString(loadedChild, "restoreGeneration", "");
+                var unchangedChild = Open(TestDict("campaignId", campaign, "timelineId", child,
+                    "savedSequence", 1L, "savedHeadEventId", head, "verifiedForkLoad",
+                    TestDict("schemaVersion", 1, "savePointId", childPointId,
+                        "loadSessionId", childSession, "restoreGeneration", childGeneration)));
+                var replacedSession = Open(Request());
+                add("verified_fork_reopens_exact_unchanged_inherited_child_head",
+                    ReadString(loadedChild, "result", "") == "no_op" && childGeneration.Length > 0
+                    && ReadBool(unchangedChild, "ok", false) && !ReadBool(unchangedChild, "branched", true)
+                    && ReadString(unchangedChild, "timelineId", "") == child && !unchangedChild.ContainsKey("verifiedFork")
+                    && !ReadBool(replacedSession, "ok", true) && State() == (child, 2),
+                    "The unchanged child's registered inherited head reopens without another branch, and an older session cannot reuse it.");
+
                 const string sibling = "d18_unrelated_active_timeline";
                 var unrelated = Open(TestDict("campaignId", campaign, "timelineId", sibling));
                 var inactive = Open(Request());
