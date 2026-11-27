@@ -37,6 +37,13 @@ namespace ReignBetaServer
             Check("opening_without_player_exchange_rejected", () => Require(DialogueService.ChatViewCompleteExchange(turns.Skip(1).ToList(), "player").Count == 0, "An NPC opening was counted as a player exchange."));
             Check("missing_snapshot_rejected", () => { var copy = turns.Select(CloneDictionary).ToList(); copy[0]["frame_json"] = "{}"; Require(DialogueService.ChatViewCompleteExchange(copy, "player").Count == 0, "Current roster substituted for missing historical presence."); });
             Check("valid_source_locked_instant", () => ValidateChatViewScene(Scene(), window));
+            Check("player_turn_can_anchor_a_completed_exchange", () => {
+                var scene = Scene();
+                scene["selectedTurnId"] = "p4";
+                scene["evidence"] = new[] { TestDict("turnId", "p4", "quote", "I offer her the sealed letter.") };
+                ValidateChatViewScene(scene, window);
+                Require(Reject(() => ValidateChatViewScene(scene, window.Take(1).ToList())), "An unfinished player turn was selected.");
+            });
             Check("absent_character_rejected", () => { var scene = Scene(); scene["characterIds"] = new[] { "ira", "absent" }; Require(Reject(() => ValidateChatViewScene(scene, window)), "Absent actor reached image stage."); });
             Check("duplicate_character_rejected", () => { var scene = Scene(); scene["characterIds"] = new[] { "ira", "ira" }; Require(Reject(() => ValidateChatViewScene(scene, window)), "Identity duplicated."); });
             Check("invented_quote_rejected", () => { var scene = Scene(); scene["evidence"] = new[] { TestDict("turnId", "n4i", "quote", "Ira draws a sword.") }; Require(Reject(() => ValidateChatViewScene(scene, window)), "Invented action quote accepted."); });
@@ -111,10 +118,18 @@ namespace ReignBetaServer
                 var people = ids.Concat(new[] { "player" }).Select(id => TestDict("heroStringId", id, "name", id)).ToList();
                 var payload = TestDict("timelineId", "main", "sceneParticipants", people, "activeHeroIds", ids);
                 var participants = ids.Concat(new[] { "player" }).ToList();
+                const string originalPlayerText = "I place my sealed letter on the table.";
+                DialogueStore.InsertOrIgnoreConversationTurns(c, TestDict("turn", "e5_original", "session", "view_session",
+                    "event", "e5", "ordinal", 99, "exchange", "e5", "role", "player", "speaker_id", "player",
+                    "speaker_name", "Player", "text", originalPlayerText, "channel", "party_chat", "day", 4d, "ts", 100L,
+                    "location", "camp", "participants", Json.Serialize(participants), "status", "source_only",
+                    "payload", Json.Serialize(TestDict("timelineId", "main", "exactTextHash", DialogueService.ConversationExactTextHash(originalPlayerText)))));
                 for (int exchange = 1; exchange <= 6; exchange++)
                 {
                     string e = "e" + exchange;
-                    DialogueService.InsertConversationTurn(c, e + "_p", "view_session", e, exchange * 20, e, "player", "player", "Player", "I offer a letter.", "party_chat", 4, 100, "camp", participants, payload);
+                    var playerPayload = CloneDictionary(payload);
+                    if (exchange == 5) playerPayload["inputSourceId"] = "e5_original";
+                    DialogueService.InsertConversationTurn(c, e + "_p", "view_session", e, exchange * 20, e, "player", "player", "Player", "I offer a letter.", "party_chat", 4, 100, "camp", participants, playerPayload);
                     for (int i = 0; i < (exchange == 6 ? 9 : 10); i++)
                         DialogueService.InsertConversationTurn(c, e + "_n" + i, "view_session", e, exchange * 20 + i + 1, e, "npc", ids[i], ids[i], "They receive the letter and nod.", "party_chat", 4, 100, "camp", participants, payload);
                 }
@@ -146,8 +161,14 @@ namespace ReignBetaServer
                 request["requestId"] = new string('b', 32); request["worldDay"] = 5d;
                 Check("transport_retry_uses_admitted_job", ReadString(ChatViewApi(request, "start"), "jobId", "") == ReadString(job, "jobId", ""));
                 Check("same_timeline_archive_visible", DialogueService.ChatViewJobVisible(c, job, request));
+                var playerJob = CloneDictionary(job);
+                playerJob["scene"] = TestDict("selectedTurnId", "e5_p");
+                Check("player_anchor_archive_binds_original_source",
+                    ReadString(window.Single(t => ReadString(t, "turnId", "") == "e5_p"), "text", "") == originalPlayerText
+                    && DialogueService.ChatViewJobVisible(c, playerJob, request));
                 request["timelineId"] = "unbound_branch";
                 Check("foreign_timeline_archive_hidden", !DialogueService.ChatViewJobVisible(c, job, request));
+                Check("foreign_timeline_player_anchor_hidden", !DialogueService.ChatViewJobVisible(c, playerJob, request));
                 request["timelineId"] = "main";
                 string pendingKey = campaign + "|pending_contract";
                 ChatViewWorkers.TryAdd(pendingKey, new System.Threading.Tasks.TaskCompletionSource<bool>().Task);

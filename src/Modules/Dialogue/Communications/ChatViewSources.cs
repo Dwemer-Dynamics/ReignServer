@@ -89,14 +89,9 @@ namespace ReignBetaServer
                 foreach (var line in complete.Where(t => ReadString(t, "role", "") == "player"))
                 {
                     var projected = turns.First(t => ReadString(t, "turn_id", "") == ReadString(line, "turnId", ""));
-                    var metadata = TryParseJsonObject(ReadString(projected, "payload_json", "{}"));
-                    string originalId = ReadString(metadata, "inputSourceId", "");
-                    if (originalId.Length == 0) continue;
-                    var original = DialogueStore.SelectConversationTurns4(connection, TestDict("id", originalId, "player", player)).SingleOrDefault();
-                    if (original == null || !MemoryTimeVisible(original, access, connection)) throw new InvalidDataException("The original player input is unavailable in this timeline.");
-                    OriginalConversationSourceIntegrity(original);
-                    line["text"] = ReadString(original, "text", "");
-                    line["sourceHash"] = PromptHash(ReadString(original, "text", ""));
+                    string original = ReadChatViewSourceText(connection, projected, player, access);
+                    line["text"] = original;
+                    line["sourceHash"] = PromptHash(original);
                 }
                 rows.InsertRange(0, complete);
                 if (rows.Select(t => ReadString(t, "exchangeId", "")).Distinct().Count() == 4) break;
@@ -106,20 +101,54 @@ namespace ReignBetaServer
             return rows;
         }
 
+        private static string ReadChatViewSourceText(ReignDbConnection connection, Dictionary<string, object> source,
+            string player, KnowledgeAccessContext access)
+        {
+            string text = ReadString(source, "text", "");
+            if (ReadString(source, "role", "") != "player") return text;
+            string originalId = ReadString(TryParseJsonObject(ReadString(source, "payload_json", "{}")), "inputSourceId", "");
+            if (originalId.Length == 0) return text;
+            var original = DialogueStore.SelectConversationTurns4(connection, TestDict("id", originalId, "player", player)).SingleOrDefault();
+            if (original == null || !MemoryTimeVisible(original, access, connection))
+                throw new InvalidDataException("The original player input is unavailable in this timeline.");
+            OriginalConversationSourceIntegrity(original);
+            return ReadString(original, "text", "");
+        }
+
+        internal static Dictionary<string, object> FindChatViewMoment(List<Dictionary<string, object>> window, string selectedId)
+        {
+            if (selectedId.Length == 0) return null;
+            var matches = window.Where(t => ReadString(t, "turnId", "") == selectedId).Take(2).ToList();
+            if (matches.Count != 1) return null;
+            var selected = matches[0];
+            string role = ReadString(selected, "role", "");
+            if (role == "npc") return selected;
+            string exchange = ReadString(selected, "exchangeId", "");
+            return role == "player" && exchange.Length > 0 && window.Any(t => ReadString(t, "exchangeId", "") == exchange
+                && ReadString(t, "role", "") == "npc") ? selected : null;
+        }
+
         internal static bool ChatViewJobVisible(ReignDbConnection connection, Dictionary<string, object> job, Dictionary<string, object> request)
         {
             if (job == null || ReadString(job, "playerId", "") != ReadString(request, "playerId", "")) return false;
             var window = ReadDictionaryList(ReadDictionary(job, "identity"), "window");
             string selectedId = ReadString(ReadDictionary(job, "scene"), "selectedTurnId", "");
             if (selectedId.Length == 0) selectedId = ReadString(window.LastOrDefault(), "turnId", "");
-            var frozen = window.SingleOrDefault(t => ReadString(t, "turnId", "") == selectedId);
-            if (frozen == null || ReadString(frozen, "role", "") != "npc") return false;
+            var frozen = FindChatViewMoment(window, selectedId);
+            if (frozen == null) return false;
             var source = DialogueStore.SelectConversationTurns5(connection, TestDict("id", selectedId)).SingleOrDefault();
-            return source != null && PromptHash(ReadString(source, "text", "")) == ReadString(frozen, "sourceHash", "")
-                && DialogueService.TextListFromJson(ReadString(source, "participants_json", "[]")).Contains(ReadString(request, "playerId", ""), StringComparer.OrdinalIgnoreCase)
-                && MemoryTimeVisible(source, new DialogueService.KnowledgeAccessContext { NpcId = ReadString(request, "playerId", ""),
-                    TimelineId = ReadString(request, "timelineId", ""), WorldDay = ReadDouble(request, "worldDay", double.MaxValue),
-                    AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue }, connection);
+            string player = ReadString(request, "playerId", "");
+            var access = new KnowledgeAccessContext { NpcId = player, TimelineId = ReadString(request, "timelineId", ""),
+                WorldDay = ReadDouble(request, "worldDay", double.MaxValue), AsOfAcceptedSequence = long.MaxValue, AsOfTimestamp = long.MaxValue };
+            string role = ReadString(frozen, "role", "");
+            if (source == null || ReadString(source, "session_id", "") != ReadString(job, "sessionId", "")
+                || ReadString(source, "exchange_id", "") != ReadString(frozen, "exchangeId", "")
+                || ReadString(source, "role", "") != role || (role == "player" && ReadString(source, "speaker_id", "") != player)
+                || !TextListFromJson(ReadString(source, "participants_json", "[]")).Contains(player, StringComparer.OrdinalIgnoreCase)
+                || !MemoryTimeVisible(source, access, connection)) return false;
+            try { return PromptHash(ReadChatViewSourceText(connection, source, player, access)) == ReadString(frozen, "sourceHash", ""); }
+            catch (InvalidDataException) { return false; }
+            catch (InvalidOperationException) { return false; }
         }
 
         internal static List<Dictionary<string, object>> ChatViewCompleteExchange(List<Dictionary<string, object>> turns, string player)

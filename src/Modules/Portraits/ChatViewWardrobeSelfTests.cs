@@ -117,6 +117,86 @@ namespace ReignBetaServer
                 string prompt = ComposeChatViewImagePrompt(Identity(turns), scene, "map", result);
                 require(prompt.Contains("\"scope\":\"garment\"") && prompt.Contains("\"operation\":\"remove\"") && prompt.Contains("every other compatible portrait garment/accessory stays"), "A partial removal replaced the entire outfit.");
             });
+            Dictionary<string, object> RemovalScene(string op, string scope, string garment, string quote, string turn = "a_accept")
+            {
+                var scene = Scene();
+                scene["wardrobeOverrides"] = new[] { TestDict("characterId", "rhagaea", "changes", new[] {
+                    TestDict("scope", scope, "operation", op, "garmentText", garment, "basis", "explicit",
+                        "evidence", new[] { E(turn, quote, "wearing") }) }) };
+                scene["wardrobeCoverage"] = new[] {
+                    TestDict("characterId", "player", "decision", "portrait", "reason", "No recorded change.", "evidence", Array.Empty<object>()),
+                    TestDict("characterId", "ira", "decision", "portrait", "reason", "No recorded change.", "evidence", Array.Empty<object>()),
+                    TestDict("characterId", "rhagaea", "decision", "changes", "reason", "An earlier line establishes the change.", "evidence", Array.Empty<object>()) };
+                return scene;
+            }
+            Dictionary<string, object> RemovalIdentity(List<Dictionary<string, object>> turns)
+            {
+                var identity = Identity(turns);
+                identity["wardrobeCoverageContract"] = ChatViewCoverageContract;
+                identity["wardrobeCoverageEvidence"] = Array.Empty<object>();
+                return identity;
+            }
+            List<Dictionary<string, object>> RemovalTurns(string wearing)
+            {
+                var turns = window.Select(CloneDictionary).ToList();
+                turns[1] = T("a_accept", 11, "rhagaea", wearing);
+                turns[0]["exchangeId"] = turns[1]["exchangeId"] = "earlier";
+                return turns;
+            }
+            check("wardrobe_earlier_named_removal_reaches_image_prompt", () => {
+                const string quote = "The dress goes the rest of the way off and is laid aside.";
+                var turns = RemovalTurns(quote + " She walks toward the table.");
+                var input = ChatViewClothingSelectionInput(turns, TestDict(), new List<Dictionary<string, object>>());
+                var lead = ReadDictionaryList(input, "clothingQuoteLeads").Single();
+                require(ReadString(lead, "turnId", "") == "a_accept" && ReadString(lead, "quote", "") == quote,
+                    "The exact clothing clause was not surfaced with its own turn ID.");
+                var scene = RemovalScene("remove", "garment", "dress", quote);
+                ValidateChatViewScene(scene, turns);
+                var identity = RemovalIdentity(turns);
+                var changes = ValidateChatViewClothingPlan(identity, scene);
+                string prompt = ComposeChatViewImagePrompt(identity, scene, "map", changes);
+                require(changes.Count == 1 && ReadString(changes[0], "characterId", "") == "rhagaea"
+                    && prompt.Contains("\"operation\":\"remove\",\"garmentText\":\"dress\"")
+                    && !prompt.Contains(quote), "The earlier exact removal was lost or reapplied to another actor.");
+                var wrong = RemovalScene("remove", "garment", "dress", "She walks toward the table.");
+                require(Reject(() => ValidateChatViewClothingPlan(identity, wrong)), "An unrelated exact line authorized removal.");
+            });
+            check("wardrobe_complete_removal_without_individual_items_reaches_image_prompt", () => {
+                const string quote = "All her clothes were taken off.";
+                var turns = RemovalTurns(quote);
+                var scene = RemovalScene("undress", "outfit", "All her clothes were taken off", quote);
+                ValidateChatViewScene(scene, turns);
+                var identity = RemovalIdentity(turns);
+                var changes = ValidateChatViewClothingPlan(identity, scene);
+                string prompt = ComposeChatViewImagePrompt(identity, scene, "map", changes);
+                require(changes.Count == 1 && ReadString(changes[0], "characterId", "") == "rhagaea"
+                    && prompt.Contains("\"operation\":\"undress\",\"garmentText\":\"entire outfit\"")
+                    && prompt.Contains("\"characterId\":\"player\",\"wardrobe\":\"mapped_portrait\"")
+                    && !prompt.Contains(quote), "Whole-outfit removal lacked a fixed actor-scoped image instruction.");
+            });
+            check("wardrobe_complete_undressing_enforces_explicit_scope_and_context", () => {
+                var rejected = new[] {
+                    (Text: "She was not completely undressed.", Phrase: "completely undressed"),
+                    (Text: "If she was completely undressed, she would wait.", Phrase: "completely undressed"),
+                    (Text: "He asked her to undress completely.", Phrase: "undress completely"),
+                    (Text: "All her clothes came off except her boots.", Phrase: "All her clothes came off"),
+                    (Text: "She was completely undressed?", Phrase: "completely undressed"),
+                    (Text: "She took off her riding coat.", Phrase: "riding coat")
+                };
+                foreach (var entry in rejected)
+                {
+                    var identity = RemovalIdentity(RemovalTurns(entry.Text));
+                    var scene = RemovalScene("undress", "outfit", entry.Phrase, entry.Phrase);
+                    require(Reject(() => ValidateChatViewClothingPlan(identity, scene)), "Partial or qualified wording authorized whole-outfit removal.");
+                }
+                const string quote = "She was now undressed.";
+                var turns = RemovalTurns(quote);
+                var wrongScope = RemovalScene("undress", "garment", "now undressed", quote);
+                require(Reject(() => ValidateChatViewClothingPlan(RemovalIdentity(turns), wrongScope)), "Whole removal accepted a single-item scope.");
+                turns[3] = T("b_action", 13, "ira", "Ira lunges toward the player. " + quote);
+                var future = RemovalScene("undress", "outfit", "now undressed", quote, "b_action");
+                require(Reject(() => ValidateChatViewClothingPlan(RemovalIdentity(turns), future)), "A later whole-outfit change altered the earlier image.");
+            });
             check("wardrobe_quoted_offsets_are_derived_with_unicode", () => {
                 var source = T("unicode", 1, "ira", "😀 She parries. She parries.");
                 require(Reject(() => ChatViewQuoteSpan(TestDict("quote", "She parries."), source, true)), "Repeated moment was ambiguous.");
