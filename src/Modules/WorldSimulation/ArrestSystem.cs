@@ -109,6 +109,34 @@ namespace ReignBetaServer
         internal static Dictionary<string, object> ArrestCaseApplyApi(
             Dictionary<string, object> payload) => ApplyArrestCaseEffect(payload, expectedPredecessor: null);
 
+        internal const string OwnedArrestReclassificationRoute = "/arrests/case/reclassify";
+
+        private sealed record OwnedArrestReclassification(string DiscoveryId, string LoadSession, bool ReceiptOnly);
+
+        internal static Dictionary<string, object> ArrestCaseReclassifyApi(Dictionary<string, object> payload)
+        {
+            if (payload == null
+                || !ExactArrestIntentValue(payload, "lateEvidenceEffectVersion", out int version) || version != 1
+                || !ExactArrestIntentValue(payload, "sharedActivityGeneration", out string _)
+                || !ExactArrestIntentValue(payload, "operation", out string operation) || operation != "apply"
+                || !ExactArrestIntentValue(payload, "discoveryEventId", out string discoveryId)
+                || !OwnedHistoryId(discoveryId)
+                || !ExactArrestIntentValue(payload, "nativeLoadSessionId", out string loadSession)
+                || (loadSession.Length != 0 && !Reign.Core.Contracts.Actions.TerminalActionReportProtocol.IsTrustedIdentifier(loadSession))
+                || !ExactArrestIntentValue(payload, "predecessorMaterialSha256", out string predecessor)
+                || !ExactArrestIntentValue(payload, "causeEstablished", out bool established) || !established
+                || !ExactArrestIntentValue(payload, "evidenceStatus", out string evidenceStatus) || evidenceStatus != "established_after_arrest"
+                || !TryReadArrestEffectIntent(payload, out var intent)
+                || (intent.ExpectedRevision == 0 ? predecessor.Length != 0
+                    : !Reign.Core.Contracts.Actions.TerminalActionReportProtocol.IsSha256Hex(predecessor)))
+                return ArrestEffectOwnerFailure("invalid_effect_intent", "An owned reclassification requires a proven discovery and exact effect material.");
+            bool receiptOnly = false;
+            if (payload.ContainsKey("receiptOnly") && !ExactArrestIntentValue(payload, "receiptOnly", out receiptOnly))
+                return ArrestEffectOwnerFailure("invalid_effect_intent", "The receipt request must be explicitly read-only.");
+            return ApplyArrestCaseEffect(payload, predecessor.Length == 0 ? null : predecessor,
+                new OwnedArrestReclassification(discoveryId, loadSession, receiptOnly));
+        }
+
 #if !REIGN_EXCLUDE_VERIFICATION
         // Deliberately has no production caller. A measured predecessor does not prove a durable native intent.
         internal static Dictionary<string, object> VerifyCompareAndApplyArrestCase(
@@ -127,7 +155,7 @@ namespace ReignBetaServer
 #endif
 
         private static Dictionary<string, object> ApplyArrestCaseEffect(
-            Dictionary<string, object> payload, string expectedPredecessor)
+            Dictionary<string, object> payload, string expectedPredecessor, OwnedArrestReclassification lateEvidence = null)
         {
             payload = payload ?? new Dictionary<string, object>();
             string campaignId = ReadString(payload, "campaignId", "default");
@@ -217,7 +245,7 @@ namespace ReignBetaServer
                 }
                 // A contention error poisons the compare transaction. Re-enter the complete
                 // owner and predecessor check on a fresh request instead of retrying its SQL.
-                using var suppressCompareRetries = expectedPredecessor != null
+                using var suppressCompareRetries = expectedPredecessor != null || lateEvidence != null
                     ? new ReignDatabase.SqlStatementRetrySuppression(connection) : null;
                 using var typedTransaction = requireOwner ? connection.BeginTransaction() : null;
                 if (requireOwner)
@@ -254,6 +282,13 @@ namespace ReignBetaServer
                             RollbackEffect();
                             return ArrestEffectOwnerFailure("arrest_effect_schema_unavailable", "The campaign arrest effect storage is not initialized.");
                         }
+                        if (lateEvidence != null && (ReadOwnedHistoryLoadSession(connection, typedTransaction,
+                                ReadString(payload, generationField, "")) != lateEvidence.LoadSession
+                            || !PersistenceService.IsCampaignMigrationReady(connection, PersistenceService.ArrestLateEvidenceReceiptMigrationVersion)))
+                        {
+                            RollbackEffect();
+                            return ArrestEffectOwnerFailure("ownership_mismatch", "The active load cannot admit this late-evidence effect.");
+                        }
                     }
                     else
                     {
@@ -276,13 +311,14 @@ namespace ReignBetaServer
                         ["subject"] = accusedId, ["player"] = playerId, ["tag"] = tagId
                     };
                     bool comparePredecessor = expectedPredecessor != null;
-                    var comparisonTransaction = comparePredecessor ? typedTransaction : null;
+                    bool lockMaterial = comparePredecessor || lateEvidence != null;
+                    var comparisonTransaction = lockMaterial ? typedTransaction : null;
                     var states = WorldSimulationStore.SelectArrestCaseEffects(connection, key, receiptSchema,
-                        comparisonTransaction, lockRows: comparePredecessor);
+                        comparisonTransaction, lockRows: lockMaterial);
                     var effectState = states.FirstOrDefault();
                     Dictionary<string, object> existing =
                         WorldSimulationStore.SelectCharacterReputations(connection, key,
-                            comparisonTransaction, lockRows: comparePredecessor).FirstOrDefault();
+                            comparisonTransaction, lockRows: lockMaterial).FirstOrDefault();
                     Dictionary<string, object> priorSnapshot = TryParseJsonObject(
                         ReadString(existing, "snapshot_json", "{}"));
                     if (states.Any(state => ReadString(state, "case_id", "") != caseId
@@ -337,6 +373,40 @@ namespace ReignBetaServer
                             ["ok"] = false, ["caseId"] = caseId,
                             ["error"] = "The recorded arrest case has an inconsistent reputation state."
                         };
+                    }
+                    string lateEffectSeal = null;
+                    if (lateEvidence != null)
+                    {
+                        lateEffectSeal = Sha256Hex(Json.Serialize(new[] { "arrest-late-evidence-v1",
+                            lateEvidence.DiscoveryId, expectedPredecessor ?? "", intent.Material }));
+                        var retained = WorldSimulationStore.SelectArrestLateEvidenceReceipt(connection, key, typedTransaction);
+                        if (retained != null)
+                        {
+                            RollbackEffect();
+                            if (ReadString(retained, "late_discovery_id", "") != lateEvidence.DiscoveryId
+                                || ReadString(retained, "late_effect_intent_id", "") != intent.Id
+                                || ReadString(retained, "late_effect_material", "") != lateEffectSeal)
+                                return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "intent_conflict");
+                            var historical = TryParseStrictJsonObject(ReadString(retained, "late_effect_receipt_json", "{}"));
+                            if (historical == null || !ReadBool(historical, "ok", false)
+                                || ReadString(historical, "status", "") != "committed"
+                                || ReadString(historical, "effectIntentId", "") != intent.Id
+                                || ReadString(historical, "discoveryEventId", "") != lateEvidence.DiscoveryId)
+                                return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "receipt_unavailable");
+                            historical["effectStillCurrent"] = !terminal && ReadLong(historical, "materialRevision", -1) == revision;
+                            return historical;
+                        }
+                        if (lateEvidence.ReceiptOnly)
+                        {
+                            RollbackEffect();
+                            return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "receipt_missing");
+                        }
+                        if (!OwnedArrestDiscoveryMatches(connection, typedTransaction, payload, lateEvidence.DiscoveryId)
+                            || (intent.ExpectedRevision == 0 && (effectState != null || existing != null)))
+                        {
+                            RollbackEffect();
+                            return ArrestEffectIntentStatus(intent, caseId, tagId, revision, "predecessor_mismatch");
+                        }
                     }
                     if (inspect)
                     {
@@ -407,6 +477,7 @@ namespace ReignBetaServer
                     bool sameRequest = !rescind && measured && requested == desiredDelta;
                     int correction = legacyUnverified || terminal || sameRequest ? 0
                         : ArrestRelationshipCorrection(operation, desiredDelta, applied);
+                    int priorApplied = applied;
                     if (correction != 0)
                     {
                         string pairKey = RelationshipsService.AmbientPairKey(accusedId, playerId);
@@ -503,6 +574,24 @@ namespace ReignBetaServer
                         key["material"] = intent?.Material ?? "";
                         key["receipt"] = intent == null ? "{}" : Json.Serialize(response);
                         WorldSimulationStore.UpsertVersionedArrestCaseEffect(connection, key);
+                        if (lateEvidence != null)
+                        {
+                            response["lateEvidenceEffectVersion"] = 1;
+                            response["discoveryEventId"] = lateEvidence.DiscoveryId;
+                            response["measuredRelationshipChange"] = applied - priorApplied;
+                            response["reputationValue"] = reputationValue;
+                            response["worldDay"] = worldDay;
+                            response["effectStillCurrent"] = true;
+                            response["campaignId"] = campaignId;
+                            response["timelineId"] = timelineId;
+                            response["accusedHeroId"] = accusedId;
+                            response["playerHeroId"] = playerId;
+                            key["discovery"] = lateEvidence.DiscoveryId;
+                            key["material"] = lateEffectSeal;
+                            key["lateReceipt"] = Json.Serialize(response);
+                            if (!WorldSimulationStore.WriteArrestLateEvidenceReceipt(connection, key, typedTransaction))
+                                throw new InvalidOperationException("The measured late-evidence receipt could not be retained.");
+                        }
                     }
                     else if (states.Count == 0 || rescind)
                     {
@@ -527,6 +616,27 @@ namespace ReignBetaServer
         }
 
         private sealed record ArrestEffectIntent(string Id, long ExpectedRevision, string Material, double WorldDay);
+
+        private static bool OwnedArrestDiscoveryMatches(ReignDbConnection connection, ReignDbTransaction transaction,
+            Dictionary<string, object> payload, string discoveryId)
+        {
+            if (!TableExists(connection, "world_history_events") || !TableExists(connection, "world_history_entities")) return false;
+            var key = TestDict("campaign", payload["campaignId"], "timeline", payload["timelineId"],
+                "generation", payload["sharedActivityGeneration"], "id", discoveryId);
+            if (WorldSimulationStore.SelectOwnedJusticeAdmission(connection, key, transaction) == null) return false;
+            var known = WorldSimulationStore.SelectOwnedWorldHistoryEventProof(connection, key, transaction);
+            if (ReadString(known, "event_id", "") != discoveryId
+                || ReadString(known, "event_type", "") != "arrest_evidence_reclassified"
+                || ReadString(known, "phase", "") != "evidence_established"
+                || ReadString(known, "correlation_id", "") != ReadString(payload, "caseId", "")) return false;
+            var discovery = TryParseStrictJsonObject(ReadString(known, "payload_json", "{}"));
+            var evidence = ReadStringList(discovery, "evidenceIds");
+            return ReadString(discovery, "effectStatus", "") == "pending"
+                && ReadString(discovery, "caseId", "") == ReadString(payload, "caseId", "")
+                && ReadString(discovery, "playerHeroId", "") == ReadString(payload, "playerHeroId", "")
+                && ReadString(discovery, "accusedHeroId", "") == ReadString(payload, "accusedHeroId", "")
+                && evidence.Count == 1 && evidence[0] == ReadString(payload, "evidenceIds", "");
+        }
 
         private static bool IsArrestEffectReceiptField(string key) =>
             string.Equals(key, "arrestEffectVersion", StringComparison.OrdinalIgnoreCase)

@@ -99,6 +99,18 @@ namespace ReignBetaServer
                     ["error"] = "Save Sync did not capture an inconsistent state because critical world-history events were still pending."
                 };
             string campaignDir = StrictCampaignDirectory(campaignId);
+            bool requireOwnedHistoryBoundary = payload.ContainsKey("ownedJusticeHistoryBoundary");
+            // The registration endpoint holds the campaign write gate through snapshot creation.
+            Dictionary<string, object> ledger = ReadSaveSyncLedger(campaignId);
+            Dictionary<string, object> existing = SaveSyncPoint(ledger, savePointId);
+            string pointRoot = existing == null ? "" : SaveSyncSnapshotRoot(campaignId, existing);
+            bool retainedSnapshot = existing != null
+                && ReignPostgreSqlStorage.SnapshotExists(campaignId, SaveSyncPostgreSqlSnapshotPointId(existing))
+                && File.Exists(Path.Combine(pointRoot, "manifest.json"))
+                && Directory.Exists(Path.Combine(pointRoot, "campaign"));
+            if (requireOwnedHistoryBoundary && !VerifyOwnedJusticeSaveSyncBoundary(payload, retainedSnapshot ? existing : null, campaignId))
+                return TestDict("ok", false, "result", "owned_history_boundary_mismatch", "campaignId", campaignId,
+                    "savePointId", savePointId, "error", "Save Sync could not verify the exact owned world-history checkpoint.");
             string calendarSha = ValidateSaveSyncCalendar(ReadSaveSyncCalendar(campaignDir), campaignId, payload);
             string nativeCalendarSha = ReadString(payload, "calendarSha256", "");
             if (nativeCalendarSha.Length != 0) RequireSaveSyncCalendarDigest(nativeCalendarSha, calendarSha);
@@ -114,14 +126,7 @@ namespace ReignBetaServer
                 });
             }
 
-            Dictionary<string, object> ledger = ReadSaveSyncLedger(campaignId);
-            Dictionary<string, object> existing = SaveSyncPoint(ledger, savePointId);
-            string pointRoot = existing == null ? "" : SaveSyncSnapshotRoot(campaignId, existing);
-            if (existing != null
-                && ReignPostgreSqlStorage.SnapshotExists(campaignId,
-                    SaveSyncPostgreSqlSnapshotPointId(existing))
-                && File.Exists(Path.Combine(pointRoot, "manifest.json"))
-                && Directory.Exists(Path.Combine(pointRoot, "campaign")))
+            if (retainedSnapshot)
             {
                 Dictionary<string, object> existingManifest = CampaignFileService.ReadJsonObject(Path.Combine(pointRoot, "manifest.json"));
                 if (!ReadString(existingManifest, "campaignId", "").Equals(campaignId, StringComparison.OrdinalIgnoreCase)
@@ -138,6 +143,8 @@ namespace ReignBetaServer
             }
 
             Dictionary<string, object> point = NormalizeSaveSyncPoint(payload);
+            if (requireOwnedHistoryBoundary)
+                point["ownedJusticeHistoryBoundary"] = ReadDictionary(payload, "ownedJusticeHistoryBoundary");
             CaptureEditorNativePointLineage(ledger, point, payload,
                 (anchorPoint, loadSession, restoreGeneration) =>
                     EditorNativeOwnerStillVerified(campaignId, ReadString(point, "timelineId", ""),
@@ -254,6 +261,38 @@ namespace ReignBetaServer
             AppendSaveSyncAudit(campaignId, "save_point.registered", result);
             QueueSaveSyncOptimization(campaignId, savePointId);
             return result;
+        }
+
+        private static bool VerifyOwnedJusticeSaveSyncBoundary(Dictionary<string, object> payload,
+            Dictionary<string, object> existing, string campaignId)
+        {
+            var authority = ReadDictionary(payload, "ownedJusticeHistoryBoundary");
+            if (authority == null || authority.Count != 3
+                || !authority.TryGetValue("version", out object version) || version is not int number || number != 1
+                || !authority.TryGetValue("restoreGeneration", out object rawGeneration) || rawGeneration is not string generation
+                || !authority.TryGetValue("nativeLoadSessionId", out object rawSession) || rawSession is not string loadSession
+                || !payload.TryGetValue("worldHistoryHeadEventId", out object rawId) || rawId is not string eventId
+                || !payload.TryGetValue("worldHistorySequence", out object rawSequence)
+                || !payload.TryGetValue("timelineId", out object rawTimeline) || rawTimeline is not string timeline
+                || ReadString(payload, "savePointKind", "") != "native_save")
+                return false;
+
+            long sequence = rawSequence switch { int count => count, long count => count, _ => -1 };
+            if (sequence < 0 || (sequence == 0 ? eventId.Length != 0 : eventId.Length > 200 || string.IsNullOrWhiteSpace(eventId)))
+                return false;
+            if (existing != null)
+            {
+                var registered = ReadDictionary(existing, "ownedJusticeHistoryBoundary");
+                return registered != null && ReadInt(registered, "version", 0) == 1
+                    && ReadString(registered, "restoreGeneration", "") == generation
+                    && ReadString(registered, "nativeLoadSessionId", "") == loadSession
+                    && ReadString(existing, "timelineId", "") == timeline
+                    && ReadLong(existing, "worldHistorySequence", -1) == sequence
+                    && ReadString(existing, "worldHistoryHeadEventId", "") == eventId;
+            }
+
+            return WorldSimulationService.MatchesOwnedJusticeSaveBoundary(
+                campaignId, timeline, generation, loadSession, sequence, eventId);
         }
 
         internal static Dictionary<string, object> SaveSyncFinalizeApi(Dictionary<string, object> payload)

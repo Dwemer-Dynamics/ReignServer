@@ -19,6 +19,7 @@ namespace ReignBetaServer
         internal const int ArrestEffectReceiptMigrationVersion = 6;
         private const int PoliticalPressureDailyProducerMigrationVersion = 7;
         internal const int NativeEditorOwnershipCampaignMigrationVersion = 8;
+        internal const int ArrestLateEvidenceReceiptMigrationVersion = 9;
 
         private sealed class CampaignSchemaMigration
         {
@@ -56,6 +57,8 @@ namespace ReignBetaServer
                 "political_pressure_daily_producers", DiplomacyStore.CreatePoliticalPressureDailyProducerSchema),
             new CampaignSchemaMigration(NativeEditorOwnershipCampaignMigrationVersion,
                 "native_editor_ownership", CharactersSchema.ApplyNativeEditorOwnershipMigration),
+            new CampaignSchemaMigration(ArrestLateEvidenceReceiptMigrationVersion,
+                "arrest_late_evidence_receipts", WorldSimulationStore.ApplyArrestLateEvidenceReceiptSchemaDdl),
         };
 
         internal static int LatestCampaignMigrationVersion =>

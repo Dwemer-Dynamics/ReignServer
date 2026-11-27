@@ -218,6 +218,46 @@ LEFT JOIN world_history_events e ON e.event_id=$id AND e.campaign_id=$campaign A
                 parameters, transaction).SingleOrDefault();
         }
 
+        internal static Dictionary<string, object> SelectOwnedWorldHistoryHead(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction, bool lockForAppend = false)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT t.head_sequence,t.head_event_id
+FROM world_history_timelines t
+WHERE t.timeline_id=$timeline AND t.campaign_id=$campaign AND t.is_active=1
+    AND (SELECT timeline_id FROM world_history_timelines WHERE is_active=1 ORDER BY updated_utc DESC LIMIT 1)=$timeline
+    AND (SELECT restore_generation FROM memory_precision_state WHERE state_id='current')=$generation"
+                + (lockForAppend ? " FOR NO KEY UPDATE OF t;" : ";"),
+                parameters, transaction).SingleOrDefault();
+        }
+
+        internal static Dictionary<string, object> SelectWorldHistoryIngestCursor(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction = null)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT last_sequence,last_event_id
+FROM world_history_ingest_state WHERE client_id=$client AND timeline_id=$timeline;", parameters, transaction).SingleOrDefault();
+        }
+
+        internal static Dictionary<string, object> SelectOwnedJusticeAdmission(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT previous_sequence,previous_event_id
+FROM world_history_owned_justice_admissions WHERE event_id=$id;", parameters, transaction).SingleOrDefault();
+        }
+
+        internal static void InsertOwnedJusticeAdmission(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            ReignDatabase.ExecuteSql(connection, @"INSERT INTO world_history_owned_justice_admissions
+(event_id,previous_sequence,previous_event_id,settles_discovery_id)
+VALUES($id,$previousSequence,$previousEventId,NULLIF($settlesDiscovery,''));",
+                parameters, transaction);
+        }
+
+        internal static bool HasOwnedJusticeSettlement(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction) =>
+            ReignDatabase.QuerySql(connection, @"SELECT 1 FROM world_history_owned_justice_admissions
+WHERE settles_discovery_id=$settlesDiscovery;", parameters, transaction).Count != 0;
+
         internal static List<Dictionary<string, object>> SelectWorldHistoryEvents5(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
             return ReignDatabase.QuerySql(connection, "SELECT * FROM world_history_events WHERE event_id=$id AND timeline_id=$timeline AND (event_type IN ('battle_completed','tournament_finished') OR (event_type='social_outcome' AND source='reign_social' AND payload_json LIKE '%\"duelMode\"%'));", parameters, transaction);
