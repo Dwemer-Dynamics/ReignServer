@@ -166,8 +166,8 @@ namespace Reign.Core.Contracts.Actions
                         Choices = new[] { "mother_only", "name_father" } } } });
             actions.Add(new ActionDefinition { Id = AgreementRules.RulerInfluenceActionId, Label = "Influence a captive ruler's judgment",
                 Family = "politics", Adapter = "ruler:influence", Source = "ReignRulerCampaignBehavior",
-                Description = "Ask the deciding ruler for a specific verdict before judgment is due. Your chance is their relation toward you minus 25 percentage points. Each judgment allows one attempt.",
-                Parameters = new List<ActionParameter> { P("judgmentId", "Captive ruler", "rulerJudgment", true),
+                Description = "Ask the deciding ruler for a specific verdict for the captive or an eligible rebel clan leader. Your chance is their relation toward you minus 25 percentage points. Each listed judgment allows one attempt.",
+                Parameters = new List<ActionParameter> { P("judgmentId", "Whose judgment", "rulerJudgment", true),
                     P("verdict", "Requested verdict", "rulerVerdict", true) } });
             var tavern = new ActionDefinition { Id = TavernHouseVisitAction.Id, Label = "Arrange a private visit", Family = "tavern",
                 Adapter = "tavern:visit", Source = "ReignTavernHouseAction", Description = "The active Tavern House only: pay the exact agreed total and begin a private visit with one to four named available adults." };
