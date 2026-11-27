@@ -9,6 +9,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.ExceptionServices;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -310,11 +311,14 @@ namespace ReignBetaServer
 
             bool campaignUpload = request.Method == "POST" && requestPath.Equals("/api/campaigns/import", StringComparison.OrdinalIgnoreCase)
                 && !request.ContentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase);
+            bool ownedJusticeRequest = request.Method == "POST" && (requestPath == WorldSimulationService.OwnedJusticeHistoryAppendRoute
+                || requestPath == WorldSimulationService.OwnedArrestReclassificationRoute);
             long limit = campaignUpload ? IngressMaxCampaignUploadBytes
                 : requestPath.Equals("/api/support-bundle", StringComparison.OrdinalIgnoreCase) ? IngressMaxSupportBundleBytes
                 : requestPath == Reign.Core.Contracts.Actions.TerminalActionReportProtocol.ProposedRoute
                     ? Reign.Core.Contracts.Actions.TerminalActionReportProtocol.MaxRequestBodyBytes
-                : requestPath == DialogueService.IndividualViewInsertionRoute ? IngressMaxViewInsertionAckBytes : IngressMaxJsonBodyBytes;
+                : requestPath == DialogueService.IndividualViewInsertionRoute ? IngressMaxViewInsertionAckBytes
+                : ownedJusticeRequest ? WorldSimulationService.OwnedJusticeHistoryAppendMaxBytes : IngressMaxJsonBodyBytes;
             if (bodyLength > limit) throw new HttpIngressException(413, "Request body is too large.", requestPath, "body_limit");
             if (bodyLength == 0)
             {
@@ -374,6 +378,14 @@ namespace ReignBetaServer
                     string body = Encoding.UTF8.GetString(bodyBytes);
                     try
                     {
+                        if (ownedJusticeRequest)
+                        {
+                            using var unique = JsonDocument.Parse(bodyBytes, new JsonDocumentOptions
+                            {
+                                AllowDuplicateProperties = false,
+                                MaxDepth = 4
+                            });
+                        }
                         request.JsonBody = string.IsNullOrWhiteSpace(body) ? new Dictionary<string, object>()
                             : Json.Deserialize<Dictionary<string, object>>(body) ?? new Dictionary<string, object>();
                     }

@@ -2545,6 +2545,41 @@ marker INTEGER PRIMARY KEY CHECK (marker > 0));");
                     return WorldSimulationService.WorldHistoryEventApi(scope, id);
                 }
 
+                Dictionary<string, object> Head(string ownerGeneration, string ownerCampaign = null,
+                    string ownerTimeline = timeline, string version = "1")
+                {
+                    var scope = new Dictionary<string, string>
+                    {
+                        ["headProofVersion"] = version, ["campaignId"] = ownerCampaign ?? campaign,
+                        ["timelineId"] = ownerTimeline
+                    };
+                    if (ownerGeneration != null) scope["sharedActivityGeneration"] = ownerGeneration;
+                    return WorldSimulationService.WorldHistoryHeadApi(scope);
+                }
+
+                var firstHead = Head(generation);
+                var headOwner = ReadDictionary(firstHead, "ownership");
+                add("owned_history_head_proof_reads_current_pair_without_writes",
+                    ReadBool(firstHead, "ok", false) && ReadString(firstHead, "result", "") == "observed"
+                    && ReadInt(firstHead, "headProofVersion", -1) == 1
+                    && ReadLong(firstHead, "headSequence", -1) == 3L
+                    && ReadString(firstHead, "headEventId", "") == unrelatedId
+                    && ReadString(headOwner, "campaignId", "") == campaign
+                    && ReadString(headOwner, "timelineId", "") == timeline
+                    && ReadString(headOwner, "sharedActivityGeneration", "") == generation
+                    && Json.Serialize(firstHead) == Json.Serialize(Head(generation))
+                    && File.ReadAllBytes(sidecar).SequenceEqual(cleanSidecar) && TimelineState() == timelineBefore,
+                    "Repeated proof reads the persisted pair and leaves both the timeline and Save Sync sidecar unchanged.");
+
+                var refusedHeads = new[] { Head(beforeRestore), Head(generation, ownerTimeline: "elsewhere"),
+                    Head(generation, ownerCampaign: absent), Head(null) };
+                add("owned_history_head_proof_requires_explicit_current_registered_owner",
+                    refusedHeads.All(result => ReadString(result, "result", "") == "owner_mismatch"
+                        && !result.ContainsKey("headSequence") && !result.ContainsKey("headEventId"))
+                    && ReadString(Head(generation, version: "2"), "result", "") == "invalid_request"
+                    && !Registered(absent) && !Directory.Exists(roots[2]) && !Directory.Exists(roots[3]),
+                    "Stale, foreign, missing and unsupported proof context exposes no head and creates no registration.");
+
                 var observed = Proof(ownerGeneration: generation);
                 var row = ReadDictionary(observed, "event");
                 var entities = ReadDictionaryList(row, "entities");
@@ -2644,13 +2679,12 @@ WHERE locktype='advisory' AND NOT granted AND pg_backend_pid()=ANY(pg_blocking_p
                 Dictionary<string, object> CursorEvent(string id, long sequence) =>
                     new Dictionary<string, object>(original) { ["eventId"] = id, ["sequence"] = sequence };
 
-                bool CursorsAt(long sequence, string id)
+                bool CursorsAt(long sequence, string id, string clientId = "bannerlord")
                 {
                     using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
                     var head = WorldSimulationStore.SelectWorldHistoryTimelines(connection, TestDict("id", timeline)).SingleOrDefault();
-                    var ingest = ReignDatabase.QuerySql(connection, @"SELECT last_sequence,last_event_id
-FROM world_history_ingest_state WHERE client_id='bannerlord' AND timeline_id=$timeline;",
-                        TestDict("timeline", timeline)).SingleOrDefault();
+                    var ingest = WorldSimulationStore.SelectWorldHistoryIngestCursor(connection,
+                        TestDict("timeline", timeline, "client", clientId));
                     return ReadLong(head, "head_sequence", -1) == sequence && ReadString(head, "head_event_id", "") == id
                         && ReadLong(ingest, "last_sequence", -1) == sequence && ReadString(ingest, "last_event_id", "") == id;
                 }
@@ -2687,10 +2721,246 @@ FROM world_history_ingest_state WHERE client_id='bannerlord' AND timeline_id=$ti
 WHERE client_id='bannerlord' AND timeline_id=$timeline;", TestDict("timeline", timeline));
                 }
                 const string legacyEventId = "history_proof_legacy_fill";
+                add("owned_history_head_proof_refuses_positive_cursor_without_id",
+                    ReadString(Head(nextGeneration), "result", "") == "head_unavailable",
+                    "A positive cursor without a stored event ID cannot authorize an exact successor.");
                 add("world_history_cursors_initialize_empty_legacy_id_at_matching_sequence",
                     CursorsAt(4L, "") && UploadStoresEvent("history_proof_legacy_older", 3L) && CursorsAt(4L, "")
                     && UploadStoresEvent(legacyEventId, 4L) && CursorsAt(4L, legacyEventId),
                     "A blank legacy ID stays blank for earlier events and can be filled at its existing sequence.");
+
+                const string ephemeralHeadId = "history_proof_ephemeral_head";
+                const string nativeHistoryClient = "reign_native_campaign";
+                Dictionary<string, object> UploadNative(Dictionary<string, object> evt) =>
+                    WorldSimulationService.WorldHistoryIngestBatchApi(TestDict("campaignId", campaign,
+                        "timelineId", timeline, "clientId", nativeHistoryClient, "sharedActivityGeneration", nextGeneration,
+                        "events", new[] { evt }, "waitForRetention", true));
+                var ephemeralHeadUpload = UploadNative(new Dictionary<string, object>(ephemeral)
+                {
+                    ["eventId"] = ephemeralHeadId, ["sequence"] = 5L
+                });
+                var ephemeralHead = Head(nextGeneration);
+                add("owned_history_head_proof_covers_retention_discarded_head",
+                    ReadBool(ephemeralHeadUpload, "ok", false) && ReadInt(ephemeralHeadUpload, "ephemeral", -1) == 1
+                    && ReadLong(ephemeralHead, "headSequence", -1) == 5L
+                    && ReadString(ephemeralHead, "headEventId", "") == ephemeralHeadId
+                    && ReadString(Proof(ephemeralHeadId, ownerGeneration: nextGeneration), "result", "") == "not_found",
+                    "The persisted head remains observable even when the event row was discarded by ordinary retention.");
+
+                const string ownedId = "arrest_discovery_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+                Dictionary<string, object> Append(string id, string evidence, string requestedGeneration = nextGeneration,
+                    string predecessorId = ephemeralHeadId, string loadSession = "") => WorldSimulationService.WorldHistoryOwnedJusticeAppendApi(TryParseJsonObject(Json.Serialize(TestDict(
+                        "historyAppendVersion", 1, "campaignId", campaign, "timelineId", timeline,
+                        "sharedActivityGeneration", requestedGeneration, "nativeLoadSessionId", loadSession,
+                        "previousSequence", 5L, "previousEventId", predecessorId,
+                        "event", TestDict("eventId", id, "sequence", 6L, "caseId", "arrest_fixture_case", "worldDay", 19.5d,
+                            "playerHeroId", "fixture_player", "accusedHeroId", "fixture_accused", "locationId", "history_proof_town",
+                            "locationName", "Proof Town", "evidenceIds", new[] { evidence })))));
+
+                MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", "history_owned_pending"));
+                var wrongPredecessor = Append(ownedId, "fixture_public_evidence", predecessorId: "a_different_event");
+                var wrongOwner = Append(ownedId, "fixture_public_evidence", requestedGeneration: generation);
+                add("owned_justice_discovery_rejects_wrong_owner_or_preceding_pair_before_write",
+                    ReadString(wrongPredecessor, "result", "") == "predecessor_mismatch"
+                    && ReadString(wrongOwner, "result", "") == "owner_mismatch"
+                    && CursorsAt(5L, ephemeralHeadId, nativeHistoryClient)
+                    && ReadString(Proof(ownedId, ownerGeneration: nextGeneration), "result", "") == "not_found",
+                    "A wrong generation or predecessor cannot append the proposed discovery.");
+
+                var reservedUpload = UploadNative(CursorEvent(ownedId, 6L));
+                add("ordinary_history_does_not_claim_an_owned_justice_identity",
+                    ReadInt(reservedUpload, "accepted", -1) == 0 && CursorsAt(5L, ephemeralHeadId, nativeHistoryClient)
+                    && ReadString(Proof(ownedId, ownerGeneration: nextGeneration), "result", "") == "not_found",
+                    "Generic history cannot claim a reserved owned discovery identity before admission.");
+                MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", "history_owned_pending"));
+
+                // Use the production JSON representation so fractional days arrive as decimals.
+                var inserted = Append(ownedId, "fixture_public_evidence");
+                var savedDiscovery = ReadDictionary(inserted, "event");
+                var discoveredMaterial = TryParseJsonObject(ReadString(savedDiscovery, "payload_json", "{}"));
+                bool checkpointDirty;
+                lock (SaveSyncActiveStateLock)
+                    checkpointDirty = ReadSaveSyncActiveStateLocked(campaign)?.Dirty == true;
+                add("owned_justice_discovery_commits_exact_material_and_advances_ephemeral_predecessor",
+                    ReadString(inserted, "result", "") == "inserted" && CursorsAt(6L, ownedId, nativeHistoryClient) && checkpointDirty
+                    && ReadString(savedDiscovery, "event_id", "") == ownedId && ReadDouble(savedDiscovery, "world_day", 0) == 19.5d
+                    && ReadString(savedDiscovery, "phase", "") == "evidence_established"
+                    && ReadString(discoveredMaterial, "effectStatus", "") == "pending" && !discoveredMaterial.ContainsKey("accusation")
+                    && !discoveredMaterial.ContainsKey("relationshipDelta")
+                    && ReadDictionaryList(savedDiscovery, "entities").Select(child => ReadString(child, "entity_id", ""))
+                        .SequenceEqual(new[] { "fixture_player", "fixture_accused" }),
+                    "Discovery advances the pair from a retained cursor and carries ordered people without alleging a measured effect.");
+
+                MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", "history_owned_committed"));
+                byte[] ownedClean = File.ReadAllBytes(sidecar);
+                var exactReplay = Append(ownedId, "fixture_public_evidence");
+                var changedReplay = Append(ownedId, "changed_evidence");
+                var changedPredecessorReplay = Append(ownedId, "fixture_public_evidence", predecessorId: "a_different_event");
+                var missingOld = Append("arrest_discovery_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "fixture_public_evidence");
+                add("owned_justice_discovery_replays_only_identical_retained_material_without_writes",
+                    ReadString(exactReplay, "result", "") == "replayed"
+                    && Json.Serialize(ReadDictionary(exactReplay, "event")) == Json.Serialize(savedDiscovery)
+                    && ReadString(changedReplay, "result", "") == "id_conflict"
+                    && ReadString(changedPredecessorReplay, "result", "") == "id_conflict"
+                    && ReadString(missingOld, "result", "") == "predecessor_mismatch" && CursorsAt(6L, ownedId, nativeHistoryClient)
+                    && File.ReadAllBytes(sidecar).SequenceEqual(ownedClean),
+                    "An exact replay observes the original. Changed material and an older missing event cannot change history or checkpoint state.");
+
+                const string session = "owned_history_fixture_new_session";
+                using (var bind = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                    DialogueStore.UpsertMemoryRestoredSourceContext(bind, TestDict("generation", nextGeneration,
+                        "timeline", timeline, "point", "history_owned_committed", "day", 19.5d, "sequence", 6L,
+                        "head", ownedId, "source", nextGeneration, "session", session));
+                var staleSession = Append(ownedId, "fixture_public_evidence");
+                var exactNewSession = Append(ownedId, "fixture_public_evidence", loadSession: session);
+                add("owned_justice_discovery_discards_stale_load_session_even_with_same_generation",
+                    ReadString(staleSession, "result", "") == "owner_mismatch"
+                    && ReadString(exactNewSession, "result", "") == "replayed"
+                    && ReadString(Head(nextGeneration), "nativeLoadSessionId", "") == session,
+                    "Two bound loads can share a restore generation. Only the current load session can admit an exact replay.");
+
+                const string successorId = "history_proof_native_successor";
+                var successor = UploadNative(CursorEvent(successorId, 7L));
+                using var cursorRead = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                var legacyCursor = WorldSimulationStore.SelectWorldHistoryIngestCursor(cursorRead,
+                    TestDict("timeline", timeline, "client", "bannerlord"));
+                add("owned_justice_discovery_preserves_native_and_legacy_ingest_cursor_sequence",
+                    ReadBool(successor, "ok", false) && CursorsAt(7L, successorId, nativeHistoryClient)
+                    && ReadLong(legacyCursor, "last_sequence", -1) == 4L
+                    && ReadString(legacyCursor, "last_event_id", "") == legacyEventId
+                    && ReadString(Append(ownedId, "fixture_public_evidence", loadSession: session), "result", "") == "replayed",
+                    "The production Bannerlord cursor accepts its next ordinary event while the retained discovery stays exactly replayable.");
+
+                bool matchesExact, matchesWrongId, matchesPriorSession;
+                Program.CampaignDataGate.EnterWriteLock();
+                try
+                {
+                    matchesExact = WorldSimulationService.MatchesOwnedJusticeSaveBoundary(
+                        campaign, timeline, nextGeneration, session, 7L, successorId);
+                    matchesWrongId = WorldSimulationService.MatchesOwnedJusticeSaveBoundary(
+                        campaign, timeline, nextGeneration, session, 7L, ownedId);
+                    matchesPriorSession = WorldSimulationService.MatchesOwnedJusticeSaveBoundary(
+                        campaign, timeline, nextGeneration, "", 7L, successorId);
+                }
+                finally { Program.CampaignDataGate.ExitWriteLock(); }
+                add("owned_justice_save_boundary_checks_pair_and_load_session_inside_write_gate",
+                    matchesExact && !matchesWrongId && !matchesPriorSession
+                    && !WorldSimulationService.MatchesOwnedJusticeSaveBoundary(
+                        campaign, timeline, nextGeneration, session, 7L, successorId),
+                    "The exact native and persistent tuple can be acknowledged only under Save Sync write ownership and the active load session.");
+
+                const string rejectedPoint = "history_owned_boundary_mismatch";
+                var refusedRegistration = SaveSyncRegisterApi(TestDict("campaignId", campaign, "savePointId", rejectedPoint,
+                    "savePointKind", "native_save", "timelineId", timeline, "worldHistoryOutboxDrained", true,
+                    "worldHistorySequence", 7L, "worldHistoryHeadEventId", ownedId,
+                    "ownedJusticeHistoryBoundary", TestDict("version", 1, "restoreGeneration", nextGeneration, "nativeLoadSessionId", session)));
+                add("save_sync_register_does_not_trust_client_drained_flag_for_owned_justice",
+                    ReadString(refusedRegistration, "result", "") == "owned_history_boundary_mismatch"
+                    && SaveSyncPoint(ReadSaveSyncLedger(campaign), rejectedPoint) == null && CursorsAt(7L, successorId, nativeHistoryClient),
+                    "A drained flag and correct sequence cannot register a Save Sync point with the wrong event ID.");
+
+                Dictionary<string, object> EffectMaterial(bool established) => TestDict(
+                    "campaignId", campaign, "timelineId", timeline, "caseId", "arrest_fixture_case",
+                    "accusedHeroId", "fixture_accused", "playerHeroId", "fixture_player", "reputationTagId", "fixture_arrest_tag",
+                    "operation", "apply", "worldDay", 19.5d, "relationshipDelta", established ? -3 : -8,
+                    "reputationValue", established ? -5 : -20, "description", "Bound arrest effect fixture",
+                    "chargeCategory", "other", "severity", "serious", "causeEstablished", established,
+                    "evidenceStatus", established ? "established_after_arrest" : "unsupported",
+                    "evidenceIds", established ? "fixture_public_evidence" : "");
+                var initialEffect = WorldSimulationService.ArrestCaseApplyApi(EffectMaterial(false));
+                var inspect = EffectMaterial(true);
+                inspect["operation"] = "inspect";
+                inspect["sharedActivityGeneration"] = nextGeneration;
+                inspect["arrestEffectVersion"] = 2;
+                inspect["observePredecessorVersion"] = 1;
+                var beforeEffect = WorldSimulationService.ArrestCaseApplyApi(inspect);
+                long effectRevision = ReadLong(beforeEffect, "materialRevision", -1);
+                string priorDigest = ReadString(ReadDictionary(beforeEffect, "predecessor"), "materialSha256", "");
+                var effect = EffectMaterial(true);
+                effect["sharedActivityGeneration"] = nextGeneration;
+                effect["nativeLoadSessionId"] = session;
+                effect["arrestEffectVersion"] = 2;
+                effect["lateEvidenceEffectVersion"] = 1;
+                effect["expectedMaterialRevision"] = effectRevision;
+                effect["effectIntentId"] = effectRevision.ToString(System.Globalization.CultureInfo.InvariantCulture) + "_" + Guid.NewGuid().ToString("N");
+                effect["discoveryEventId"] = ownedId;
+                effect["predecessorMaterialSha256"] = priorDigest;
+
+                const string copiedId = "history_proof_ordinary_lookalike";
+                var copy = TestDict("eventId", copiedId, "sequence", 8L, "eventType", "arrest_evidence_reclassified",
+                    "worldDay", 19.5d, "locationId", "history_proof_town", "locationName", "Proof Town",
+                    "source", "reign_system", "category", "justice", "phase", "evidence_established",
+                    "correlationId", "arrest_fixture_case", "summary", "New evidence established cause in an active arrest.",
+                    "payload", discoveredMaterial, "entities", ReadDictionaryList(savedDiscovery, "entities")
+                        .Select(entity => TryParseJsonObject(ReadString(entity, "payload_json", "{}"))).ToList());
+                var importedLookalike = UploadNative(copy);
+                var impostor = new Dictionary<string, object>(effect) { ["discoveryEventId"] = copiedId };
+                var oldSession = new Dictionary<string, object>(effect) { ["nativeLoadSessionId"] = "" };
+                var readOnlyEffect = new Dictionary<string, object>(effect) { ["receiptOnly"] = true };
+                add("owned_late_arrest_effect_rejects_ordinary_history_lookalike_and_old_session",
+                    ReadBool(initialEffect, "ok", false) && effectRevision > 0 && priorDigest.Length == 64
+                    && ReadInt(importedLookalike, "accepted", 0) == 1
+                    && ReadString(WorldSimulationService.ArrestCaseReclassifyApi(impostor), "status", "") == "predecessor_mismatch"
+                    && ReadString(WorldSimulationService.ArrestCaseReclassifyApi(oldSession), "status", "") == "ownership_mismatch"
+                    && ReadString(WorldSimulationService.ArrestCaseReclassifyApi(readOnlyEffect), "status", "") == "receipt_missing"
+                    && ReadLong(WorldSimulationService.ArrestCaseApplyApi(inspect), "materialRevision", -1) == effectRevision,
+                    "A lookalike ordinary event and an older native load cannot authorize a measured effect.");
+
+                var corrected = WorldSimulationService.ArrestCaseReclassifyApi(effect);
+                var rescind = EffectMaterial(true);
+                rescind["operation"] = "rescind";
+                var rescinded = WorldSimulationService.ArrestCaseApplyApi(rescind);
+                var recovered = WorldSimulationService.ArrestCaseReclassifyApi(readOnlyEffect);
+                var changed = new Dictionary<string, object>(effect) { ["relationshipDelta"] = -4 };
+                var conflict = WorldSimulationService.ArrestCaseReclassifyApi(changed);
+                add("owned_late_arrest_effect_replays_the_retained_measurement_after_rescission",
+                    ReadString(corrected, "status", "") == "committed"
+                    && ReadInt(corrected, "appliedRelationshipDelta", -1000) == -3
+                    && ReadInt(corrected, "measuredRelationshipChange", -1000) == 5
+                    && ReadBool(rescinded, "ok", false) && ReadString(recovered, "status", "") == "committed"
+                    && !ReadBool(recovered, "effectStillCurrent", true) && ReadInt(recovered, "measuredRelationshipChange", -1000) == 5
+                    && ReadString(conflict, "status", "") == "intent_conflict",
+                    "A superseding rescission cannot erase the exact prior receipt or let it be retried with changed material.");
+
+                const string settlementId = "arrest_settlement_cccccccccccccccccccccccccccccccc";
+                Dictionary<string, object> Settlement(string id, long preceding, string priorId, int change) =>
+                    WorldSimulationService.WorldHistoryOwnedJusticeAppendApi(TestDict(
+                        "historyAppendVersion", 1, "campaignId", campaign, "timelineId", timeline,
+                        "sharedActivityGeneration", nextGeneration, "nativeLoadSessionId", session,
+                        "previousSequence", preceding, "previousEventId", priorId,
+                        "event", TestDict("eventId", id, "sequence", preceding + 1, "caseId", "arrest_fixture_case",
+                            "playerHeroId", "fixture_player", "accusedHeroId", "fixture_accused", "worldDay", 19.5d,
+                            "locationId", "history_proof_town", "locationName", "Proof Town",
+                            "discoveryEventId", ownedId, "effectIntentId", ReadString(effect, "effectIntentId", ""),
+                            "reputationTagId", "fixture_arrest_tag", "appliedRelationshipDelta", -3,
+                            "measuredRelationshipChange", change, "reputationValue", -5)));
+                var inventedSettlement = Settlement(settlementId, 8L, copiedId, 4);
+                var realSettlement = Settlement(settlementId, 8L, copiedId, 5);
+                var repeatedSettlement = Settlement(settlementId, 8L, copiedId, 5);
+                var duplicateSettlement = Settlement("arrest_settlement_dddddddddddddddddddddddddddddddd", 9L, settlementId, 5);
+                var settlementEvent = ReadDictionary(realSettlement, "event");
+                var settlementPayload = TryParseJsonObject(ReadString(settlementEvent, "payload_json", "{}"));
+                add("owned_late_arrest_settlement_requires_the_retained_measurement_and_is_unique",
+                    ReadString(inventedSettlement, "result", "") == "effect_receipt_mismatch"
+                    && ReadString(realSettlement, "result", "") == "inserted"
+                    && ReadString(settlementEvent, "phase", "") == "effect_settled"
+                    && ReadString(settlementPayload, "discoveryEventId", "") == ownedId
+                    && ReadString(settlementPayload, "effectStatus", "") == "measured"
+                    && ReadInt(settlementPayload, "measuredRelationshipChange", -1000) == 5
+                    && ReadString(repeatedSettlement, "result", "") == "replayed"
+                    && ReadString(duplicateSettlement, "result", "") == "id_conflict"
+                    && CursorsAt(9L, settlementId, nativeHistoryClient),
+                    "Only the exact archived measurement can follow the discovery, once, even after the effect is superseded.");
+
+                using (var emptyCursor = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign))
+                    ReignDatabase.ExecuteSql(emptyCursor,
+                        "UPDATE world_history_timelines SET head_sequence=0,head_event_id='' WHERE timeline_id=$timeline;",
+                        TestDict("timeline", timeline));
+                var emptyHead = Head(nextGeneration);
+                add("owned_history_head_proof_accepts_paired_empty_initial_cursor",
+                    ReadBool(emptyHead, "ok", false) && ReadLong(emptyHead, "headSequence", -1) == 0L
+                    && emptyHead.TryGetValue("headEventId", out object emptyId) && emptyId is string pair && pair.Length == 0,
+                    "An explicitly stored sequence zero and empty event ID form a valid starting pair.");
             }
             finally
             {

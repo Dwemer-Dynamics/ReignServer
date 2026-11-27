@@ -39,8 +39,10 @@ namespace ReignBetaServer
             routes.Get("/tests/campaign-command/readiness", request => WorldSimulationService.CampaignCommandReadinessApi(request.Query));
 #endif
             routes.Post("/world-history/ingest-batch", request => WorldSimulationService.WorldHistoryIngestBatchApi(request.JsonBody));
+            routes.Post(WorldSimulationService.OwnedJusticeHistoryAppendRoute, request => WorldSimulationService.WorldHistoryOwnedJusticeAppendApi(request.JsonBody));
             routes.Post("/world-history/timeline/open", request => WorldSimulationService.WorldHistoryOpenTimelineApi(request.JsonBody));
             routes.Get("/world-history/query", request => WorldSimulationService.WorldHistoryQueryApi(request.Query));
+            routes.Get("/world-history/head", request => WorldSimulationService.WorldHistoryHeadApi(request.Query));
             routes.GetPrefix("/world-history/event/", StringComparison.OrdinalIgnoreCase, request => WorldSimulationService.WorldHistoryEventApi(request.Query, Uri.UnescapeDataString(request.Path.Substring("/world-history/event/".Length))));
             routes.GetPrefix("/world-history/correlation/", StringComparison.OrdinalIgnoreCase, request => WorldSimulationService.WorldHistoryCorrelationApi(request.Query, Uri.UnescapeDataString(request.Path.Substring("/world-history/correlation/".Length))));
             routes.Post("/world-history/verify", request => WorldSimulationService.WorldHistoryVerifyApi(request.JsonBody));
@@ -67,6 +69,7 @@ namespace ReignBetaServer
 #endif
 #if !REIGN_EXCLUDE_COURT
             routes.Post("/arrests/case/apply", request => WorldSimulationService.ArrestCaseApplyApi(request.JsonBody));
+            routes.Post(WorldSimulationService.OwnedArrestReclassificationRoute, request => WorldSimulationService.ArrestCaseReclassifyApi(request.JsonBody));
             routes.Post("/arrests/evidence/evaluate", request => WorldSimulationService.ArrestEvidenceEvaluateApi(request.JsonBody));
 #if !REIGN_EXCLUDE_VERIFICATION
             routes.Post("/arrests/test/contracts", request => WorldSimulationService.ArrestContractReportApi());

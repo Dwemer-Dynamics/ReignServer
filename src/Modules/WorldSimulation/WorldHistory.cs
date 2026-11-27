@@ -301,6 +301,11 @@ namespace ReignBetaServer
                         errors.Add("An event was rejected because eventId was empty.");
                         continue;
                     }
+                    if (IsReservedOwnedJusticeEventId(eventId))
+                    {
+                        errors.Add("An owned justice event requires its exact append route.");
+                        continue;
+                    }
                     if (!seenEventIds.Add(eventId))
                     {
                         duplicates++;
@@ -696,9 +701,38 @@ namespace ReignBetaServer
             }
         }
 
+        internal static Dictionary<string, object> WorldHistoryHeadApi(Dictionary<string, string> query)
+        {
+            if (query == null || !query.TryGetValue("headProofVersion", out string version) || version != "1")
+                return WorldHistoryHeadProofFailure("invalid_request");
+
+            return ReadOwnedWorldHistorySnapshot(query, (connection, transaction, campaign, timeline) =>
+            {
+                var key = TestDict("campaign", campaign, "timeline", timeline,
+                    "generation", query["sharedActivityGeneration"]);
+                var head = WorldSimulationStore.SelectOwnedWorldHistoryHead(connection, key, transaction);
+                if (head == null) return null;
+
+                long sequence = ReadLong(head, "head_sequence", -1);
+                string eventId = ReadString(head, "head_event_id", "");
+                if (sequence < 0 || (sequence == 0 ? eventId.Length != 0 : string.IsNullOrWhiteSpace(eventId)))
+                    return WorldHistoryHeadProofFailure("head_unavailable");
+
+                return TestDict("ok", true, "headProofVersion", 1, "result", "observed",
+                    "headSequence", sequence, "headEventId", eventId,
+                    "nativeLoadSessionId", ReadOwnedHistoryLoadSession(connection, transaction, query["sharedActivityGeneration"]));
+            }, initializeInfrastructure: false) ?? WorldHistoryHeadProofFailure("owner_mismatch");
+        }
+
+        private static Dictionary<string, object> WorldHistoryHeadProofFailure(string result) =>
+            TestDict("ok", false, "headProofVersion", 1, "result", result);
+
         private static Dictionary<string, object> ReadOwnedWorldHistoryEventProof(
             Dictionary<string, string> query, string eventId)
         {
+            bool requireAdmission = query.TryGetValue("ownedAdmissionProofVersion", out string admissionVersion);
+            if (requireAdmission && (admissionVersion != "1" || !query.ContainsKey("nativeLoadSessionId")))
+                return WorldHistoryEventProofFailure("invalid_request", "Owned justice proof requires an exact active load session.");
             return ReadOwnedWorldHistorySnapshot(query, (connection, transaction, campaign, timeline) =>
             {
                 if (!TableExists(connection, "world_history_events") || !TableExists(connection, "world_history_entities"))
@@ -714,12 +748,21 @@ namespace ReignBetaServer
                     || ReadString(row, "timeline_id", "") != timeline)
                     return WorldHistoryEventProofFailure("not_found", "The complete justice event is absent from the current timeline.");
 
+                var result = TestDict("ok", true, "eventProofVersion", 1, "result", "observed", "event", row);
+                if (requireAdmission)
+                {
+                    string loadSession = ReadOwnedHistoryLoadSession(connection, transaction, query["sharedActivityGeneration"]);
+                    if (loadSession == null || loadSession != query["nativeLoadSessionId"]) return null;
+                    if (!PersistenceService.IsCampaignMigrationReady(connection, PersistenceService.ArrestLateEvidenceReceiptMigrationVersion)
+                        || WorldSimulationStore.SelectOwnedJusticeAdmission(connection, key, transaction) == null)
+                        return WorldHistoryEventProofFailure("not_found", "The event has no owned justice admission.");
+                    result["ownedAdmissionProofVersion"] = 1;
+                    result["nativeLoadSessionId"] = loadSession;
+                }
+
                 row["entities"] = Json.DeserializeObject(ReadString(row, "entities_json", "[]"));
                 row.Remove("entities_json");
-                return new Dictionary<string, object>
-                {
-                    ["ok"] = true, ["eventProofVersion"] = 1, ["result"] = "observed", ["event"] = row
-                };
+                return result;
             }, initializeInfrastructure: false) ?? WorldHistoryEventProofFailure("owner_mismatch", "The requested event scope is no longer current.");
         }
 

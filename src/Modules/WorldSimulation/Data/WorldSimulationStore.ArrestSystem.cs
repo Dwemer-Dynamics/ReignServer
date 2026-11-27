@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace ReignBetaServer
 {
@@ -51,6 +52,40 @@ ADD COLUMN IF NOT EXISTS effect_receipt_json TEXT NOT NULL DEFAULT '{}';");
 WHERE table_schema=current_schema() AND table_name='arrest_case_effect_state'
 AND column_name IN ('material_revision','effect_intent_id','effect_intent_material','effect_receipt_json');");
             return ReadInt(columns[0], "count", 0) == 4;
+        }
+
+        internal static void ApplyArrestLateEvidenceReceiptSchemaDdl(ReignDbConnection connection)
+        {
+            ReignDatabase.ExecuteSql(connection, @"ALTER TABLE arrest_case_effect_state
+ADD COLUMN IF NOT EXISTS late_discovery_id TEXT NOT NULL DEFAULT '',
+ADD COLUMN IF NOT EXISTS late_effect_intent_id TEXT NOT NULL DEFAULT '',
+ADD COLUMN IF NOT EXISTS late_effect_material TEXT NOT NULL DEFAULT '',
+ADD COLUMN IF NOT EXISTS late_effect_receipt_json TEXT NOT NULL DEFAULT '{}';");
+            ReignDatabase.ExecuteSql(connection, @"CREATE TABLE IF NOT EXISTS world_history_owned_justice_admissions (
+event_id TEXT PRIMARY KEY REFERENCES world_history_events(event_id) ON DELETE CASCADE,
+previous_sequence BIGINT NOT NULL CHECK(previous_sequence>=0), previous_event_id TEXT NOT NULL,
+settles_discovery_id TEXT UNIQUE);");
+        }
+
+        internal static Dictionary<string, object> SelectArrestLateEvidenceReceipt(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"SELECT material_revision,rescinded,late_discovery_id,
+late_effect_intent_id,late_effect_material,late_effect_receipt_json
+FROM arrest_case_effect_state WHERE campaign_id=$campaign AND timeline_id=$timeline
+AND case_id=$case AND accused_id=$subject AND player_id=$player AND tag_id=$tag
+AND late_discovery_id<>'' FOR UPDATE;", parameters, transaction).SingleOrDefault();
+        }
+
+        internal static bool WriteArrestLateEvidenceReceipt(ReignDbConnection connection,
+            Dictionary<string, object> parameters, ReignDbTransaction transaction)
+        {
+            return ReignDatabase.QuerySql(connection, @"UPDATE arrest_case_effect_state
+SET late_discovery_id=$discovery,late_effect_intent_id=$intent,late_effect_material=$material,
+late_effect_receipt_json=$lateReceipt
+WHERE campaign_id=$campaign AND timeline_id=$timeline AND case_id=$case
+AND accused_id=$subject AND player_id=$player AND tag_id=$tag AND late_discovery_id=''
+RETURNING case_id;", parameters, transaction).Count == 1;
         }
 
         internal static List<Dictionary<string, object>> SelectArrestCaseEffects(ReignDbConnection connection,
