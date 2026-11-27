@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ReignBeta.Shared.Rulers
 {
@@ -86,7 +89,9 @@ namespace ReignBeta.Shared.Rulers
         public RulerVerdict Verdict { get; set; }
         public RulerVerdict? PendingVerdict { get; set; }
         public RulerJudgmentInfluence? Influence { get; set; }
+        public Dictionary<string, RulerJudgmentInfluence> ClanInfluences { get; set; } = new Dictionary<string, RulerJudgmentInfluence>(StringComparer.Ordinal);
         public double CapturedDay { get; set; } = -1;
+        public bool DecisionCustodyConfirmed { get; set; }
         public double SentencedDay { get; set; } = -1;
         public double Deadline { get; set; }
         public double Draw { get; set; } = -1;
@@ -111,6 +116,7 @@ namespace ReignBeta.Shared.Rulers
     {
         public string OperationId { get; set; } = "";
         public string RulerId { get; set; } = "";
+        public string SubjectId { get; set; } = "";
         public RulerVerdict Verdict { get; set; }
         public int Chance { get; set; }
         public int Roll { get; set; }
@@ -236,12 +242,19 @@ namespace ReignBeta.Shared.Rulers
             || j.Stage == RulerJudgmentStage.Applying || j.Stage == RulerJudgmentStage.Completed
             || j.Stage == RulerJudgmentStage.Cancelled && (Finite(j.SentencedDay) && j.SentencedDay > 0
                 || Finite(j.Deadline) && j.Deadline > 0);
+        public static void RestoreDecisionCustodyClock(RulerJudgment j)
+        {
+            // A legacy sovereign record may contain time spent with a neutral or subordinate captor.
+            // Defeated-lord execution orders are created after the aftermath takes custody.
+            if (j.Stage == RulerJudgmentStage.AwaitingAuthority
+                || j.Stage == RulerJudgmentStage.AwaitingDecision && !j.DecisionCustodyConfirmed && !j.DefeatedLord)
+                j.CapturedDay = -1;
+        }
         public static void EnsureCaptureDay(RulerJudgment j, double day)
         {
-            // Old saves without a capture timestamp begin a full waiting window.
-            // A valid day zero is retained, as are future timestamps after a rewind.
-            if ((j.Stage == RulerJudgmentStage.AwaitingDecision || j.Stage == RulerJudgmentStage.AwaitingAuthority)
-                && Finite(day) && day >= 0 && (!Finite(j.CapturedDay) || j.CapturedDay < 0)) j.CapturedDay = day;
+            if (j.Stage != RulerJudgmentStage.AwaitingDecision || !Finite(day) || day < 0) return;
+            if (!Finite(j.CapturedDay) || j.CapturedDay < 0) j.CapturedDay = day;
+            j.DecisionCustodyConfirmed = true;
         }
         public static void SetDecisionAuthority(RulerJudgment j, string rulerId)
         {
@@ -250,11 +263,35 @@ namespace ReignBeta.Shared.Rulers
             // A queued choice belongs to its sovereign, not their successor.
             j.PendingVerdict = null;
             if (j.Influence != null) j.Influence.AuthorityChanged = true;
+            foreach (var attempt in j.ClanInfluences.Values) attempt.AuthorityChanged = true;
         }
-        public static bool InfluenceOpen(RulerJudgment j, double day)
-            => j.Stage == RulerJudgmentStage.AwaitingDecision && j.Influence == null && !j.PendingVerdict.HasValue
+        public static bool AppealWindowOpen(RulerJudgment j, double day)
+            => j.Stage == RulerJudgmentStage.AwaitingDecision && !j.PendingVerdict.HasValue
                 && Finite(day) && Finite(j.CapturedDay) && j.CapturedDay >= 0
                 && day >= j.CapturedDay && day < j.CapturedDay + DecisionDays;
+
+        public static bool InfluenceOpen(RulerJudgment j, double day) => j.Influence == null && AppealWindowOpen(j, day);
+
+        public static string ClanAppealId(string judgmentId, string clanId, string leaderId)
+        {
+            string identity = judgmentId + ":" + clanId.Length.ToString(CultureInfo.InvariantCulture) + ":" + clanId + leaderId;
+            using (var digest = SHA256.Create())
+                return "clan_" + BitConverter.ToString(digest.ComputeHash(Encoding.UTF8.GetBytes(identity))).Replace("-", "").ToLowerInvariant();
+        }
+
+        public static bool ClanAppealVerdictEligible(RulerVerdict verdict, bool executionAllowed)
+            => verdict == RulerVerdict.Freedom || verdict == RulerVerdict.Imprisonment
+                || verdict == RulerVerdict.CleanExecution && executionAllowed;
+
+        public static RulerVerdict? InfluencedClanVerdict(RulerJudgment? judgment, string clanId, string leaderId,
+            string rulerId, bool executionAllowed)
+        {
+            if (judgment == null || string.IsNullOrEmpty(rulerId) || judgment.VictorId != rulerId
+                || !judgment.ClanInfluences.TryGetValue(clanId, out var attempt) || !attempt.Succeeded
+                || attempt.AuthorityChanged || attempt.RulerId != rulerId || attempt.SubjectId != leaderId
+                || !ClanAppealVerdictEligible(attempt.Verdict, executionAllowed)) return null;
+            return attempt.Verdict;
+        }
 
         public static int InfluenceChance(int relation) => Math.Max(0, Math.Min(100, relation) - 25);
 
