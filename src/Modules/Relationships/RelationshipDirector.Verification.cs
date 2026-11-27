@@ -38,11 +38,32 @@ namespace ReignBetaServer
                     ReadBool(preview,"ok",false)&&ReadBool(preview,"eligible",false)&&!ReadBool(preview,"rollPerformed",true)&&ReadDouble(preview,"roll",0d)==-1d&&previewRows==0,
                     "Opening the popup reports eligibility and chance without consuming or storing a pregnancy roll.");
 
+                var pregnantRequest = request("attempt_preview_cancel", "preview");
+                ReadDictionary(pregnantRequest, "partner")["isPregnant"] = true;
+                var pregnantPreview = VerifyPlayerConceptionAttemptApi(pregnantRequest);
+                add("warning_preview_is_pregnancy_independent",
+                    ReadBool(preview, "showWarning", false) && Json.Serialize(preview) == Json.Serialize(pregnantPreview),
+                    "An otherwise qualifying action returns exactly the same stateless warning preview during pregnancy.");
+                var invalidRequest = request("attempt_incomplete", "preview");
+                invalidRequest["completed"] = false;
+                add("incomplete_act_cannot_open_warning",
+                    !ReadBool(VerifyPlayerConceptionAttemptApi(invalidRequest), "showWarning", true),
+                    "An incomplete event does not enter the decision flow.");
+                string noSecondConception = Enumerable.Range(0, 1000).Select(i => "pregnancy_already_active_" + i)
+                    .First(id => StableUnit(id + "|player_conception") < PlayerConceptionChance(30d));
+                var activeOutcome = request(noSecondConception, "proceed");
+                ReadDictionary(activeOutcome, "partner")["isPregnant"] = true;
+                var blocked = VerifyPlayerConceptionAttemptApi(activeOutcome);
+                add("proceed_cannot_start_a_second_pregnancy",
+                    ReadBool(blocked, "ok", false) && !ReadBool(blocked, "eligible", true)
+                    && !ReadBool(blocked, "success", true) && ReadString(blocked, "conceptionId", "") == "",
+                    "Proceed still rejects conception while pregnant, even for a seed that otherwise succeeds.");
+
                 Dictionary<string, object> cancelled=VerifyPlayerConceptionAttemptApi(request("attempt_preview_cancel","pull_out"));
                 Dictionary<string, object> cancelledThenProceed=VerifyPlayerConceptionAttemptApi(request("attempt_preview_cancel","proceed"));
                 Dictionary<string, object> cancelledRow;
                 using(ReignDbConnection connection=ReignDatabase.OpenCampaignConnection(campaign))
-                    cancelledRow=RelationshipsStore.SelectConceptionAttempts(connection).FirstOrDefault();
+                    cancelledRow=RelationshipsStore.SelectConceptionAttempts2(connection, TestDict("id", "attempt_preview_cancel")).FirstOrDefault();
                 add("pull_out_never_rolls",
                     ReadBool(cancelled,"cancelled",false)&&!ReadBool(cancelled,"rollPerformed",true)&&ReadDouble(cancelled,"roll",0d)==-1d
                     &&ReadString(cancelledRow,"status","")=="cancelled"&&ReadDouble(cancelledRow,"roll",0d)==-1d,

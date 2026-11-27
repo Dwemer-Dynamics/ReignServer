@@ -447,11 +447,9 @@ namespace ReignBetaServer
             double age = ReadDouble(mother, "age", 0d);
             string text = ReadFirstString(payload, "actionText", "npcReply", "playerText", "text", "description");
             bool verified = ReadBool(payload, "verifiedAct", false) || IsExplicitConceptionCapablePlayerText(text);
-            bool eligible = verified && !string.IsNullOrWhiteSpace(motherId) && !string.IsNullOrWhiteSpace(fatherId)
-                && age >= 18d && age <= 45d && !ReadBool(mother, "isPregnant", false)
+            bool showWarning = verified && !string.IsNullOrWhiteSpace(motherId) && !string.IsNullOrWhiteSpace(fatherId)
+                && motherId != fatherId && age >= 18d && age <= 45d
                 && ReadBool(payload, "coLocated", true) && ReadBool(payload, "completed", true);
-            double chance = eligible ? PlayerConceptionChance(age) : 0d;
-            double day = ReadDouble(payload, "worldDay", 0d);
 
             // A preview is deliberately stateless: displaying the choice must never
             // consume a deterministic roll or create a conception record.
@@ -459,11 +457,17 @@ namespace ReignBetaServer
             {
                 return new Dictionary<string, object> {
                     ["ok"] = true,["attemptId"] = attemptId,["decision"] = decision,
-                    ["verified"] = verified,["eligible"] = eligible,["chance"] = chance,
+                    // Legacy clients use eligible to decide whether to show the
+                    // popup. Preview chance is the nominal age-based probability.
+                    ["verified"] = verified,["showWarning"] = showWarning,["eligible"] = showWarning,
+                    ["chance"] = showWarning ? PlayerConceptionChance(age) : 0d,
                     ["roll"] = -1d,["rollPerformed"] = false,["success"] = false,["cancelled"] = false
                 };
             }
 
+            bool eligible = showWarning && !ReadBool(mother, "isPregnant", false);
+            double chance = eligible ? PlayerConceptionChance(age) : 0d;
+            double day = ReadDouble(payload, "worldDay", 0d);
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             using (ReignDbTransaction transaction = connection.BeginTransaction(System.Data.IsolationLevel.ReadCommitted))
             {
