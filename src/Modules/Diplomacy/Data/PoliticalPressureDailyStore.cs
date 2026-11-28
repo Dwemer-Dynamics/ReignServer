@@ -130,6 +130,129 @@ INSERT INTO political_pressure_daily_holds(campaign_id,timeline_id,day_key,stora
 VALUES($campaign,$timeline,$day,$storage,$generation,$reason)
 ON CONFLICT(campaign_id,timeline_id,day_key,storage_witness,restore_generation) DO NOTHING;", scope, transaction);
 
+        // One keyset window. The caller owns the active campaign, timeline and restore
+        // witness and holds the pressure advisory transaction lock before this statement.
+        internal static (int? LastDay, int Inserted) RepairLegacyPoliticalPressureMetadataWindow(
+            ReignDbConnection connection, ReignDbTransaction transaction, Dictionary<string, object> scope)
+        {
+            var row = ReignDatabase.QuerySql(connection, @"
+WITH day_window AS MATERIALIZED (
+ SELECT d.* FROM political_pressure_daily_rolls d
+ WHERE d.campaign_id=$campaign AND d.timeline_id=$timeline
+   AND d.day_key>$after AND d.day_key<=$through
+ ORDER BY d.day_key LIMIT 32
+), proved AS (
+ SELECT i.*, i.correlation_id || ':incident_completed::' || i.incident_id AS completion_id,
+        'daily:' || CAST(d.day_key AS text) AS daily_id
+ FROM day_window d
+ JOIN political_pressure_incidents i ON i.campaign_id=d.campaign_id AND i.timeline_id=d.timeline_id
+   AND i.day_key=d.day_key AND i.incident_id=d.incident_id
+ WHERE d.status='incident_created' AND d.passed=1 AND d.chance=$chance AND d.roll BETWEEN 1 AND d.chance
+   AND i.incident_id='political-pressure:' || d.timeline_id || ':' || CAST(d.day_key AS text)
+   AND i.correlation_id=i.incident_id
+   AND i.origin_kingdom_id=d.origin_kingdom_id AND i.origin_kingdom_id<>''
+   AND i.target_kingdom_id<>'' AND i.origin_kingdom_id<>i.target_kingdom_id
+   AND i.origin_ruler_id<>'' AND i.target_ruler_id<>''
+   AND i.world_day=d.world_day AND d.world_day>=d.day_key AND d.world_day<d.day_key+1
+   AND i.status='completed' AND i.notice_status IN ('ready','fetched','acknowledged') AND btrim(i.narrative)<>''
+   AND i.llm_selector_status IN ('llm','invalid_fallback','unavailable_fallback')
+   AND i.llm_narration_status IN ('llm','invalid_fallback','unavailable_fallback')
+ FOR SHARE OF i
+), eligible AS (
+ SELECT p.* FROM proved p
+ LEFT JOIN political_pressure_activity a ON a.activity_id=p.completion_id
+ WHERE a.activity_id IS NULL OR (a.campaign_id=p.campaign_id AND a.timeline_id=p.timeline_id
+       AND a.incident_id=p.incident_id AND a.event_type='incident_completed' AND a.status='completed'
+       AND a.correlation_id=p.correlation_id AND a.action_id='' AND a.world_day=p.world_day
+       AND a.actor_kingdom_id=p.origin_kingdom_id AND a.target_kingdom_id=p.target_kingdom_id
+       AND a.actor_ruler_id=p.origin_ruler_id AND a.target_ruler_id=p.target_ruler_id)
+), activity AS (
+ INSERT INTO political_pressure_activity(activity_id,campaign_id,timeline_id,world_day,incident_id,
+    actor_kingdom_id,target_kingdom_id,actor_ruler_id,target_ruler_id,event_type,polarity,channel,severity,
+    status,before_value,after_value,roll,chance,action_id,correlation_id,reason,payload_json,created_ts)
+ SELECT completion_id,campaign_id,timeline_id,world_day,incident_id,
+    origin_kingdom_id,target_kingdom_id,origin_ruler_id,target_ruler_id,'incident_completed',polarity,channel,severity,
+    'completed',origin_pressure_before,origin_pressure_after,polarity_roll,hostile_chance,'',correlation_id,
+    origin_stance || ' / ' || target_stance,
+    CAST(json_build_object('originStance',origin_stance,'targetStance',target_stance,'pressureAmount',pressure_amount,
+                           'selectorStatus',llm_selector_status,'narrationStatus',llm_narration_status) AS text),$ts
+ FROM eligible ON CONFLICT(activity_id) DO NOTHING RETURNING activity_id
+), counters AS (
+ INSERT INTO world_test_chunk_counters(campaign_id,timeline_id,day_key,subsystem,chunk_key,counters_json,
+     created_ts,updated_ts)
+ SELECT campaign_id,timeline_id,day_key,'political_pressures',
+     daily_id, '{""dailyRolls"":1,""dailyRollsPassed"":1,""status:incident_created"":1}',$ts,$ts
+ FROM eligible
+ UNION ALL
+ SELECT campaign_id,timeline_id,day_key,'political_pressures',
+     completion_id, '{""activity:incident_completed"":1,""status:completed"":1}',$ts,$ts
+ FROM eligible
+ ON CONFLICT(campaign_id,timeline_id,day_key,subsystem,chunk_key) DO NOTHING RETURNING chunk_key
+)
+SELECT (SELECT MAX(day_key) FROM day_window)::integer AS last_day,
+       ((SELECT COUNT(*) FROM activity) + (SELECT COUNT(*) FROM counters))::integer AS inserted;",
+                scope, transaction, commandTimeoutSeconds: 2).Single();
+            // Legacy day_key uses bigint on PostgreSQL. The int caller bounds make this projection exact.
+            return (row["last_day"] is null ? (int?)null : (int)row["last_day"], (int)row["inserted"]);
+        }
+
+        internal static Dictionary<string, object> ReadPressureRepairOwner(ReignDbConnection connection,
+            ReignDbTransaction transaction, Dictionary<string, object> scope)
+        {
+            var ready = ReignDatabase.QuerySql(connection, @"
+SELECT to_regclass(current_schema() || '.world_history_timelines') IS NOT NULL AND
+       to_regclass(current_schema() || '.memory_precision_state') IS NOT NULL AND
+       to_regclass(current_schema() || '.political_pressure_daily_rolls') IS NOT NULL AND
+       to_regclass(current_schema() || '.political_pressure_incidents') IS NOT NULL AND
+       to_regclass(current_schema() || '.political_pressure_activity') IS NOT NULL AND
+       to_regclass(current_schema() || '.world_test_chunk_counters') IS NOT NULL AS ready;",
+                scope, transaction, commandTimeoutSeconds: 2).Single();
+            if (!ReadBool(ready, "ready", false)) return null;
+
+            var owners = ReignDatabase.QuerySql(connection, @"
+SELECT w.timeline_id,n.oid::text || ':' || extract(epoch from r.updated_utc)::text AS storage_witness,
+       p.restore_generation
+FROM reign_meta.campaign_registry r
+JOIN pg_namespace n ON n.nspname=r.schema_name AND n.nspname=current_schema()
+JOIN world_history_timelines w ON w.campaign_id=r.campaign_id AND w.is_active=1
+JOIN memory_precision_state p ON p.state_id='current'
+WHERE r.campaign_id=$campaign
+LIMIT 2 FOR SHARE OF r,w,p;", scope, transaction, commandTimeoutSeconds: 2);
+            return owners.Count == 1 ? owners[0] : null;
+        }
+
+        internal static Dictionary<string, object> ReadPressureRepairCursor(ReignDbConnection connection,
+            ReignDbTransaction transaction, Dictionary<string, object> scope)
+            => ReignDatabase.QuerySql(connection, @"
+SELECT last_day,through_day,retry_after IS NOT NULL AS completed,
+       COALESCE(retry_after>clock_timestamp(),false) AS cooling_down
+FROM reign_meta.political_pressure_repair_cursor
+WHERE campaign_id=$campaign AND timeline_id=$timeline
+  AND storage_witness=$witness AND restore_generation=$restore;",
+                scope, transaction, commandTimeoutSeconds: 2).SingleOrDefault();
+
+        internal static int ReadPressureRepairHighWater(ReignDbConnection connection,
+            ReignDbTransaction transaction, Dictionary<string, object> scope)
+            => ReadInt(ReignDatabase.QuerySql(connection, @"
+SELECT day_key FROM political_pressure_daily_rolls
+WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key>=0
+ORDER BY day_key DESC LIMIT 1;", scope, transaction, commandTimeoutSeconds: 2).SingleOrDefault(), "day_key", -1);
+
+        internal static void PublishPressureRepairCursor(ReignDbConnection connection,
+            ReignDbTransaction transaction, Dictionary<string, object> scope)
+        {
+            if (ReignDatabase.QuerySql(connection, @"
+INSERT INTO reign_meta.political_pressure_repair_cursor(campaign_id,timeline_id,storage_witness,
+ restore_generation,last_day,through_day,retry_after)
+VALUES($campaign,$timeline,$witness,$restore,$last,$through,
+ CASE WHEN $completed THEN clock_timestamp()+interval '1 day' ELSE NULL END)
+ON CONFLICT(campaign_id) DO UPDATE SET timeline_id=excluded.timeline_id,storage_witness=excluded.storage_witness,
+ restore_generation=excluded.restore_generation,last_day=excluded.last_day,through_day=excluded.through_day,
+ retry_after=excluded.retry_after
+RETURNING campaign_id;", scope, transaction, commandTimeoutSeconds: 2).Count != 1)
+                throw new System.InvalidOperationException("Could not publish the exact pressure repair cursor.");
+        }
+
         internal static Dictionary<string, object> ReadPublishedLegacyPressureIncident(ReignDbConnection connection,
             ReignDbTransaction transaction, Dictionary<string, object> scope)
             => ReignDatabase.QuerySql(connection, @"

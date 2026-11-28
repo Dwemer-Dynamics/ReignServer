@@ -45,6 +45,35 @@ RETURNING day_key;", claim.Terms());
                 if (changed.Count != 1) throw new InvalidOperationException("Fixture no longer owns its exact day.");
             }
 
+            Claim(19, .25, original, out var contendedClaim);
+            if (contendedClaim == null) throw new InvalidOperationException("Contention fixture did not own its day.");
+            PressureDayClaim recoveredSeal;
+            int busyAttempts = 0;
+            using (var blocker = setup.BeginTransaction())
+            {
+                if (!TryEnterPressureMutation(setup, blocker))
+                    throw new InvalidOperationException("Contention fixture could not acquire the independent advisory lock.");
+                try
+                {
+                    ObservePressurePublicationForTests = stage =>
+                    {
+                        if (stage != "seal_busy") return;
+                        if (++busyAttempts == 1) blocker.Rollback();
+                    };
+                    recoveredSeal = SealPressureDay(contendedClaim, PressurePlan(contendedClaim, "no_eligible_kingdoms"));
+                }
+                finally { ObservePressurePublicationForTests = null; }
+            }
+            var recoveredResult = recoveredSeal == null ? null
+                : PublishPressureDay(recoveredSeal, TryParseJsonObject(recoveredSeal.PreparedJson));
+            var recoveredRow = DiplomacyStore.FindPoliticalPressureDailyProducer(setup, null, contendedClaim.Terms());
+            add("daily_seal_retries_transient_advisory_contention_for_same_owner",
+                busyAttempts == 1 && recoveredSeal?.Token == contendedClaim.Token
+                && recoveredSeal.InputSha == contendedClaim.InputSha && ReadBool(recoveredResult, "ok", false)
+                && ReadString(recoveredRow, "claim_id", "") == contendedClaim.Token
+                && ReadString(recoveredRow, "result_sha256", "").Length == 64,
+                "An independent PostgreSQL advisory lock defers the first seal. The same live claim seals and publishes after release.");
+
             var initial = Claim(20, .25, original, out var first);
             var concurrent = Claim(20, .75, successor, out _);
             if (first == null) throw new InvalidOperationException("Initial fixture did not own its day.");
@@ -141,6 +170,8 @@ SELECT matter_id FROM international_court_queue WHERE matter_id=$incident;", Tes
                 && retried.PreparedSha == fixture.PreparedSha && retried.WorldDay == 22.5
                 && ReadString(effect, "target_id", "") == "original_holdings" && courtRows.Count == 1,
                 "Two separate rollback boundaries hide pressure and Court from an independent connection, and replay keeps the original holdings.");
+            CheckLegacyPressureMetadataWindow(setup, campaign, timeline, incident, retried.WorldDay, add);
+            CheckLegacyPressureMaintenanceOwnership(setup, campaign, timeline, incident, add);
 #endif
 
             Claim(21, .3, original, out var older);
@@ -189,6 +220,124 @@ SELECT matter_id FROM international_court_queue WHERE matter_id=$incident;", Tes
                 && ReadBool(legacyResult, "ok", false) && ReadBool(resumedLater, "ok", false),
                 "Historical holds preserve their rows while two real unfinished dates drain oldest first, once per date.");
         }
+
+#if !REIGN_EXCLUDE_COURT
+        private static void CheckLegacyPressureMaintenanceOwnership(ReignDbConnection observer, string campaign,
+            string timeline, string incident, Action<string, bool, string> add)
+        {
+            long epoch = System.Threading.Interlocked.Read(ref PersistenceService.CampaignReplacementGeneration);
+            var stale = RepairLegacyPressureMetadata(campaign, unchecked(epoch - 1));
+            (bool Committed, int Inserted) contended;
+            using (var blocker = observer.BeginTransaction())
+            {
+                if (!TryEnterPressureMutation(observer, blocker))
+                    throw new InvalidOperationException("Legacy repair fixture lost its guard.");
+                contended = RepairLegacyPressureMetadata(campaign, epoch);
+                blocker.Rollback();
+            }
+
+            Dictionary<string, object> ReadCursor() => ReignDatabase.QuerySql(observer, @"
+SELECT timeline_id,storage_witness,restore_generation,last_day,through_day,retry_after IS NOT NULL AS completed,
+       retry_after::text AS retry_after
+FROM reign_meta.political_pressure_repair_cursor WHERE campaign_id=$campaign;",
+                TestDict("campaign", campaign)).SingleOrDefault();
+            bool absent = ReadCursor() == null;
+            var scope = TestDict("campaign", campaign, "timeline", timeline, "incident", incident);
+            ReignDatabase.ExecuteSql(observer, @"
+DELETE FROM world_test_chunk_counters WHERE campaign_id=$campaign AND timeline_id=$timeline
+  AND day_key=22 AND subsystem='political_pressures' AND chunk_key='daily:22';
+UPDATE political_pressure_incidents SET notice_status='preparing'
+  WHERE campaign_id=$campaign AND timeline_id=$timeline AND incident_id=$incident;", scope);
+            var processed = RepairLegacyPressureMetadata(campaign, epoch);
+            var cursor = ReadCursor();
+            var repeated = RepairLegacyPressureMetadata(campaign, epoch);
+            add("daily_legacy_cursor_is_durable_and_exactly_owned",
+                !stale.Committed && !contended.Committed && absent && processed.Committed
+                && processed.Inserted == 0 && !repeated.Committed && ReadString(cursor, "timeline_id", "") == timeline
+                && ReadString(cursor, "storage_witness", "").Length > 0
+                && ReadString(cursor, "restore_generation", "") == "fixture_pressure_original"
+                && ReadInt(cursor, "last_day", -1) == 22 && ReadInt(cursor, "through_day", -1) == 22
+                && ReadBool(cursor, "completed", false),
+                "An old-epoch or advisory-contended attempt leaves no cursor. The active registered timeline publishes once "
+                + $"and an independent connection observes it. Stale committed: {stale.Committed}, contended committed: {contended.Committed}, "
+                + $"cursor absent before repair: {absent}, processed: {processed}, repeat: {repeated}, cursor: {Json.Serialize(cursor)}.");
+
+            ReignDatabase.ExecuteSql(observer, @"
+UPDATE political_pressure_incidents SET notice_status='ready'
+  WHERE campaign_id=$campaign AND timeline_id=$timeline AND incident_id=$incident;
+UPDATE reign_meta.political_pressure_repair_cursor SET retry_after=clock_timestamp()-interval '1 second'
+  WHERE campaign_id=$campaign AND timeline_id=$timeline;", scope);
+            Dictionary<string, object> ReadDailyCounter() => ReignDatabase.QuerySql(observer, @"
+SELECT chunk_key FROM world_test_chunk_counters WHERE campaign_id=$campaign AND timeline_id=$timeline
+  AND day_key=22 AND subsystem='political_pressures' AND chunk_key='daily:22';", scope).SingleOrDefault();
+            string cursorBeforeFault = Json.Serialize(ReadCursor());
+            bool startedWithoutCounter = ReadDailyCounter() == null;
+            (bool Committed, int Inserted) revisited = default;
+            var recovery = PersistenceService.VerifyLegacyPressureDirtyMarkerRecovery(campaign,
+                () => { RepairLegacyPressureMetadata(campaign, epoch); },
+                () => ReadDailyCounter() == null && Json.Serialize(ReadCursor()) == cursorBeforeFault,
+                () =>
+                {
+                    revisited = RepairLegacyPressureMetadata(campaign, epoch);
+                    return revisited.Committed && revisited.Inserted == 1 && ReadDailyCounter() != null
+                        && Json.Serialize(ReadCursor()) != cursorBeforeFault;
+                });
+            add("daily_legacy_dirty_marker_failure_rolls_back_telemetry_and_cursor",
+                startedWithoutCounter && recovery.FaultObserved && recovery.RolledBack && recovery.Retried,
+                "The real repair worker leaves raw rows, cursor and clean marker unchanged after a failed marker replacement. "
+                + "Its retry publishes both PostgreSQL changes and a reloadable dirty marker. "
+                + "Fault observed: " + recovery.FaultObserved + ", rolled back: " + recovery.RolledBack
+                + ", retried: " + recovery.Retried + ".");
+            var repaired = ReadDailyCounter();
+            add("daily_legacy_cursor_revisits_newly_provable_history",
+                processed.Inserted == 0 && !repeated.Committed && revisited.Committed && revisited.Inserted == 1
+                && ReadString(repaired, "chunk_key", "") == "daily:22",
+                "A preparing incident is skipped for the current sweep and repaired once it is terminal on the next bounded sweep.");
+        }
+
+        private static void CheckLegacyPressureMetadataWindow(ReignDbConnection connection, string campaign,
+            string timeline, string incident, double worldDay, Action<string, bool, string> add)
+        {
+            int day = (int)Math.Floor(worldDay);
+            string activity = incident + ":incident_completed::" + incident;
+            string daily = "daily:" + day.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var scope = TestDict("campaign", campaign, "timeline", timeline, "activity", activity, "daily", daily,
+                "after", day - 1, "through", day, "ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                "incident", incident, "chance", PoliticalPressureIncidentChance, "day", day);
+            using var transaction = connection.BeginTransaction();
+            if (!TryEnterPressureMutation(connection, transaction))
+                throw new InvalidOperationException("Legacy repair fixture lost the exact pressure lock.");
+
+            var countBefore = DiplomacyStore.RepairLegacyPoliticalPressureMetadataWindow(connection, transaction, scope);
+            ReignDatabase.ExecuteSql(connection, @"
+DELETE FROM political_pressure_activity WHERE activity_id=$activity;
+DELETE FROM world_test_chunk_counters WHERE campaign_id=$campaign AND timeline_id=$timeline
+  AND day_key=$day AND subsystem='political_pressures' AND chunk_key IN ($daily,$activity);
+UPDATE political_pressure_incidents SET notice_status='preparing'
+  WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND incident_id=$incident;",
+                scope, transaction);
+            var preparing = DiplomacyStore.RepairLegacyPoliticalPressureMetadataWindow(connection, transaction, scope);
+            ReignDatabase.ExecuteSql(connection, @"
+UPDATE political_pressure_incidents SET notice_status='acknowledged'
+  WHERE campaign_id=$campaign AND timeline_id=$timeline AND day_key=$day AND incident_id=$incident;",
+                scope, transaction);
+            var repaired = DiplomacyStore.RepairLegacyPoliticalPressureMetadataWindow(connection, transaction, scope);
+            var repeated = DiplomacyStore.RepairLegacyPoliticalPressureMetadataWindow(connection, transaction, scope);
+            ReignDatabase.ExecuteSql(connection, @"
+DELETE FROM world_test_chunk_counters WHERE campaign_id=$campaign AND timeline_id=$timeline
+  AND day_key=$day AND subsystem='political_pressures' AND chunk_key=$daily;
+UPDATE political_pressure_activity SET actor_ruler_id='conflicting_fixture_ruler' WHERE activity_id=$activity;",
+                scope, transaction);
+            var collision = DiplomacyStore.RepairLegacyPoliticalPressureMetadataWindow(connection, transaction, scope);
+            transaction.Rollback();
+            add("daily_legacy_exact_window_repairs_only_proven_missing_metadata",
+                countBefore == (day, 0) && preparing == (day, 0) && repaired == (day, 3)
+                && repeated == (day, 0) && collision == (day, 0),
+                "An exact completed acknowledged incident repairs all three missing rows once. Preparing and conflicting activity are held. "
+                + $"Window (last day, inserted) before: {countBefore}, preparing: {preparing}, repaired: {repaired}, "
+                + $"repeat: {repeated}, collision: {collision}.");
+        }
+#endif
     }
 }
 #endif

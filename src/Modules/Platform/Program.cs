@@ -748,6 +748,7 @@ namespace ReignBetaServer
             ReputationService.ResumePendingReputationReasonJobs();
             RelationshipsService.StartContinuousRelationshipWorker();
             WorldSimulationService.StartWorldTestRollupWorker();
+            DiplomacyService.StartLegacyPressureRepair();
             DialogueService.ResumePendingMemoryBackgroundJobs();
             DialogueService.StartSemanticMemorySubsystem(settings);
             PersistenceService.ProcessPendingCampaignRetirementsAtStartup();
@@ -821,6 +822,7 @@ namespace ReignBetaServer
                     DeleteAllScheduledSettings = null;
                 }
                 // Idempotent; also closes admission when the listener exited exceptionally.
+                DiplomacyService.StopLegacyPressureRepair();
                 Task backgroundFence = OperationsService.StopPriorityBackgroundScheduler("listener_closed");
                 // Published before any quiescence snapshot so the semantic pump observes it.
                 ShutdownRequested = true;

@@ -5,6 +5,7 @@ using System.Data;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 namespace ReignBetaServer
 {
@@ -245,22 +246,51 @@ namespace ReignBetaServer
             if (claim.PreparedJson.Length > 0) return claim;
             string prepared = Json.Serialize(ready);
             string preparedSha = PressureDailyHash(prepared);
+            for (int attempt = 1; ; attempt++)
+            {
+                string deferred = TrySealPressurePlan(claim, prepared, preparedSha);
+                if (deferred == null)
+                {
+                    if (attempt > 1) LogPressureSeal(claim, "recovered_advisory_busy", attempt);
+                    return claim with { PreparedJson = prepared, PreparedSha = preparedSha };
+                }
+                if (deferred != "advisory_busy" || attempt == 4)
+                {
+                    LogPressureSeal(claim, deferred, attempt);
+                    return null;
+                }
+
+                // Back off after closing the transaction, connection and timeline scope.
+                // Keep the same serialized plan and claim token so an expired owner cannot publish.
+                ObservePressurePublicationForTests?.Invoke("seal_busy");
+                Thread.Sleep(50 << (attempt - 1));
+            }
+        }
+
+        private static void LogPressureSeal(PressureDayClaim claim, string reason, int attempts)
+            => OperationsService.LogOperational("diplomacy.pressure_producer_seal", TestDict(
+                "campaignId", claim.Campaign, "timelineId", claim.Timeline, "day", claim.Day,
+                "reason", reason, "attempts", attempts));
+
+        private static string TrySealPressurePlan(PressureDayClaim claim, string prepared, string preparedSha)
+        {
             using var timelineScope = WorldSimulationService.EnterWorldHistoryTimelineScope(claim.Campaign);
             using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(claim.Campaign,
                 trackCampaignMutations: true, initializeInfrastructure: false);
-            if (connection == null) return null;
+            if (connection == null) return "connection_unavailable";
             using var suppress = new ReignDatabase.SqlStatementRetrySuppression(connection);
             using var transaction = connection.BeginTransaction(IsolationLevel.ReadCommitted);
             var terms = claim.Terms();
             terms["prepared"] = prepared;
             terms["preparedSha"] = preparedSha;
-            if (!TryEnterPressureMutation(connection, transaction)
-                || ReadPressureStorageWitness(connection, transaction, claim.Campaign, claim.Timeline) != claim.Witness
-                || !DiplomacyStore.SealPoliticalPressureDailyProducer(connection, transaction, terms))
-                return null;
+            if (!TryEnterPressureMutation(connection, transaction)) return "advisory_busy";
+            if (ReadPressureStorageWitness(connection, transaction, claim.Campaign, claim.Timeline) != claim.Witness)
+                return "scope_changed";
+            if (!DiplomacyStore.SealPoliticalPressureDailyProducer(connection, transaction, terms))
+                return "claim_write_refused";
             PersistenceService.MarkSaveSyncActiveStateDirty(claim.Campaign);
             transaction.Commit();
-            return claim with { PreparedJson = prepared, PreparedSha = preparedSha };
+            return null;
         }
 
         [ThreadStatic] private static Action<string> observePressurePublicationForTests;
