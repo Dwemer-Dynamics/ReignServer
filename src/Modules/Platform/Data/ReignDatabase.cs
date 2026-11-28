@@ -575,7 +575,8 @@ WHERE table_schema=current_schema()
             ReignDbConnection connection,
             string sql,
             Dictionary<string, object> parameters = null,
-            ReignDbTransaction transaction = null)
+            ReignDbTransaction transaction = null,
+            int commandTimeoutSeconds = 60)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
             PersistenceService.RequireSaveSyncConnectionAvailable(connection);
@@ -589,7 +590,7 @@ WHERE table_schema=current_schema()
                     using (ReignDbCommand command = connection.CreateCommand())
                     {
                         command.CommandText = ReignPostgreSqlDialect.Normalize(connection, sql);
-                        command.CommandTimeout = 60;
+                        command.CommandTimeout = commandTimeoutSeconds;
                         if (transaction != null) command.Transaction = transaction;
                         AddSqlParameters(command, parameters);
                         long executeStarted = timing == null ? 0 : Stopwatch.GetTimestamp();

@@ -547,6 +547,17 @@ namespace ReignBetaServer
             }
         }
 
+        internal static bool TryMarkSaveSyncDirtyForMaintenance(string campaignId)
+        {
+            if (!Monitor.TryEnter(SaveSyncActiveStateLock)) return false;
+            try
+            {
+                MarkSaveSyncActiveStateDirty(campaignId);
+                return true;
+            }
+            finally { Monitor.Exit(SaveSyncActiveStateLock); }
+        }
+
         private static bool IsSaveSyncActiveStateCleanForPoint(
             string campaignId,
             string savePointId)
@@ -609,7 +620,7 @@ namespace ReignBetaServer
             string temp = path + ".tmp_" + Guid.NewGuid().ToString("N");
             try
             {
-                File.WriteAllText(temp, Json.Serialize(new Dictionary<string, object>
+                byte[] payload = new UTF8Encoding(false).GetBytes(Json.Serialize(new Dictionary<string, object>
                 {
                     ["format"] = "bannerlord-reign-save-sync-active-state",
                     ["version"] = 1,
@@ -618,8 +629,14 @@ namespace ReignBetaServer
                     ["calendarSha256"] = state.CalendarSha256 ?? "",
                     ["dirty"] = dirty,
                     ["updatedUtc"] = DateTime.UtcNow.ToString("o")
-                }), new UTF8Encoding(false));
+                }));
+                using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    stream.Write(payload);
+                    stream.Flush(flushToDisk: true);
+                }
                 ReplaceSaveSyncFileWithRetry(temp, path);
+                SyncSaveSyncActiveStateDirectory(Path.GetDirectoryName(path));
             }
             catch
             {
@@ -627,6 +644,31 @@ namespace ReignBetaServer
                 TryDeleteFile(temp);
                 throw;
             }
+        }
+
+        [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+        private static extern int OpenSaveSyncDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+
+        [DllImport("libc", EntryPoint = "fsync", SetLastError = true)]
+        private static extern int FlushSaveSyncDirectory(int descriptor);
+
+        [DllImport("libc", EntryPoint = "close")]
+        private static extern int CloseSaveSyncDirectory(int descriptor);
+
+        private static void SyncSaveSyncActiveStateDirectory(string directory)
+        {
+            if (!OperatingSystem.IsLinux()) return;
+            int descriptor = OpenSaveSyncDirectory(directory, 0);
+            if (descriptor < 0)
+                throw new IOException("Could not open the Save Sync marker directory.",
+                    new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError()));
+            try
+            {
+                if (FlushSaveSyncDirectory(descriptor) != 0)
+                    throw new IOException("Could not make the Save Sync marker replacement durable.",
+                        new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError()));
+            }
+            finally { CloseSaveSyncDirectory(descriptor); }
         }
 
         internal static void ResumePendingSaveSyncOptimizations()

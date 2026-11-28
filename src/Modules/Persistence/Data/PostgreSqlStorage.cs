@@ -218,7 +218,8 @@ RETURNING (xmax = 0) AS inserted;", connection, transaction))
         }
 
         internal static NpgsqlConnection TryOpenRegisteredCampaignConnection(string campaignId,
-            bool trackCampaignMutations = false, bool initializeInfrastructure = true, bool allowEditorRecoveryWitness = false)
+            bool trackCampaignMutations = false, bool initializeInfrastructure = true, bool allowEditorRecoveryWitness = false,
+            bool boundedMaintenance = false)
         {
             PersistenceService.ThrowIfCampaignRequestReplaced();
             string normalizedCampaignId = NormalizeCampaignId(campaignId);
@@ -228,7 +229,7 @@ RETURNING (xmax = 0) AS inserted;", connection, transaction))
             else if (!System.Threading.Volatile.Read(ref InfrastructureReady)) return null;
 
             string schema = CampaignSchemaName(normalizedCampaignId);
-            NpgsqlConnection connection = OpenDatabaseConnection();
+            NpgsqlConnection connection = boundedMaintenance ? OpenBoundedMaintenanceConnection() : OpenDatabaseConnection();
             try
             {
                 using var command = new NpgsqlCommand(@"
@@ -258,6 +259,17 @@ SELECT EXISTS(
                 connection.Dispose();
                 throw;
             }
+        }
+
+        internal static string ReadNextPressureRepairCampaign(string afterCampaignId)
+        {
+            if (!System.Threading.Volatile.Read(ref InfrastructureReady)) return null;
+            using var connection = OpenBoundedMaintenanceConnection();
+            using var command = new NpgsqlCommand(@"
+SELECT campaign_id FROM reign_meta.campaign_registry
+WHERE campaign_id>@after ORDER BY campaign_id LIMIT 1;", connection);
+            command.Parameters.AddWithValue("after", afterCampaignId ?? "");
+            return command.ExecuteScalar() as string;
         }
 
         public static NpgsqlConnection OpenMetadataConnection()
@@ -1120,6 +1132,25 @@ WHERE datname=current_database();", connection))
                         + "' and database owner is '" + databaseOwner + "'.");
                 }
             }
+        }
+
+        private static NpgsqlConnection OpenBoundedMaintenanceConnection()
+        {
+            // Maintenance never borrows the interactive pool or changes its defaults.
+            var options = new NpgsqlConnectionStringBuilder(Options.BuildConnectionString())
+            {
+                Pooling = false,
+                Timeout = 2,
+                CommandTimeout = 2,
+                CancellationTimeout = 500,
+                ApplicationName = "Bannerlord Reign maintenance"
+            };
+            if (DatabaseAvailability.Shared.BackingOff)
+                throw new InvalidOperationException("PostgreSQL recovery is in progress.");
+            var connection = new NpgsqlConnection(options.ConnectionString);
+            // A short maintenance timeout must not open the interactive circuit.
+            try { connection.Open(); return connection; }
+            catch { connection.Dispose(); throw; }
         }
 
         private static NpgsqlConnection OpenDatabaseConnection()

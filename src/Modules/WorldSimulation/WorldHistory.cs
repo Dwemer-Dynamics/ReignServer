@@ -22,6 +22,25 @@ namespace ReignBetaServer
         internal static PersistenceService.CampaignWorkLock EnterWorldHistoryTimelineScope(string campaignId) =>
             PersistenceService.EnterCampaignWorkLock(WorldHistoryTimelineLocks.GetOrAdd(WorldHistoryTimelineScopeKey(campaignId), _ => new object()));
 
+        internal static bool TryEnterWorldHistoryTimelineScope(string campaignId,
+            out PersistenceService.CampaignWorkLock scope)
+        {
+            scope = null;
+            object gate = WorldHistoryTimelineLocks.GetOrAdd(WorldHistoryTimelineScopeKey(campaignId), _ => new object());
+            if (!System.Threading.Monitor.TryEnter(gate)) return false;
+            try
+            {
+                scope = new PersistenceService.CampaignWorkLock(gate, nameof(TryEnterWorldHistoryTimelineScope),
+                    0, "none", "none");
+                return true;
+            }
+            catch
+            {
+                System.Threading.Monitor.Exit(gate);
+                throw;
+            }
+        }
+
         internal static bool OwnsWorldHistoryTimelineScope(string campaignId) =>
             WorldHistoryTimelineLocks.TryGetValue(WorldHistoryTimelineScopeKey(campaignId), out object gate)
             && System.Threading.Monitor.IsEntered(gate);

@@ -2291,25 +2291,7 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
             string path = SaveSyncActiveStatePath(campaignId);
             string campaignPath = Path.Combine(StrictCampaignDirectory(campaignId), "world", "fixture.json");
             const string oldPoint = "before_write", newPoint = "after_write";
-            bool FailPublication(Action publish)
-            {
-                string savedSidecar = path + ".fixture_previous";
-                File.Move(path, savedSidecar);
-                try
-                {
-                    Directory.CreateDirectory(path);
-                    try { publish(); }
-                    catch (IOException) { return true; }
-                    catch (UnauthorizedAccessException) { return true; }
-                    return false;
-                }
-                finally
-                {
-                    if (Directory.Exists(path))
-                        Directory.Move(path, path + ".fixture_obstruction_" + Guid.NewGuid().ToString("N"));
-                    File.Move(savedSidecar, path);
-                }
-            }
+            bool FailPublication(Action publish) => RejectFixtureActiveStatePublication(path, publish);
 
             bool CachedStateMatches(string point, bool dirty)
             {
@@ -2358,6 +2340,76 @@ WHERE ns.nspname = $schema AND relation.relname = 'conversation_accepted_units')
             {
                 lock (SaveSyncActiveStateLock) SaveSyncActiveStates.Remove(campaignId);
                 if (Directory.Exists(fixtureRoot)) Directory.Delete(fixtureRoot, true);
+            }
+        }
+
+        private static bool RejectFixtureActiveStatePublication(string path, Action publish)
+        {
+            string savedSidecar = path + ".fixture_previous_" + Guid.NewGuid().ToString("N");
+            File.Move(path, savedSidecar);
+            try
+            {
+                Directory.CreateDirectory(path);
+                try { publish(); }
+                catch (IOException) { return true; }
+                catch (UnauthorizedAccessException) { return true; }
+                return false;
+            }
+            finally
+            {
+                if (Directory.Exists(path)) Directory.Delete(path);
+                File.Move(savedSidecar, path);
+            }
+        }
+
+        internal static (bool FaultObserved, bool RolledBack, bool Retried) VerifyLegacyPressureDirtyMarkerRecovery(
+            string campaign, Action attempt, Func<bool> sqlUnchanged, Func<bool> retry)
+        {
+            if (!ReignPostgreSqlStorage.Options.IsValidation
+                || !campaign.StartsWith("world_test_selftest_pressure_", StringComparison.Ordinal))
+                throw new InvalidOperationException("The pressure repair marker fixture requires isolated World Test storage.");
+
+            const string point = "legacy_pressure_dirty_marker_fixture";
+            string path = SaveSyncActiveStatePath(campaign);
+            if (Directory.Exists(path))
+                throw new IOException("The exact active-state path is occupied by a directory.");
+            string previous = path + ".fixture_preserved_" + Guid.NewGuid().ToString("N");
+            bool hadMarker = File.Exists(path);
+            if (hadMarker) File.Move(path, previous);
+            try
+            {
+                MarkSaveSyncActiveStateClean(campaign, TestDict("savePointId", point));
+                byte[] clean = File.ReadAllBytes(path);
+                bool failed = RejectFixtureActiveStatePublication(path, attempt);
+                bool rowsRetained = sqlUnchanged();
+                bool markerRetained;
+                lock (SaveSyncActiveStateLock)
+                {
+                    var cached = ReadSaveSyncActiveStateLocked(campaign);
+                    markerRetained = !cached.Dirty && cached.SavePointId == point
+                        && clean.SequenceEqual(File.ReadAllBytes(path));
+                }
+
+                bool repaired = retry();
+                lock (SaveSyncActiveStateLock)
+                {
+                    SaveSyncActiveStates.Remove(campaign);
+                    var reloaded = ReadSaveSyncActiveStateLocked(campaign);
+                    return (failed, rowsRetained && markerRetained,
+                        repaired && reloaded.Dirty && reloaded.SavePointId == point);
+                }
+            }
+            finally
+            {
+                try
+                {
+                    if (hadMarker) File.Move(previous, path, overwrite: true);
+                    else File.Delete(path);
+                }
+                finally
+                {
+                    lock (SaveSyncActiveStateLock) SaveSyncActiveStates.Remove(campaign);
+                }
             }
         }
 

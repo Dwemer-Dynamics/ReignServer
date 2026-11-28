@@ -21,6 +21,18 @@ CREATE TABLE IF NOT EXISTS reign_meta.campaign_registry (
     migration_report_json jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
+-- The active maintenance cursor commits with the raw repair. Keeping it in
+-- metadata prevents a native save snapshot from capturing or restoring it.
+CREATE TABLE IF NOT EXISTS reign_meta.political_pressure_repair_cursor (
+    campaign_id text PRIMARY KEY REFERENCES reign_meta.campaign_registry(campaign_id) ON DELETE CASCADE,
+    timeline_id text NOT NULL,
+    storage_witness text NOT NULL,
+    restore_generation text NOT NULL,
+    last_day integer NOT NULL CHECK (last_day >= -1),
+    through_day integer NOT NULL CHECK (through_day >= last_day),
+    retry_after timestamptz NULL
+);
+
 CREATE TABLE IF NOT EXISTS reign_meta.save_sync_snapshots (
     campaign_id text NOT NULL,
     save_point_id text NOT NULL,
