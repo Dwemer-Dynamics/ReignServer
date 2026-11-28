@@ -152,22 +152,15 @@ namespace ReignBetaServer
             UseCookies = false
         };
 
-        private static HttpRequestMessage BuildLocalModelImageRequest(Dictionary<string, object> settings,
-            ImageGenerationProfile profile, string prompt, byte[] reference, string sizeOverride,
-            out int requestChars, out bool fitReference)
+        private static Dictionary<string, object> BuildLocalModelImageSettings(ImageGenerationProfile profile, string sizeOverride = null)
         {
-            bool edit = reference != null;
-            if (!TryGetLocalModelImageEndpoint(settings, edit, out Uri endpoint))
-                throw new InvalidOperationException("Use the Local Model Desk loopback URL for the selected image route.");
             var options = profile.LocalModel;
             if (options == null || options.Model != DefaultLocalModelImageModel)
                 throw new InvalidOperationException("Select the qwen-image-2.1-int8 image model in the Local Model profile.");
-            if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > LocalModelMaxPromptChars
-                || options.NegativePrompt.Length > LocalModelMaxPromptChars)
+            if (options.NegativePrompt.Length > LocalModelMaxPromptChars)
                 throw new InvalidDataException("Local Model Desk limits a prompt or negative prompt to 16,000 characters.");
-            bool sizePinned = !string.IsNullOrWhiteSpace(sizeOverride);
-            fitReference = edit && !sizePinned && !profile.ChatView && options.FitReference;
-            if (!TryLocalModelImageSize(sizePinned ? sizeOverride : options.Size, out int width, out int height))
+            string size = string.IsNullOrWhiteSpace(sizeOverride) ? options.Size : sizeOverride;
+            if (!TryLocalModelImageSize(size, out int width, out int height))
                 throw new InvalidDataException("Local Model Desk image dimensions must be multiples of 32 between 256 and 2048.");
             if (IsCharacterPortraitProfile(profile.Name) && (width < 768 || height < 1024
                 || (double)width / height < 0.52d || (double)width / height > 0.77d))
@@ -175,18 +168,33 @@ namespace ReignBetaServer
             var body = new Dictionary<string, object>
             {
                 ["model"] = options.Model,
-                ["prompt"] = prompt,
                 ["negative_prompt"] = options.NegativePrompt,
                 ["width"] = width,
                 ["height"] = height,
                 ["steps"] = options.Steps,
                 ["cfg"] = options.Cfg,
                 ["sampler"] = options.Sampler,
-                ["scheduler"] = options.Scheduler,
-                ["n"] = 1,
-                ["response_format"] = "b64_json"
+                ["scheduler"] = options.Scheduler
             };
             if (options.Seed.Length != 0) body["seed"] = options.Seed;
+            return body;
+        }
+
+        private static HttpRequestMessage BuildLocalModelImageRequest(Dictionary<string, object> settings,
+            ImageGenerationProfile profile, string prompt, byte[] reference, string sizeOverride,
+            out int requestChars, out bool fitReference)
+        {
+            bool edit = reference != null;
+            if (!TryGetLocalModelImageEndpoint(settings, edit, out Uri endpoint))
+                throw new InvalidOperationException("Use the Local Model Desk loopback URL for the selected image route.");
+            if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > LocalModelMaxPromptChars)
+                throw new InvalidDataException("Local Model Desk limits a prompt or negative prompt to 16,000 characters.");
+            var options = profile.LocalModel;
+            var body = BuildLocalModelImageSettings(profile, sizeOverride);
+            fitReference = edit && string.IsNullOrWhiteSpace(sizeOverride) && !profile.ChatView && options.FitReference;
+            body["prompt"] = prompt;
+            body["n"] = 1;
+            body["response_format"] = "b64_json";
             if (edit)
             {
                 if (reference.Length > LocalModelMaxReferenceBytes)
@@ -222,9 +230,13 @@ namespace ReignBetaServer
         private static byte[] ReadLocalModelPngResponse(string json, bool fitReference)
         {
             var root = Json.DeserializeObject(json);
-            if (ReadPathObject(root, "data", "0", "b64_json") is not string image
-                || image.Length == 0 || image.Length > LocalModelMaxResponseBytes)
-                throw new InvalidDataException("Local Model Desk did not return bounded PNG bytes in data[0].b64_json.");
+            return DecodeLocalModelPng(ReadPathObject(root, "data", "0", "b64_json") as string, fitReference);
+        }
+
+        private static byte[] DecodeLocalModelPng(string image, bool fitReference)
+        {
+            if (string.IsNullOrEmpty(image) || image.Length > LocalModelMaxResponseBytes)
+                throw new InvalidDataException("Local Model Desk did not return bounded PNG bytes.");
             byte[] png = Convert.FromBase64String(image);
             if (png.Length < 33 || !HasLocalModelPngSignature(png) || !png.AsSpan(12, 4).SequenceEqual("IHDR"u8)
                 || BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(8, 4)) != 13)
@@ -241,6 +253,23 @@ namespace ReignBetaServer
             else if (!IsLocalModelImageDimension(width) || !IsLocalModelImageDimension(height))
                 throw new InvalidDataException("Local Model Desk returned a PNG outside the supported canvas dimensions.");
             return png;
+        }
+
+        private static string ReadBoundedLocalModelResponse(HttpResponseMessage response, CancellationToken timeout, int maxBytes)
+        {
+            if (response.Content.Headers.ContentLength > maxBytes)
+                throw new InvalidDataException("The Local Model Desk response exceeds the configured image limit.");
+            using Stream remote = response.Content.ReadAsStream(timeout);
+            using var buffer = new MemoryStream();
+            byte[] bytes = new byte[64 * 1024];
+            int read;
+            while ((read = remote.ReadAsync(bytes.AsMemory(), timeout).AsTask().GetAwaiter().GetResult()) > 0)
+            {
+                if (buffer.Length + read > maxBytes)
+                    throw new InvalidDataException("The Local Model Desk response exceeds the configured image limit.");
+                buffer.Write(bytes, 0, read);
+            }
+            return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
         }
 
         private static PortraitImageCallResult GenerateLocalModelImage(Dictionary<string, object> settings,
@@ -266,19 +295,7 @@ namespace ReignBetaServer
                         : "Local Model Desk rejected the image request (HTTP " + (int)response.StatusCode + ").";
                     throw new InvalidOperationException(error);
                 }
-                if (response.Content.Headers.ContentLength > LocalModelMaxResponseBytes)
-                    throw new InvalidDataException("The Local Model Desk response exceeds the configured image limit.");
-                using Stream remote = response.Content.ReadAsStream(timeout.Token);
-                using var buffer = new MemoryStream();
-                byte[] bytes = new byte[64 * 1024];
-                int read;
-                while ((read = remote.ReadAsync(bytes.AsMemory(), timeout.Token).AsTask().GetAwaiter().GetResult()) > 0)
-                {
-                    if (buffer.Length + read > LocalModelMaxResponseBytes)
-                        throw new InvalidDataException("The Local Model Desk response exceeds the configured image limit.");
-                    buffer.Write(bytes, 0, read);
-                }
-                string json = Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+                string json = ReadBoundedLocalModelResponse(response, timeout.Token, LocalModelMaxResponseBytes);
                 responseChars = json.Length;
                 return PortraitImageCallResult.Success(LocalModelImageProviderId, model, adapter,
                     ReadLocalModelPngResponse(json, fitReference), timer.ElapsedMilliseconds, requestChars, responseChars);

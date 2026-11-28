@@ -347,7 +347,14 @@ namespace ReignBetaServer
             builder.Add("IDENTITY INTRODUCTION RULES", "identityIntroductions stays empty unless the current speaker audibly introduces a present person by name. Include supportingQuote from that speaker's exact words and use supplied IDs. Only listeners may learn the name; the server verifies presence and introducer knowledge. Player self-introductions are detected separately.");
             if (!eventMode) builder.Add("PRIVATE DECISION POLICY", PromptService.LoadPromptTemplate("dialogue_internal_posture.txt"));
             else builder.Add("PRIVATE DECISION POLICY", "Deliberate privately before answering. Verify supplied facts, then decide what the current NPC wants, fears losing in public, is trying to impress or avoid, and what they should reveal, hide, test, refuse, bargain over, or act on. Do not print private reasoning. Return only the compact decisionBrief required by the output schema.");
-            if (!eventMode) builder.Add("SOCIAL SIGNAL OUTPUT", PromptService.SocialSignalPromptContract);
+            if (!eventMode)
+            {
+                builder.Add("SOCIAL SIGNAL OUTPUT", PromptService.SocialSignalPromptContract);
+                builder.Add("CONCEPTION WARNING",
+                    "Classify the completed act in this accepted exchange independently of pregnancy, fertility, or likelihood. " +
+                    "Set conceptionGate.needed and conceptionGate.completed together when the current visible reply establishes completed conception-capable contact under the ordinary act criteria, even when someone is already pregnant. " +
+                    "Do not mark intentions, hypotheticals, refusals, interrupted acts, or uncertain and off-screen outcomes. Do not mention this mechanical choice in the visible reply.");
+            }
             builder.Add("MEMORY WRITE RULES", LoadSourceScopedMemoryWriteRules());
             string referenceInstructions = ConversationReferenceInstructions();
             if (referenceInstructions.Length > 0) builder.Add("CONVERSATION SOURCE REFERENCES", referenceInstructions);

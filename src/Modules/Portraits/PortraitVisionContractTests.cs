@@ -137,11 +137,88 @@ namespace ReignBetaServer
             };
             RunCodexImageExchange("fixture-job", "written traits", "768x1024", imageRpc, (a,b) => TestDict("type", "imageGeneration", "status", "completed"), false);
             check("codex_text_no_reference_runtime_image_model", imageHasNoReference && imageModelUnspecified);
+            CheckLocalTextPortraitContract(settings, payload, description, png, check, rejects);
             // Existing RunAdultPortraitContractTests supplies the full threshold/handoff/failure contracts.
             check("adult_threshold_unchanged", !UsesAdultPortraitClothingEdit(TestDict("promptPurpose", "portrait", "gender", "female", "ageYears", 18, "physicalConfidence", TestDict("score", 60)))
                 && UsesAdultPortraitClothingEdit(TestDict("promptPurpose", "portrait", "gender", "female", "ageYears", 18, "physicalConfidence", TestDict("score", 61)))
                 && !UsesAdultPortraitClothingEdit(TestDict("promptPurpose", "portrait", "gender", "female", "ageYears", 17, "physicalConfidence", TestDict("score", 100))));
             return rows;
+        }
+        private static void CheckLocalTextPortraitContract(Dictionary<string, object> settings,
+            Dictionary<string, object> payload, Dictionary<string, object> description, byte[] source,
+            Action<string, bool> check, Func<Action, bool> rejects)
+        {
+            settings["portraitGenerationMethod"] = LocalTextPortraitMethod;
+            var restored = Json.Deserialize<Dictionary<string, object>>(Json.Serialize(settings));
+            check("local_text_roundtrip_is_independent", ValidatePortraitVisionSettings(restored) == ""
+                && PortraitGenerationMethod(restored) == LocalTextPortraitMethod
+                && ResolveImageGenerationProfile(restored, "portrait").Provider == "OpenRouter");
+            var normal = ResolveImageGenerationProfile(restored, "portrait", LocalModelImageProviderId);
+            var subject = new Dictionary<string, object>(payload)
+            {
+                ["resolvedPortraitPhysique"] = TestDict("bodyLayer", "Fixture authorized physique"),
+                ["physicalConfidence"] = TestDict("score", 72)
+            };
+            string template = BuildLocalTextPortraitTemplate(subject, "preview");
+            string confidence = ExpandPortraitIdentityTokens(subject,
+                PromptService.LoadPromptTemplate(SelectPortraitPhysicalConfidencePromptFile(subject)).Trim());
+            check("local_text_reuses_normal_text_prompt", template.Contains("19-year-old female")
+                && confidence.Length > 0 && template.Contains(confidence) && template.Contains("Fixture authorized physique")
+                && !template.Contains(LocalTextVisionPlaceholder("outfit"))
+                && PortraitVisionFields.Where(x => x != "outfit").All(x => template.Contains(LocalTextVisionPlaceholder(x))));
+            var resident = new Dictionary<string, object>(subject)
+            {
+                ["campaignId"] = "fixture", ["heroStringId"] = "resident",
+                ["nativeCharacterSnapshot"] = TestDict("schema", "reign-native-portrait-snapshot-v1",
+                    "campaignId", "fixture", "heroStringId", "resident", "portraitSourceProfile", ResidentOutfitRenderContract)
+            };
+            check("local_text_includes_resident_outfit_once", BuildLocalTextPortraitTemplate(resident, "preview")
+                .Split(LocalTextVisionPlaceholder("outfit"), StringSplitOptions.None).Length == 2);
+            var residentSnapshot = ReadDictionary(resident, "nativeCharacterSnapshot");
+            residentSnapshot["age"] = 21;
+            residentSnapshot["tavernHouse"] = TestDict("schema", 1, "heroStringId", "resident",
+                "castId", "reign_tavern_fixture", "madam", true);
+            string tavern = BuildLocalTextPortraitTemplate(resident, "preview");
+            string wardrobe = ExpandPortraitIdentityTokens(resident, PromptService.LoadPromptTemplate("tavern_house_portrait_clothing.txt").Trim())
+                .Replace("[TAVERN ROLE]", "madam");
+            check("local_text_tavern_clothing_in_single_pass", wardrobe.Length > 0 && tavern.Contains(wardrobe)
+                && !tavern.Contains("Retain exactly the clothes"));
+
+            using var request = BuildLocalTextPortraitRequest(normal, source, template);
+            var body = Json.Deserialize<Dictionary<string, object>>(request.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+            check("local_text_one_pass_loopback_wire", request.Method.Method == "POST"
+                && request.RequestUri.AbsoluteUri == "http://127.0.0.1:18500/v1/portraits/generations"
+                && request.Headers.Authorization == null && body.Count == 4 && !body.ContainsKey("clothing_edit")
+                && ReadString(body, "vision_prompt", "") == PortraitVisionInstructions
+                && ReadString(body, "prompt_template", "") == template
+                && DecodeImageBase64(ReadString(body, "imageDataUrl", "")).SequenceEqual(source)
+                && ReadString(ReadDictionary(body, "image_settings"), "model", "") == DefaultLocalModelImageModel);
+
+            string effective = template;
+            foreach (var field in PortraitVisionFields) effective = effective.Replace(LocalTextVisionPlaceholder(field), (string)description[field]);
+            byte[] output = LinuxImageCodec.Fixture(768, 1024);
+            string image = Convert.ToBase64String(output);
+            var response = TestDict("model", DefaultLocalModelImageModel, "vision_model", LocalTextPortraitVisionModel,
+                "description", description, "prompt", effective, "data", new[] { TestDict("b64_json", image) },
+                "timing", TestDict("vision_ms", 20, "image_ms", 40));
+            LocalTextPortraitResult captured = ReadLocalTextPortraitResponse(Json.Serialize(response), template, source, 100, 200);
+            check("local_text_uses_verified_effective_prompt", captured.Normal.Ok && captured.Normal.ImageBytes.SequenceEqual(output)
+                && captured.EffectivePrompt == effective && ReadString(captured.Vision, "sourceSha256", "") == Sha256Hex(source)
+                && ReadLong(captured.Vision, "durationMs", 0) == 20 && captured.ImageMs == 40);
+            response["prompt"] = "altered";
+            check("local_text_altered_prompt_refused", rejects(() => ReadLocalTextPortraitResponse(
+                Json.Serialize(response), template, source, 100, 200)));
+            response["prompt"] = effective;
+            response["vision_model"] = "another-model";
+            check("local_text_unexpected_vision_model_refused", rejects(() => ReadLocalTextPortraitResponse(
+                Json.Serialize(response), template, source, 100, 200)));
+            response["vision_model"] = LocalTextPortraitVisionModel;
+            response["data"] = new object[] { TestDict("b64_json", image), null };
+            check("local_text_extra_image_refused", rejects(() => ReadLocalTextPortraitResponse(
+                Json.Serialize(response), template, source, 100, 200)));
+            response["data"] = new[] { TestDict("b64_json", "invalid") };
+            check("local_text_invalid_png_refused", rejects(() => ReadLocalTextPortraitResponse(
+                Json.Serialize(response), template, source, 100, 200)));
         }
     }
 }

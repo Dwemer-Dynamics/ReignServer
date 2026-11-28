@@ -177,7 +177,7 @@ Do not claim to know a bandit's identity, location, settlement condition, market
 The NPC may make a suspicion or inference appropriate to their experience, but must phrase it as uncertainty rather than fact.
 Do not turn a player's stage direction, courtesy, movement, or hypothetical statement into a committed mechanical action.
 Set actionGate.needed=true only when the NPC explicitly and finally accepts, commands, or commits to a concrete action they intend to perform.
-Set conceptionGate.needed=true and conceptionGate.completed=true only when the visible reply itself depicts completed insemination that could cause pregnancy. Keep both false for flirtation, nudity, foreplay, sex without insemination, intentions, hypotheticals, refusals, interrupted acts, and uncertain or off-screen outcomes. This gate pauses the game for the player's explicit pregnancy-risk choice; it is not a world action and must never be mentioned in the visible reply.
+Set conceptionGate.needed=true and conceptionGate.completed=true only when the visible reply itself establishes a completed conception-capable act. Classify the action itself independently of current pregnancy, fertility or probability. Keep both false for flirtation, nudity, foreplay, sex without insemination, intentions, hypotheticals, refusals, interrupted acts, and uncertain or off-screen outcomes. This gate pauses the game for the player's explicit pregnancy-risk choice; it is not a world action and must never be mentioned in the visible reply.
 
 VISIBLE REPLY FORMAT
 Apply these rules only to the value of the ""reply"" field. Keep every other field required by the supplied output schema.
@@ -278,7 +278,7 @@ Answer the latest player message directly. Earlier lines provide continuity but 
     ""needed"": false,
     ""completed"": false,
     ""confidence"": 0.0,
-    ""reason"": ""Set needed and completed true only when the visible NPC action actually completes insemination that could cause pregnancy; otherwise keep both false.""
+    ""reason"": ""Set needed and completed true only when the visible reply establishes a completed conception-capable act, regardless of current pregnancy or fertility; otherwise keep both false.""
   },
   ""socialSignals"": [
     {

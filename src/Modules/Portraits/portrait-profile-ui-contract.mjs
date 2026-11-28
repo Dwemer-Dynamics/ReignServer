@@ -23,6 +23,7 @@ const browser = await chromium.launch({ channel: process.env.REIGN_BROWSER_CHANN
 const results = [];
 let saved;
 let failVisionCatalog = false;
+let visionCatalogRequests = 0;
 try {
   const page = await browser.newPage();
   await page.route('**/*', async route => {
@@ -33,6 +34,7 @@ try {
       if (route.request().method() === 'POST') { saved = route.request().postDataJSON(); Object.assign(settings, saved); }
       body = { ...settings, ok: true };
     } else if (url.pathname === '/portraits/vision/models') {
+      visionCatalogRequests++;
       if (failVisionCatalog) return route.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
       body = { ok: true, models: url.searchParams.get('provider') === 'NanoGPT'
         ? [{ id: 'fixture-nano-vision', displayName: 'Fixture subscription vision model' }]
@@ -63,16 +65,24 @@ try {
   if (!rebuildConfirmation) throw new Error('Source-free shared rebuild is blocked before its cost confirmation');
   for (const width of [1672, 1024, 600]) {
     await page.setViewportSize({ width, height: 941 });
-    for (const method of ['text', 'image']) {
+    await page.selectOption('#portraitProvider', 'NanoGPT');
+    await page.selectOption('#adultPortraitProvider', 'AtlasCloud');
+    for (const method of ['text', 'image', 'local_text']) {
+      const catalogBefore = visionCatalogRequests;
       await page.selectOption('#portraitGenerationMethod', method);
       const options = await page.evaluate(() => {
         const card = document.getElementById('portraitGenerationOptions');
         const bounds = card.getBoundingClientRect();
         return { visionVisible: document.getElementById('portraitVisionSettings').checkVisibility(),
+          localHint: document.getElementById('portraitLocalTextHint').checkVisibility(),
+          normalLocalControls: document.getElementById('portraitLocalModelProfileSettings').checkVisibility(),
+          adultLocalControls: document.getElementById('adultPortraitLocalModelProfileSettings').checkVisibility(),
           overflow: card.scrollWidth > card.clientWidth + 1, inViewport: bounds.left >= 0 && bounds.right <= innerWidth + 1,
           background: getComputedStyle(card).backgroundColor };
       });
-      if (options.visionVisible !== (method === 'text') || options.overflow || !options.inViewport || options.background !== 'rgb(18, 18, 17)')
+      if (options.visionVisible !== (method === 'text') || options.localHint !== (method === 'local_text')
+          || options.normalLocalControls !== (method === 'local_text') || options.adultLocalControls
+          || options.overflow || !options.inViewport || options.background !== 'rgb(18, 18, 17)')
         throw new Error('Portrait method layout failure: ' + JSON.stringify({ width, method, options }));
       if (method === 'text') {
         await page.selectOption('#portraitVisionModel', 'fixture-vision');
@@ -85,10 +95,14 @@ try {
       await page.evaluate(() => loadSettings());
       if (await page.locator('#portraitGenerationMethod').inputValue() !== method || await page.locator('#portraitVisionModel').inputValue() !== 'fixture-vision')
         throw new Error('Portrait method/model reload failed');
+      if (method === 'local_text' && (visionCatalogRequests !== catalogBefore ||
+            saved.portraitProvider === 'LocalModel' || saved.adultPortraitProvider === 'LocalModel'))
+        throw new Error('Local Text Based touched the existing provider selection or contacted a vision catalog');
       const screenshot = path.join(outputDirectory, `${width}-${method}-generation.png`);
       await page.locator('#portraitGenerationOptions').screenshot({ path: screenshot });
       results.push({ width, method, passed: true, options, screenshot });
     }
+    await page.selectOption('#portraitGenerationMethod', 'text');
     failVisionCatalog = true;
     await page.evaluate(() => loadPortraitVisionModels());
     if (await page.locator('#portraitVisionModel').inputValue() !== 'fixture-vision') throw new Error('Catalog failure cleared the saved vision model');

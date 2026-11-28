@@ -51,6 +51,11 @@ namespace Reign.Core.Contracts.Family
             return Math.Max(0, Math.Min(1, (facts.WorldDay - facts.ConceptionDay) / (facts.DueDay - facts.ConceptionDay)));
         }
         public static bool Visible(PregnancyFacts facts) => Progress(facts) is double progress && progress >= .5d;
+
+        // Native campaign days scale with gestation. The first five of the
+        // nine pregnancy months are one fixed fraction of the recorded term.
+        public static bool NativeStatusVisible(PregnancyFacts facts) =>
+            Progress(facts) is double progress && progress >= 5d / 9d;
         public static bool FatherMismatch(PregnancyFacts facts) => facts.BiologicalFatherId.Length > 0
             && facts.LegalFatherId.Length > 0 && facts.BiologicalFatherId != facts.LegalFatherId;
 

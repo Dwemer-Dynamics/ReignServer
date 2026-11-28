@@ -279,7 +279,7 @@ namespace ReignBetaServer
         internal static void ValidateChatViewScene(Dictionary<string, object> scene, List<Dictionary<string, object>> window)
         {
             if (scene == null) throw new InvalidDataException("The scene selector returned invalid JSON.");
-            var selected = window.SingleOrDefault(t => ReadString(t, "turnId", "") == ReadString(scene, "selectedTurnId", "") && ReadString(t, "role", "") == "npc");
+            var selected = DialogueService.FindChatViewMoment(window, ReadString(scene, "selectedTurnId", ""));
             if (selected == null) throw new InvalidDataException("The selected moment is outside the completed exchange window.");
             var actors = ReadDictionaryList(ReadDictionary(selected, "frame"), "actors");
             var cast = ReadStringList(scene, "characterIds");
