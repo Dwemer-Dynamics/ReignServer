@@ -3166,6 +3166,88 @@ WHERE client_id='bannerlord' AND timeline_id=$timeline;", TestDict("timeline", t
                     && State() == (child, 2),
                     "An identical request after a lost response returns the existing child and byte-equivalent proof.");
 
+                // Save immediately in the child, before it retains any local event.
+                // Its authenticated head is still inherited from the parent.
+                const string childPointId = "d18_fork_child_checkpoint";
+                const string childSession = "d18_fork_child_session";
+                string childSaveName = "D18 fixture child " + token;
+                var childPoint = SaveSyncTestPointPayload(campaign, childPointId, savedDay, childSaveName);
+                childPoint["timelineId"] = child;
+                childPoint["worldHistorySequence"] = 1L;
+                childPoint["worldHistoryHeadEventId"] = head;
+                if (!ReadBool(SaveSyncRegisterApi(childPoint), "ok", false)
+                    || !ReadBool(SaveSyncFinalizeApi(TestDict("campaignId", campaign, "savePointId", childPointId,
+                        "nativeSaveName", childSaveName, "successful", true)), "ok", false))
+                    throw new InvalidOperationException("The verified fork fixture could not finalize the immediate child save.");
+
+                Dictionary<string, object> LoadChild(string loadSession)
+                {
+                    childPoint["loadSessionId"] = loadSession;
+                    childPoint["skipCleanLoadComparison"] = true;
+                    return SaveSyncLoadApi(childPoint, false);
+                }
+
+                Dictionary<string, object> ChildRequest(string loadSession, string restore) =>
+                    TestDict("campaignId", campaign, "timelineId", child, "savedSequence", 1L, "savedHeadEventId", head,
+                        "verifiedForkLoad", TestDict("schemaVersion", 1, "savePointId", childPointId,
+                            "loadSessionId", loadSession, "restoreGeneration", restore));
+
+                bool IsExactChildLoad(Dictionary<string, object> load, string loadSession) =>
+                    ReadBool(load, "ok", false) && ReadString(load, "result", "") is ("no_op" or "rolled_back")
+                    && ReadString(load, "campaignId", "") == campaign && ReadString(load, "savePointId", "") == childPointId
+                    && ReadString(load, "loadSessionId", "") == loadSession
+                    && ReadString(load, "restoreGeneration", "").Length > 0;
+
+                bool IsExactChildOpen(Dictionary<string, object> opened, string restore) =>
+                    ReadBool(opened, "ok", false) && !ReadBool(opened, "branched", true)
+                    && !ReadBool(opened, "historyMissing", true) && !opened.ContainsKey("verifiedFork")
+                    && ReadString(opened, "campaignId", "") == campaign && ReadString(opened, "timelineId", "") == child
+                    && ReadString(opened, "parentTimelineId", "") == source && ReadLong(opened, "savedSequence", -1) == 1L
+                    && ReadString(opened, "sharedActivityGeneration", "") == restore;
+
+                bool InheritsSourceHead()
+                {
+                    using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaign);
+                    if (connection == null) return false;
+                    var activeChild = WorldSimulationStore.SelectWorldHistoryTimelines(connection, TestDict("id", child)).SingleOrDefault();
+                    return ReadString(activeChild, "fork_event_id", "") == head && ReadString(activeChild, "head_event_id", "") == head
+                        && ReadLong(activeChild, "head_sequence", -1) == 1L
+                        && WorldSimulationStore.SelectWorldHistoryEvents4(connection,
+                            TestDict("id", head, "timeline", child)).Count == 0
+                        && WorldSimulationStore.SelectWorldHistoryEvents4(connection,
+                            TestDict("id", head, "timeline", source)).Count == 1;
+                }
+
+                // Finalization can dirty the campaign metadata and make the
+                // first exact load restore the snapshot instead of taking no-op.
+                var loadedChild = LoadChild(childSession);
+                string childGeneration = ReadString(loadedChild, "restoreGeneration", "");
+                bool childLoadProved = IsExactChildLoad(loadedChild, childSession);
+                var unchangedChild = Open(ChildRequest(childSession, childGeneration));
+                bool childOpenProved = IsExactChildOpen(unchangedChild, childGeneration);
+                bool inherited = InheritsSourceHead();
+                var replacedSession = Open(Request());
+                add("verified_fork_reopens_exact_unchanged_inherited_child_head",
+                    childLoadProved && childOpenProved && inherited
+                    && ReadString(replacedSession, "error", "") == "verified_fork_unproven" && State() == (child, 2),
+                    "The registered inherited head reopens without another branch. Load outcome: "
+                    + ReadString(loadedChild, "result", "<missing>") + ", load proved: " + childLoadProved
+                    + ", inherited: " + inherited + ", open proved: " + childOpenProved
+                    + ", open error: " + ReadString(unchangedChild, "error", "<none>") + ".");
+
+                // Once that exact child has aligned, the next load is a genuine fresh no-op.
+                const string cleanChildSession = "d18_fork_clean_child_session";
+                var cleanChild = LoadChild(cleanChildSession);
+                string cleanGeneration = ReadString(cleanChild, "restoreGeneration", "");
+                var cleanOpen = Open(ChildRequest(cleanChildSession, cleanGeneration));
+                var staleChild = Open(ChildRequest(childSession, childGeneration));
+                add("verified_fork_no_op_keeps_inherited_child_and_retires_old_session",
+                    ReadString(cleanChild, "result", "") == "no_op" && IsExactChildLoad(cleanChild, cleanChildSession)
+                    && IsExactChildOpen(cleanOpen, cleanGeneration) && InheritsSourceHead()
+                    && ReadString(staleChild, "error", "") == "verified_fork_unproven" && State() == (child, 2),
+                    "A fresh no-op keeps the same inherited child without a fork and the previous child session is rejected. Load outcome: "
+                    + ReadString(cleanChild, "result", "<missing>") + ", open error: " + ReadString(cleanOpen, "error", "<none>") + ".");
+
                 const string sibling = "d18_unrelated_active_timeline";
                 var unrelated = Open(TestDict("campaignId", campaign, "timelineId", sibling));
                 var inactive = Open(Request());
