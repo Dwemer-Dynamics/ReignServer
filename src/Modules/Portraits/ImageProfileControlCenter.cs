@@ -100,8 +100,9 @@ namespace ReignBetaServer
                   <h2>Character Portrait Generation</h2>
                   <p id='portraitLocalModelReferenceHint' class='hint' style='display:none'>Local Model uses the native reference directly. Choose at least 768 x 1024 pixels and a portrait aspect ratio from 2:3 to 3:4.</p>
                   <div id='portraitGenerationMethodSettings'>
-                    <label>Generation method <select id='portraitGenerationMethod' onchange='updatePortraitGenerationUi()'>
-                      <option value='text'>Text based (recommended)</option><option value='image'>Image based</option></select></label>
+                    <label>Generation method <select id='portraitGenerationMethod' onchange='updateImageProfileUi();loadPortraitVisionModels()'>
+                      <option value='text'>Text based (recommended)</option><option value='image'>Image based</option><option value='local_text'>Local Text Based</option></select></label>
+                    <p id='portraitLocalTextHint' class='hint' hidden>Uses Qwen Vision and Qwen Image in Local Model Desk. Enable both models in Desk before generating a portrait.</p>
                     <p class='hint'>Text based describes the native face, then creates a photographic portrait from those traits and current age, weight and build. Image based sends the native source to the normal image provider.</p>
                   </div>
                   <div id='portraitVisionSettings'>

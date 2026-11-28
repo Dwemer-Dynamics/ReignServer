@@ -165,6 +165,7 @@ namespace ReignBetaServer
                 ReadString(payload, "provider", ""));
             Dictionary<string, object> timing = new Dictionary<string, object>();
             Dictionary<string, object> visionEvidence = null;
+            bool useLocalText = false;
 
             if (IsCharacterPortraitProfile(imageProfile.Name))
             {
@@ -236,7 +237,14 @@ namespace ReignBetaServer
                         if (imageProfile.AtlasWanNegativePrompt == DefaultAtlasWan25NegativePrompt)
                             imageProfile.AtlasWanNegativePrompt = DefaultAtlasWan25NegativePrompt.Replace(", armor, weapons, helmets, chainmail, modern clothing", "");
                     }
-                    if (!sharedRebuild && imageProfile.Name == "portrait"
+                    useLocalText = !sharedRebuild && imageProfile.Name == "portrait"
+                        && PortraitGenerationMethod(settings) == LocalTextPortraitMethod;
+                    if (useLocalText)
+                    {
+                        imageProfile = ResolveImageGenerationProfile(settings, promptPurpose, LocalModelImageProviderId);
+                        adultClothingEdit = false;
+                    }
+                    else if (!sharedRebuild && imageProfile.Name == "portrait"
                         && imageProfile.Provider != LocalModelImageProviderId && PortraitGenerationMethod(settings) == "text")
                     {
                         phase.Restart();
@@ -246,9 +254,11 @@ namespace ReignBetaServer
                         payload["resolvedPortraitVision"] = visionEvidence;
                         sourceProvenance["vision"] = visionEvidence;
                     }
-                    prompt = sharedRebuild
-                        ? ApplyPortraitProductPromptContract(BuildSharedPortraitRebuildPrompt(payload))
-                        : ApplyPortraitProductPromptContract(BuildPortraitPrompt(payload, clientPrompt, !adultClothingEdit));
+                    prompt = useLocalText
+                        ? BuildLocalTextPortraitTemplate(payload, clientPrompt)
+                        : sharedRebuild
+                            ? ApplyPortraitProductPromptContract(BuildSharedPortraitRebuildPrompt(payload))
+                            : ApplyPortraitProductPromptContract(BuildPortraitPrompt(payload, clientPrompt, !adultClothingEdit));
                     if (imageProfile.Provider != LocalModelImageProviderId) outputSizeOverride = "768x1024";
                 }
 
@@ -259,10 +269,19 @@ namespace ReignBetaServer
                 }
 
                 phase.Restart();
-                PortraitImageCallResult call = CallImageProvider(settings, imageProfile, prompt,
+                LocalTextPortraitResult localText = useLocalText ? GenerateLocalTextPortrait(imageProfile, sourceImage, prompt) : null;
+                PortraitImageCallResult call = localText?.Normal ?? CallImageProvider(settings, imageProfile, prompt,
                     visionEvidence == null ? sourceImage : null, outputSizeOverride);
                 phase.Stop();
                 timing["providerCallMs"] = phase.ElapsedMilliseconds;
+                if (localText?.Vision != null)
+                {
+                    prompt = localText.EffectivePrompt;
+                    visionEvidence = localText.Vision;
+                    sourceProvenance["vision"] = visionEvidence;
+                    timing["visionMs"] = visionEvidence["durationMs"];
+                    timing["imageMs"] = localText.ImageMs;
+                }
 
                 timing["totalMs"] = total.ElapsedMilliseconds;
                 if (!call.Ok || call.ImageBytes == null || call.ImageBytes.Length == 0)
@@ -308,7 +327,8 @@ namespace ReignBetaServer
                         ["model"] = call.Model, ["outcome"] = "completed", ["durationMs"] = timing["providerCallMs"],
                         ["sourceSha256"] = Sha256Hex(sourceImage), ["outputSha256"] = Sha256Hex(call.ImageBytes) }
                 };
-                generationStages[0]["generationMethod"] = visionEvidence == null && sourceImage != null ? "image" : "text";
+                generationStages[0]["generationMethod"] = useLocalText ? LocalTextPortraitMethod
+                    : visionEvidence == null && sourceImage != null ? "image" : "text";
                 if (visionEvidence != null) generationStages[0]["vision"] = visionEvidence;
                 string generationWarning = "";
                 if (ReadDictionary(payload, "resolvedPortraitPhysique") != null)
@@ -710,10 +730,13 @@ namespace ReignBetaServer
 			return "high noble";
 		}
 
-        internal static string BuildPortraitPrompt(Dictionary<string, object> payload, string clientPrompt, bool includePhysicalConfidence = true)
+        internal static string BuildPortraitPrompt(Dictionary<string, object> payload, string clientPrompt,
+            bool includePhysicalConfidence = true, string residentClothingGuidance = null)
         {
-            if (PreserveResidentClothing(payload)) return ReadDictionary(payload, "resolvedPortraitVision") == null ? BuildResidentPortraitPrompt(payload)
-                : PortraitVisionIdentityPrompt(payload) + "\n" + BuildResidentPortraitPrompt(payload)
+            if (PreserveResidentClothing(payload)) return ReadDictionary(payload, "resolvedPortraitVision") == null
+                ? BuildResidentPortraitPrompt(payload, residentClothingGuidance)
+                : PortraitVisionIdentityPrompt(payload, residentClothingGuidance == null) + "\n"
+                    + BuildResidentPortraitPrompt(payload, residentClothingGuidance)
                     .Replace("supplied native source image", "written identity and outfit description")
                     .Replace("in the source", "in the outfit description");
 			List<string> layers = new List<string>

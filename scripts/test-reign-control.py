@@ -1,11 +1,15 @@
 """Provider-free contracts. Service calls and health probes are always injected fakes."""
 import hashlib
+from http.client import HTTPConnection
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -498,6 +502,9 @@ class ControlTests(unittest.TestCase):
         # Interactive client requests allow 900 seconds, including provider retries.
         # A shorter proxy deadline substitutes the offline HTML page for a pending JSON response.
         self.assertIn("ProxyPass / http://127.0.0.1:5101/ timeout=900\n", site)
+        portrait_proxy = next(line.strip() for line in site.splitlines() if line.strip().startswith("ProxyPassMatch "))
+        self.assertTrue(portrait_proxy.endswith(" timeout=1260"))
+        self.assertLess(site.index(portrait_proxy), site.index("ProxyPass / http"))
         with tempfile.TemporaryDirectory(prefix="reign-control-config-") as directory:
             root = Path(directory)
             modules = ["mpm_event", "authz_core", "proxy", "proxy_http", "alias", "cgid", "headers"]
@@ -508,6 +515,84 @@ class ControlTests(unittest.TestCase):
             target.write_text(config)
             result = subprocess.run(["/usr/sbin/apache2", "-t", "-f", str(target)], capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+    def test_apache_forwards_portrait_post_once_and_keeps_long_timeout(self):
+        source = (SOURCE / "reignctl").read_text()
+        directives = [line.strip() for line in source.splitlines()
+                      if line.strip().startswith(("ProxyPassMatch ", "ProxyPass / http://127.0.0.1:5101/ "))]
+        self.assertEqual(len(directives), 2)
+
+        class EchoRoute(BaseHTTPRequestHandler):
+            def do_POST(self):
+                request_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                if self.path.endswith("?slow=1"):
+                    time.sleep(1.4)
+                body = self.path.encode("ascii") + b"\n" + request_body
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+            def log_message(self, *_):
+                pass
+
+        with tempfile.TemporaryDirectory(prefix="reign-portrait-proxy-") as directory, \
+                ThreadingHTTPServer(("127.0.0.1", 0), EchoRoute) as backend:
+            threading.Thread(target=backend.serve_forever, daemon=True).start()
+            try:
+                with socket.socket() as candidate:
+                    candidate.bind(("127.0.0.1", 0))
+                    port = candidate.getsockname()[1]
+                root = Path(directory)
+                modules = ["mpm_event", "authz_core", "proxy", "proxy_http"]
+                config = f'ServerRoot "/etc/apache2"\nServerName localhost\nDefaultRuntimeDir "{root}"\n'
+                config += f'PidFile "{root}/apache.pid"\nErrorLog "{root}/error.log"\nListen 127.0.0.1:{port}\n'
+                if os.getuid() == 0:
+                    config += "User www-data\nGroup www-data\n"
+                config += "\n".join(f"LoadModule {name}_module /usr/lib/apache2/modules/mod_{name}.so" for name in modules)
+                config += "\nProxyRequests Off\n" + "\n".join(directives) + "\n"
+                config = config.replace("127.0.0.1:5101", f"127.0.0.1:{backend.server_port}")
+                # Scale only the waits. The delayed request must outlive the ordinary proxy worker.
+                config = config.replace("timeout=1260", "timeout=4").replace("timeout=900", "timeout=1")
+                path = root / "private.conf"
+                path.write_text(config)
+                proxy = subprocess.Popen(["/usr/sbin/apache2", "-X", "-f", str(path)],
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    for _ in range(50):
+                        try:
+                            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                                break
+                        except OSError:
+                            if proxy.poll() is not None:
+                                self.fail((root / "error.log").read_text() if (root / "error.log").exists()
+                                          else "Isolated Apache exited before serving the fixture.")
+                            time.sleep(0.05)
+                    else:
+                        self.fail("Isolated Apache did not listen on its private loopback port.")
+
+                    for route in ["/portraits/generate?slow=1", "/portraits/generate/status", "/health"]:
+                        with self.subTest(route=route):
+                            connection = HTTPConnection("127.0.0.1", port, timeout=5)
+                            try:
+                                connection.request("POST", route, body=b'{"probe":true}')
+                                response = connection.getresponse()
+                                self.assertEqual((response.status, response.read()), (200, route.encode() + b'\n{"probe":true}'))
+                            finally:
+                                connection.close()
+                finally:
+                    proxy.terminate()
+                    try:
+                        proxy.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proxy.kill()
+                        proxy.wait(timeout=5)
+            finally:
+                backend.shutdown()
 
 
 class RecoveryTests(unittest.TestCase):

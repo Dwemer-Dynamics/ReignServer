@@ -36,16 +36,16 @@ namespace ReignBetaServer
             => ReadBool(ReadDictionary(ReadDictionary(payload, "nativeCharacterSnapshot"), "tavernHouse"), "madam", false)
                 ? "madam" : "worker";
 
-        internal static string BuildResidentPortraitPrompt(Dictionary<string, object> payload)
+        internal static string BuildResidentPortraitPrompt(Dictionary<string, object> payload, string clothingGuidance = null)
         {
             // The ordinary identity and exclusion layers ALSO change clothes (status, armor,
             // helmets). None is appended here; an instruction at the end cannot undo a conflict.
             return AppendPortraitPhysique(@"IDENTITY AND ENCOUNTERED OUTFIT
 Create a believable photographic portrait of the exact person in the supplied native source image.
 Preserve recognizable facial features, apparent age, expression, eyes, hair, skin, scars, facial hair and body proportions.
-Retain exactly the clothes the person is wearing in the source: every visible garment, color, material, layer, fastening and accessory.
+" + (clothingGuidance ?? @"Retain exactly the clothes the person is wearing in the source: every visible garment, color, material, layer, fastening and accessory.
 Retain any encountered armor, helmet, headwear, fur, jewelry and work equipment. Do not remove or replace them or reveal more skin.
-Do not select clothing from culture, sex, occupation, clan, wealth, social standing, confidence or attractiveness.
+Do not select clothing from culture, sex, occupation, clan, wealth, social standing, confidence or attractiveness.") + @"
 Translate game rendering into authentic skin texture, natural hair, realistic fabric and metal while preserving identity and the complete outfit.
 COMPOSITION
 Show one upright, centered person from the top of the head through both feet with a small clear margin, a relaxed pose and soft natural daylight.

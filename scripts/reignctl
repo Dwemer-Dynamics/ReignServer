@@ -460,6 +460,8 @@ EOF
     # Global key mutations trust only these: always overwritten here, so a client can never supply its own peer or host.
     RequestHeader set X-Reign-Peer "expr=%{REMOTE_ADDR}"
     RequestHeader set X-Reign-Host "expr=%{HTTP_HOST}"
+    # Substitute the captured route once. A literal target path is followed by the original request path.
+    ProxyPassMatch ^(/portraits/generate)$ http://127.0.0.1:5101$1 timeout=1260
     ProxyPass / http://127.0.0.1:5101/ timeout=900
     ProxyPassReverse / http://127.0.0.1:5101/
     ErrorLog ${APACHE_LOG_DIR}/reign_error.log

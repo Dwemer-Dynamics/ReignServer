@@ -2412,8 +2412,10 @@
     }
 
     function updateImageProfileUi() {
+      const localText = document.getElementById('portraitGenerationMethod')?.value === 'local_text';
       imageProfiles.forEach(profile => {
-        const provider = document.getElementById(profile + 'Provider')?.value || 'NanoGPT';
+        const configuredProvider = document.getElementById(profile + 'Provider')?.value || 'NanoGPT';
+        const provider = localText && profile === 'portrait' ? 'LocalModel' : configuredProvider;
         const nano = document.getElementById(profile + 'NanoGptProfileSettings');
         const atlas = document.getElementById(profile + 'AtlasProfileSettings');
         const openrouter = document.getElementById(profile + 'OpenRouterProfileSettings');
@@ -2432,20 +2434,22 @@
     }
 
     function updatePortraitGenerationUi() {
+      const method = document.getElementById('portraitGenerationMethod')?.value;
       const local = document.getElementById('portraitProvider')?.value === 'LocalModel';
       const box = document.getElementById('portraitVisionSettings');
-      const method = document.getElementById('portraitGenerationMethodSettings');
       const localHint = document.getElementById('portraitLocalModelReferenceHint');
-      if (box) box.style.display = !local && document.getElementById('portraitGenerationMethod').value === 'text' ? '' : 'none';
-      if (method) method.style.display = local ? 'none' : '';
-      if (localHint) localHint.style.display = local ? '' : 'none';
+      const localTextHint = document.getElementById('portraitLocalTextHint');
+      if (box) box.style.display = !local && method === 'text' ? '' : 'none';
+      if (localHint) localHint.style.display = local && method !== 'local_text' ? '' : 'none';
+      if (localTextHint) localTextHint.hidden = method !== 'local_text';
       const nano = document.getElementById('portraitVisionProvider')?.value === 'NanoGPT';
       document.getElementById('portraitCodexVisionModelLabel').style.display = nano ? 'none' : '';
       document.getElementById('portraitNanoVisionModelLabel').style.display = nano ? '' : 'none';
     }
 
     async function loadPortraitVisionModels() {
-      if (document.getElementById('portraitProvider')?.value === 'LocalModel') return;
+      if (document.getElementById('portraitGenerationMethod')?.value !== 'text'
+          || document.getElementById('portraitProvider')?.value === 'LocalModel') return;
       const provider = document.getElementById('portraitVisionProvider')?.value || 'Codex';
       const select = document.getElementById(provider === 'NanoGPT' ? 'portraitVisionNanoGptModel' : 'portraitVisionModel');
       const status = document.getElementById('portraitVisionCatalogStatus');
