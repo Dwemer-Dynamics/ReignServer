@@ -40,6 +40,45 @@ namespace ReignBetaServer
             add("simultaneous_outbreak_tiebreak", selected == "clan_a", "lowest ruler relation, then stable clan id");
             add("supporter_strict_comparison", 5 > -10 && !(-10 > -10), "supporter joins only when rebel relation is strictly higher than ruler relation");
             add("realm_cooldown", RebellionAcceptedCooldownDays == 63 && RebellionResolvedCooldownDays == 63, "63-day cooldown after every resolution");
+            var resolvedMovement = new Dictionary<string, object>
+            {
+                ["movementId"] = "test-resolution", ["stage"] = "resolved", ["executionPhase"] = "verified",
+                ["resolutionApplied"] = true, ["judgmentsPending"] = false, ["updatedDay"] = 112.25d,
+                ["cooldownUntilDay"] = 175.25d
+            };
+            var resolvedProjection = new Dictionary<string, object>
+            {
+                ["intent"] = "mirror_resolved", ["worldDay"] = 113d, ["campaignStartDay"] = 110d,
+                ["movements"] = new object[] { resolvedMovement }
+            };
+            add("resolved_projection_preserves_native_day",
+                TryReadResolvedProjection(resolvedProjection, out var resolutions)
+                && ReadDouble(resolutions.Single(), "updatedDay", 0d) == 112.25d
+                && ReadDouble(resolutions.Single(), "cooldownUntilDay", 0d) == 175.25d,
+                "native fractional resolution day is separate from receipt and cooldown days");
+            add("resolved_projection_requires_save_owner_even_during_grace",
+                !ReadBool(EvaluateRebellions(resolvedProjection), "ok", true),
+                "terminal mirror requires exact active ownership before admitting a write");
+            var pendingJudgment = new Dictionary<string, object>(resolvedMovement)
+            {
+                ["movementId"] = "pending-judgment", ["judgmentsPending"] = true
+            };
+            var duplicate = new Dictionary<string, object>(resolvedMovement) { ["movementId"] = "TEST-RESOLUTION" };
+            var laterResolution = new Dictionary<string, object>(resolvedMovement) { ["updatedDay"] = 113.25d };
+            foreach (var test in new (string Name, object[] Rows)[]
+            {
+                ("mixed_pending_judgment", new object[] { resolvedMovement, pendingJudgment }),
+                ("mixed_malformed", new object[] { resolvedMovement, "invalid" }),
+                ("duplicate", new object[] { resolvedMovement, duplicate }),
+                ("future_observation", new object[] { laterResolution })
+            })
+            {
+                resolvedProjection["movements"] = test.Rows;
+                add("resolved_projection_rejects_" + test.Name, !TryReadResolvedProjection(resolvedProjection, out _),
+                    "one invalid observation prevents admission of the batch");
+            }
+            if (ReignPostgreSqlStorage.Options.IsValidation && Program.CampaignsRootOverride.Value != null)
+                VerifyResolvedProjectionPostgreSql(add);
             add("recognition_hard_roll_limits",
                 RebellionRecognitionMinimumWarDays == 14
                 && RebellionRecognitionAttemptIntervalDays == 30
@@ -394,6 +433,99 @@ namespace ReignBetaServer
             add("mercy_relation_modifiers", mercifulScore == 90 && cruelScore == 10,
                 "d100 + 15*Mercy + round(native relation/5)");
             return new Dictionary<string, object> { ["ok"] = tests.All(x => ReadBool(x, "passed", false)), ["passed"] = tests.Count(x => ReadBool(x, "passed", false)), ["total"] = tests.Count, ["languageCaseCount"] = languageCases.Length, ["tests"] = tests };
+        }
+
+        private static void VerifyResolvedProjectionPostgreSql(Action<string, bool, string> add)
+        {
+            string token = Guid.NewGuid().ToString("N");
+            string campaign = "__rebellion_mirror_" + token;
+            const string timeline = "main";
+            const string movementId = "test-rebellion";
+            const double resolutionDay = 91134.28d;
+            var opened = WorldSimulationService.WorldHistoryOpenTimelineApi(new Dictionary<string, object>
+            {
+                ["campaignId"] = campaign, ["timelineId"] = timeline
+            });
+            if (!ReadBool(opened, "ok", false) || ReadString(opened, "timelineId", "") != timeline)
+                throw new InvalidOperationException("Could not open the isolated rebellion mirror timeline.");
+            string generation = ReadString(opened, "sharedActivityGeneration", "");
+
+            Dictionary<string, object> Movement(string id, string stage, double day) => new Dictionary<string, object>
+            {
+                ["movementId"] = id, ["stage"] = stage, ["updatedDay"] = day,
+                ["parentKingdomId"] = "parent", ["rebelKingdomId"] = "rebels", ["leaderHeroId"] = "leader",
+                ["createdDay"] = 91100d, ["civilWarStartedDay"] = 91101d,
+                ["executionPhase"] = stage == "resolved" ? "verified" : "",
+                ["resolutionApplied"] = stage == "resolved", ["judgmentsPending"] = false,
+                ["cooldownUntilDay"] = day + RebellionResolvedCooldownDays
+            };
+
+            Dictionary<string, object> Post(string intent, string requestGeneration, params Dictionary<string, object>[] rows)
+            {
+                var request = new Dictionary<string, object>
+                {
+                    ["campaignId"] = campaign, ["timelineId"] = timeline, ["worldDay"] = 91135d,
+                    ["campaignStartDay"] = intent == "mirror_resolved" ? 91134d : 91100d,
+                    ["intent"] = intent, ["movements"] = rows
+                };
+                if (requestGeneration != null) request["sharedActivityGeneration"] = requestGeneration;
+                var access = Program.EnterCampaignRequestAccess("/rebellions/evaluate");
+                try { return EvaluateRebellions(request); }
+                finally { Program.ExitCampaignRequestAccess(access); }
+            }
+
+            Dictionary<string, object> ReadMovement(string id = movementId) => ReadDictionaryList(RebellionQueryApi(
+                new Dictionary<string, string> { ["campaignId"] = campaign, ["movementId"] = id }), "movements").SingleOrDefault();
+
+            var live = Movement(movementId, "civil_war", 91122.75d);
+            var resolved = Movement(movementId, "resolved", resolutionDay);
+            if (!ReadBool(Post("", generation, live), "ok", false) || ReadString(ReadMovement(), "stage", "") != "civil_war")
+                throw new InvalidOperationException("Could not seed the isolated live rebellion.");
+
+            ReignPostgreSqlStorage.CloneCampaignToSnapshot(campaign, token);
+            bool staleOwnerRejected = !ReadBool(Post("mirror_resolved", generation + "-old", resolved), "ok", true)
+                && ReadString(ReadMovement(), "stage", "") == "civil_war";
+            add("resolved_projection_postgresql_stale_owner", staleOwnerRejected,
+                "a stale save generation cannot modify the current live row");
+
+            var accepted = Post("mirror_resolved", generation, resolved);
+            var mirrored = ReadMovement();
+            var transitions = ReadDictionaryList(mirrored, "transitions");
+            var transition = transitions.SingleOrDefault();
+            add("resolved_projection_postgresql_native_observation",
+                ReadString(accepted, "status", "") == "resolved_mirrored"
+                && ReadString(mirrored, "stage", "") == "resolved"
+                && ReadDouble(mirrored, "updated_day", 0d) == resolutionDay
+                && ReadDouble(transition, "world_day", 0d) == resolutionDay
+                && ReadString(transition, "from_stage", "") == "civil_war"
+                && ReadString(transition, "to_stage", "") == "resolved",
+                "the native fractional day reaches both the movement and its single transition even during startup grace");
+
+            bool replayAccepted = ReadBool(Post("mirror_resolved", generation, resolved), "ok", false);
+            Post("", generation, live);
+            Post("", null, live);
+            var afterReplay = ReadMovement();
+            add("resolved_projection_postgresql_replay_and_delayed_evaluation",
+                replayAccepted && ReadString(afterReplay, "stage", "") == "resolved"
+                && ReadDictionaryList(afterReplay, "transitions").Count == 1
+                && ReadDictionary(afterReplay, "backingRequest") == null,
+                "replay and delayed owned or legacy evaluations preserve one terminal transition");
+
+            var conflicting = Movement(movementId, "resolved", resolutionDay - 1d);
+            var unrelated = Movement("second-rebellion", "resolved", resolutionDay);
+            add("resolved_projection_postgresql_atomic_conflict",
+                !ReadBool(Post("mirror_resolved", generation, unrelated, conflicting), "ok", true)
+                && ReadMovement("second-rebellion") == null
+                && ReadDouble(ReadMovement(), "updated_day", 0d) == resolutionDay,
+                "a conflicting observation rolls back the new movement and transition in the same batch");
+
+            Program.CampaignDataGate.EnterWriteLock();
+            try { ReignPostgreSqlStorage.RestoreCampaignSnapshot(campaign, token); }
+            finally { Program.CampaignDataGate.ExitWriteLock(); }
+            add("resolved_projection_postgresql_rewind_restores_live_row",
+                ReadString(ReadMovement(), "stage", "") == "civil_war"
+                && ReadDictionaryList(ReadMovement(), "transitions").Count == 0,
+                "restoring the isolated PostgreSQL checkpoint rewinds both the movement and terminal transition");
         }
     }
 }

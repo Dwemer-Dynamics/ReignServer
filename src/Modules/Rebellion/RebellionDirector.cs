@@ -21,6 +21,7 @@ namespace ReignBetaServer
         internal const int RebellionRecognitionMaximumChancePercent = 30;
         private const int RebellionRecognitionPeaceDays = 63;
         private const int RebellionSchemaRevision = 3;
+        private const int ResolvedProjectionBatchSize = 32;
         private const string RebellionSchemaMarker =
             "rebellion_schema_version";
 
@@ -58,6 +59,8 @@ namespace ReignBetaServer
             string timelineId = ReadString(payload, "timelineId", "main");
             bool owned = payload.TryGetValue("sharedActivityGeneration", out object expectedGeneration);
             double worldDay = ReadDouble(payload, "worldDay", 0d);
+            if (ReadString(payload, "intent", "") == "mirror_resolved")
+                return MirrorResolvedRebellions(payload, campaignId, timelineId, expectedGeneration);
             Dictionary<string, object> startupGrace =
                 DiplomacyService.BuildAutonomousWorldStartupGrace(payload);
             if (ReadBool(startupGrace, "locked", false))
@@ -78,15 +81,28 @@ namespace ReignBetaServer
 
             // Save Sync replaces the campaign under the outer data write gate.
             // Ordinary timeline activation shares that gate, so fence it separately.
-            using var timelineScope = owned ? WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId) : null;
+            using var timelineScope = WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId);
             if (owned && !HasCurrentRebellionEvaluationOwner(payload, expectedGeneration))
                 return StaleRebellionEvaluationOwner();
             using (ReignDbConnection connection = ReignDatabase.OpenCampaignConnection(campaignId))
             {
                 if (owned && !RebellionEvaluationOwnerMatches(connection, payload, expectedGeneration))
                     return StaleRebellionEvaluationOwner();
+                if (!owned && WorldSimulationService.TableExists(connection, "world_history_timelines"))
+                {
+                    string activeTimeline = ReadString(WorldSimulationStore.SelectWorldHistoryTimelines2(connection)
+                        .FirstOrDefault(), "timeline_id", "");
+                    if (activeTimeline.Length > 0 && activeTimeline != timelineId)
+                        return StaleRebellionEvaluationOwner();
+                }
                 EnsureRebellionSchema(connection);
-                foreach (Dictionary<string, object> saved in savedMovements) MirrorSavedRebellionState(connection, campaignId, timelineId, worldDay, saved);
+                var acceptedMovements = new List<Dictionary<string, object>>();
+                foreach (Dictionary<string, object> saved in savedMovements)
+                {
+                    if (MirrorSavedRebellionState(connection, campaignId, timelineId, worldDay, saved))
+                        acceptedMovements.Add(saved);
+                }
+                savedMovements = acceptedMovements;
                 foreach (Dictionary<string, object> kingdom in kingdoms)
                 {
                     string kingdomId = ReadString(kingdom, "kingdomId", "");
@@ -159,8 +175,8 @@ namespace ReignBetaServer
                         ["evaluationDay"] = worldDay, ["acceptedCooldownDays"] = RebellionAcceptedCooldownDays,
                         ["resolvedCooldownDays"] = RebellionResolvedCooldownDays
                     };
-                    updates.Add(update);
-                    PersistRebellionEvaluation(connection, campaignId, timelineId, worldDay, update);
+                    if (PersistRebellionEvaluation(connection, campaignId, timelineId, worldDay, update))
+                        updates.Add(update);
                 }
                 foreach (Dictionary<string, object> movement in savedMovements.Where(x =>
                     string.Equals(ReadString(x, "stage", ""), "civil_war", StringComparison.OrdinalIgnoreCase)))
@@ -220,13 +236,78 @@ namespace ReignBetaServer
                 ["newMovementTrigger"] = "deferred_pending_native_relation_rebuild"
             };
             if (owned)
-                response["ownership"] = new Dictionary<string, object>
-                {
-                    ["campaignId"] = campaignId, ["timelineId"] = timelineId,
-                    ["sharedActivityGeneration"] = expectedGeneration
-                };
+                response["ownership"] = RebellionEvaluationOwnership(campaignId, timelineId, expectedGeneration);
             return response;
         }
+
+        private static Dictionary<string, object> MirrorResolvedRebellions(Dictionary<string, object> payload,
+            string campaignId, string timelineId, object expectedGeneration)
+        {
+            if (!TryReadResolvedProjection(payload, out var rows))
+                return new Dictionary<string, object> { ["ok"] = false, ["error"] = "Expected a batch of verified rebellion resolutions." };
+
+            using var scope = WorldSimulationService.EnterWorldHistoryTimelineScope(campaignId);
+            if (!HasCurrentRebellionEvaluationOwner(payload, expectedGeneration))
+                return StaleRebellionEvaluationOwner();
+            using var connection = ReignPostgreSqlStorage.TryOpenRegisteredCampaignConnection(campaignId, trackCampaignMutations: true);
+            if (connection == null || !RebellionEvaluationOwnerMatches(connection, payload, expectedGeneration))
+                return StaleRebellionEvaluationOwner();
+            EnsureRebellionSchema(connection);
+
+            using var transaction = connection.BeginTransaction();
+            foreach (Dictionary<string, object> movement in rows)
+            {
+                double resolutionDay = ReadDouble(movement, "updatedDay", double.NaN);
+                if (!MirrorSavedRebellionState(connection, campaignId, timelineId, resolutionDay, movement, transaction))
+                    return new Dictionary<string, object> { ["ok"] = false, ["error"] = "The rebellion resolution conflicts with its existing projection." };
+            }
+            transaction.Commit();
+            return new Dictionary<string, object>
+            {
+                ["ok"] = true, ["status"] = "resolved_mirrored",
+                ["ownership"] = RebellionEvaluationOwnership(campaignId, timelineId, expectedGeneration),
+                ["movementIds"] = rows.Select(row => ReadString(row, "movementId", "")).ToArray()
+            };
+        }
+
+        private static bool TryReadResolvedProjection(Dictionary<string, object> payload,
+            out List<Dictionary<string, object>> rows)
+        {
+            rows = new List<Dictionary<string, object>>();
+            double worldDay = ReadDouble(payload, "worldDay", double.NaN);
+            if (!double.IsFinite(worldDay) || !payload.TryGetValue("movements", out object raw)
+                || raw is not IList batch || batch.Count == 0 || batch.Count > ResolvedProjectionBatchSize)
+                return false;
+
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (object value in batch)
+            {
+                if (value is not Dictionary<string, object> row || !IsVerifiedRebellionResolution(row)
+                    || !row.TryGetValue("movementId", out object rawId) || rawId is not string id
+                    || string.IsNullOrWhiteSpace(id) || !ids.Add(id))
+                    return false;
+                double day = ReadDouble(row, "updatedDay", double.NaN);
+                double cooldown = ReadDouble(row, "cooldownUntilDay", double.NaN);
+                if (!double.IsFinite(day) || day < 0d || day > worldDay
+                    || !double.IsFinite(cooldown) || cooldown < day)
+                    return false;
+                rows.Add(row);
+            }
+            return true;
+        }
+
+        private static bool IsVerifiedRebellionResolution(Dictionary<string, object> row) => row != null
+            && string.Equals(ReadString(row, "stage", ""), "resolved", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(ReadString(row, "executionPhase", ""), "verified", StringComparison.OrdinalIgnoreCase)
+            && row.TryGetValue("resolutionApplied", out object applied) && applied is true
+            && row.TryGetValue("judgmentsPending", out object pending) && pending is false;
+
+        private static Dictionary<string, object> RebellionEvaluationOwnership(string campaignId,
+            string timelineId, object generation) => new Dictionary<string, object>
+            {
+                ["campaignId"] = campaignId, ["timelineId"] = timelineId,
+                ["sharedActivityGeneration"] = generation
+            };
 
         private static Dictionary<string, object> StaleRebellionEvaluationOwner() =>
             new Dictionary<string, object> { ["ok"] = false, ["error"] = "The rebellion evaluation belongs to a previous save or timeline." };
@@ -773,12 +854,27 @@ namespace ReignBetaServer
                 });
         }
 
-        private static void MirrorSavedRebellionState(ReignDbConnection connection, string campaignId, string timelineId, double worldDay, Dictionary<string, object> saved)
+        private static bool MirrorSavedRebellionState(ReignDbConnection connection, string campaignId, string timelineId,
+            double worldDay, Dictionary<string, object> saved, ReignDbTransaction resolutionTransaction = null)
         {
             string id = ReadString(saved, "movementId", "");
-            if (string.IsNullOrWhiteSpace(id)) return;
-            Dictionary<string, object> old = RebellionStore.SelectRebellionMovements3(connection, new Dictionary<string, object> { ["id"] = id }).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(id)) return resolutionTransaction == null;
+            Dictionary<string, object> old = RebellionStore.SelectRebellionMovements3(connection,
+                new Dictionary<string, object> { ["id"] = id }, resolutionTransaction).FirstOrDefault();
             string oldStage = ReadString(old, "stage", "none"), stage = ReadString(saved, "stage", "none");
+            bool sameTimeline = old != null && ReadString(old, "timeline_id", "") == timelineId;
+            bool oldResolved = string.Equals(oldStage, "resolved", StringComparison.OrdinalIgnoreCase);
+            bool newResolved = string.Equals(stage, "resolved", StringComparison.OrdinalIgnoreCase);
+            // Save Sync can restore a pre-resolution row. An older evaluation in the
+            // same timeline must never reopen a resolved row or evaluate its backing.
+            if (resolutionTransaction == null && sameTimeline && oldResolved)
+                return newResolved;
+            if (resolutionTransaction == null && IsVerifiedRebellionResolution(saved))
+                return true;
+            if (resolutionTransaction != null && sameTimeline && oldResolved
+                && IsVerifiedRebellionResolution(Json.Deserialize<Dictionary<string, object>>(ReadString(old, "payload_json", "{}"))))
+                return ReadDouble(old, "updated_day", double.NaN) == worldDay;
+
             RebellionStore.UpsertRebellionMovements(connection, new Dictionary<string, object>
                 {
                     ["id"] = id, ["campaign"] = campaignId, ["timeline"] = timelineId, ["parent"] = ReadString(saved, "parentKingdomId", ""),
@@ -789,13 +885,14 @@ namespace ReignBetaServer
                     ["demand"] = Json.Serialize(ReadDictionary(saved, "demand") ?? new Dictionary<string, object>()), ["correlation"] = ReadString(saved, "correlationId", id),
                     ["created"] = ReadDouble(saved, "createdDay", worldDay), ["updated"] = ReadDouble(saved, "updatedDay", worldDay), ["cooldown"] = ReadDouble(saved, "cooldownUntilDay", 0d),
                     ["player"] = ReadBool(saved, "isPlayerKingdom", false) ? 1 : 0, ["payload"] = Json.Serialize(saved)
-                });
-            if (old != null && !string.Equals(oldStage, stage, StringComparison.OrdinalIgnoreCase))
+                }, resolutionTransaction);
+            if ((old != null || resolutionTransaction != null) && !string.Equals(oldStage, stage, StringComparison.OrdinalIgnoreCase))
                 RebellionStore.InsertRebellionTransitions(connection, new Dictionary<string, object>
                 {
                     ["transition"] = Guid.NewGuid().ToString("N"), ["movement"] = id, ["day"] = worldDay, ["from"] = oldStage, ["to"] = stage,
                     ["actor"] = ReadString(saved, "leaderHeroId", ""), ["payload"] = Json.Serialize(saved), ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-                });
+                }, resolutionTransaction);
+            return true;
         }
 
         private static bool IsEligibleRebellionClan(Dictionary<string, object> clan)
@@ -1008,12 +1105,14 @@ namespace ReignBetaServer
                 + 0.15d * Trait100(traits, "mercy") - 0.15d * Trait100(traits, "pride") - 0.10d * Trait100(traits, "assertiveness"));
         }
 
-        private static void PersistRebellionEvaluation(ReignDbConnection connection, string campaignId, string timelineId, double worldDay,
+        private static bool PersistRebellionEvaluation(ReignDbConnection connection, string campaignId, string timelineId, double worldDay,
             Dictionary<string, object> update)
         {
             string movementId = ReadString(update, "movementId", "");
             Dictionary<string, object> old = RebellionStore.SelectRebellionMovements3(connection, new Dictionary<string, object> { ["id"] = movementId }).FirstOrDefault();
             string oldStage = ReadString(old, "stage", "none");
+            if (ReadString(old, "timeline_id", "") == timelineId
+                && string.Equals(oldStage, "resolved", StringComparison.OrdinalIgnoreCase)) return false;
             RebellionStore.UpsertRebellionMovements2(connection, new Dictionary<string, object>
                 {
                     ["id"] = movementId, ["campaign"] = campaignId, ["timeline"] = timelineId, ["parent"] = ReadString(update, "parentKingdomId", ""),
@@ -1047,6 +1146,7 @@ namespace ReignBetaServer
                     ["ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
                 });
             }
+            return true;
         }
 
         internal static double Trait100(Dictionary<string, object> traits, string key) => Clamp(0d, 100d, 50d + 25d * ReadDouble(traits, key, 0d));

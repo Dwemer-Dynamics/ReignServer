@@ -195,7 +195,7 @@ $supportPower,$oppositionPower,$chance,$militaryRoll,$supportCoalition,$oppositi
 
         internal static List<Dictionary<string, object>> SelectRebellionMovements3(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
         {
-            return ReignDatabase.QuerySql(connection, "SELECT stage FROM rebellion_movements WHERE movement_id=$id;", parameters, transaction);
+            return ReignDatabase.QuerySql(connection, "SELECT stage,timeline_id,updated_day,payload_json FROM rebellion_movements WHERE movement_id=$id;", parameters, transaction);
         }
 
         internal static void UpsertRebellionMovements(ReignDbConnection connection, Dictionary<string, object> parameters = null, ReignDbTransaction transaction = null)
