@@ -14,6 +14,7 @@
     "hearing_compose",
     "authority",
     "resolutions",
+    "construction",
     "voting",
     "pressure",
     "save_prepare",
@@ -26,6 +27,7 @@
     "cleanup"
   ],
   "hearingComposerContract": "Exact armed Current and already-open interactive businessId; playerMessage is 1-1200 characters. Only unsent text changes. Native Speak submits production dialogue. No case selection, creation, provider call, vote or effect during composition.",
+  "constructionNativeContract": "One exact paused owned Current with a retained recovery checkpoint and matching clean provider guard. Prepare, observe, manual and automatic address the same bounded fixture ID. Only the stock callback and its production observer can write physical evidence. Native time, checkpoint and cleanup remain with the guarded campaign controller.",
   "contracts": {
     "governmentPlayerFlowFixtures": {"tool":"reign_test_structured_actions","schema":"reign-government-player-flow-fixture-v1","capitalActionId":"fixture.government_capital_visit","composerActionId":"fixture.government_action_composer","exactPausedOwnedCurrent":true,"retainedRecoveryCheckpoint":true,"productionChatOnly":true,"actualCapitalOnly":true,"noProviderOrVote":true,"conservationRequired":true,"partialFailureNeverReplayed":true},
     "proposalReadingTerms": {"distinctNamedRemediesKeepIdenticalTerms":true,"deduplicateWholeLabeledParagraphOnly":true,"nativeAssertion":"government_equal_cost_remedies_keep_named_terms"},
